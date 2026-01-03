@@ -38,7 +38,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-muted">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-3xl font-display">Sheepie IOMS</CardTitle>
+          <CardTitle className="text-3xl font-display">Sheepie</CardTitle>
           <CardDescription>
             Sign in to access the inventory management system
           </CardDescription>

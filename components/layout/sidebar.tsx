@@ -67,7 +67,7 @@ export function Sidebar() {
       {/* Logo */}
       <div className="flex h-16 items-center border-b px-6">
         <h1 className="text-xl font-display font-bold text-primary">
-          Sheepie IOMS
+          Sheepie.
         </h1>
       </div>
 

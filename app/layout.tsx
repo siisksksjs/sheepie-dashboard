@@ -15,7 +15,7 @@ const quicksand = Quicksand({
 });
 
 export const metadata: Metadata = {
-  title: "Sheepie IOMS | Inventory & Order Management",
+  title: "Sheepie | Inventory & Order Management",
   description: "Internal inventory and order management system for Sheepie",
 };
 
