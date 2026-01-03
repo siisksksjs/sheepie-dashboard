@@ -1,0 +1,277 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { getOrderById, updateOrderStatus } from "@/lib/actions/orders"
+import { getProducts } from "@/lib/actions/products"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { formatCurrency, formatDate } from "@/lib/utils"
+import { ArrowLeft } from "lucide-react"
+import Link from "next/link"
+import type { Order, OrderLineItem, OrderStatus, Product } from "@/lib/types/database.types"
+
+const statusBadges: Record<string, "default" | "success" | "destructive" | "outline"> = {
+  paid: "success",
+  shipped: "default",
+  cancelled: "destructive",
+  returned: "outline",
+}
+
+const channelLabels: Record<string, string> = {
+  shopee: "Shopee",
+  tokopedia: "Tokopedia",
+  tiktok: "TikTok",
+  offline: "Offline",
+}
+
+export default function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const router = useRouter()
+  const [id, setId] = useState<string>("")
+  const [order, setOrder] = useState<Order | null>(null)
+  const [lineItems, setLineItems] = useState<OrderLineItem[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [loading, setLoading] = useState(true)
+  const [updating, setUpdating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    params.then((resolvedParams) => {
+      setId(resolvedParams.id)
+      loadOrder(resolvedParams.id)
+    })
+    loadProducts()
+  }, [params])
+
+  const loadOrder = async (orderId: string) => {
+    const data = await getOrderById(orderId)
+    if (data) {
+      setOrder(data.order)
+      setLineItems(data.lineItems)
+    } else {
+      setError("Order not found")
+    }
+    setLoading(false)
+  }
+
+  const loadProducts = async () => {
+    const data = await getProducts()
+    setProducts(data)
+  }
+
+  const handleStatusChange = async (newStatus: OrderStatus) => {
+    if (!order) return
+
+    setUpdating(true)
+    setError(null)
+
+    const result = await updateOrderStatus(id, newStatus, order.status)
+
+    if (result.success) {
+      // Reload order
+      await loadOrder(id)
+      router.refresh()
+    } else {
+      setError(result.error || "Failed to update order status")
+    }
+
+    setUpdating(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <p className="text-muted-foreground">Loading order...</p>
+      </div>
+    )
+  }
+
+  if (!order) {
+    return (
+      <div className="flex flex-col items-center justify-center p-12">
+        <p className="text-destructive mb-4">Order not found</p>
+        <Link href="/orders">
+          <Button variant="outline">Back to Orders</Button>
+        </Link>
+      </div>
+    )
+  }
+
+  const productMap = new Map(products.map(p => [p.sku, p]))
+  const totalAmount = lineItems.reduce((sum, item) => sum + item.quantity * item.selling_price, 0)
+  const totalCost = lineItems.reduce((sum, item) => {
+    const product = productMap.get(item.sku)
+    return sum + (product ? product.cost_per_unit * item.quantity : 0)
+  }, 0)
+  const grossProfit = totalAmount - totalCost
+  const netProfit = grossProfit - (order.channel_fees || 0)
+
+  return (
+    <div>
+      <Link href="/orders">
+        <Button variant="ghost" className="mb-4">
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to Orders
+        </Button>
+      </Link>
+
+      <div className="grid gap-6 max-w-5xl">
+        {/* Order Header */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-start justify-between">
+              <div>
+                <CardTitle>Order {order.order_id}</CardTitle>
+                <CardDescription>
+                  Created on {formatDate(order.order_date)}
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-3">
+                <Badge variant={statusBadges[order.status]} className="text-sm">
+                  {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                </Badge>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-sm text-muted-foreground mb-1">Sales Channel</p>
+              <p className="font-medium">{channelLabels[order.channel]}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground mb-1">Order Date</p>
+              <p className="font-medium">{formatDate(order.order_date)}</p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground mb-1">Channel Fees</p>
+              <p className="font-medium">
+                {order.channel_fees ? formatCurrency(order.channel_fees) : "-"}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground mb-1">Notes</p>
+              <p className="font-medium">{order.notes || "-"}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Status Update */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Update Order Status</CardTitle>
+            <CardDescription>
+              Changing status will auto-generate ledger entries
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-end gap-4">
+              <div className="flex-1">
+                <Select
+                  defaultValue={order.status}
+                  onValueChange={(value) => handleStatusChange(value as OrderStatus)}
+                  disabled={updating}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="paid">Paid</SelectItem>
+                    <SelectItem value="shipped">Shipped</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                    <SelectItem value="returned">Returned</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="mt-4 p-3 bg-muted/50 border rounded-lg">
+              <p className="text-sm text-muted-foreground">
+                <strong>Automatic ledger entries:</strong>
+              </p>
+              <ul className="text-sm text-muted-foreground mt-2 space-y-1">
+                <li>• Paid → Creates OUT_SALE entries (reduces stock)</li>
+                <li>• Cancelled (from Paid) → Creates RETURN entries (adds stock back)</li>
+                <li>• Returned (from Paid) → Creates RETURN entries (adds stock back)</li>
+              </ul>
+            </div>
+
+            {error && (
+              <div className="mt-4 p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg">
+                {error}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Line Items */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Order Items</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>SKU</TableHead>
+                  <TableHead>Product</TableHead>
+                  <TableHead className="text-right">Quantity</TableHead>
+                  <TableHead className="text-right">Unit Price</TableHead>
+                  <TableHead className="text-right">Subtotal</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {lineItems.map((item) => {
+                  const product = productMap.get(item.sku)
+                  return (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-mono text-sm">{item.sku}</TableCell>
+                      <TableCell>
+                        <div className="font-medium">{product?.name || "Unknown"}</div>
+                        {product?.variant && (
+                          <div className="text-sm text-muted-foreground">{product.variant}</div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">{item.quantity}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(item.selling_price)}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatCurrency(item.quantity * item.selling_price)}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+
+            <div className="mt-4 space-y-2 border-t pt-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Subtotal</span>
+                <span className="font-medium">{formatCurrency(totalAmount)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Channel Fees</span>
+                <span className="font-medium text-destructive">
+                  -{formatCurrency(order.channel_fees || 0)}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Total Cost (COGS)</span>
+                <span className="font-medium text-destructive">
+                  -{formatCurrency(totalCost)}
+                </span>
+              </div>
+              <div className="flex justify-between text-lg font-bold border-t pt-2">
+                <span>Net Profit</span>
+                <span className={netProfit >= 0 ? "text-success" : "text-destructive"}>
+                  {formatCurrency(netProfit)}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}

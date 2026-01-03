@@ -1,0 +1,5 @@
+sku,name,variant,cost_per_unit,reorder_point,is_bundle,status
+CERVI-PILLOW,CerviCloud Pillow,,192000,10,false,active
+CERVI-CASE,CerviCloud Pillow Case,,40000,20,false,active
+LUMI-MASK,LumiCloud EyeMask,,4000,30,false,active
+CALM-EARPLUG,CalmCloud EarPlug,,4000,30,false,active

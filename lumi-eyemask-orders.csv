@@ -1,0 +1,6 @@
+order_id,channel,order_date,sku,quantity,selling_price,channel_fees,notes,status
+TOKOP-20251227-001,tokopedia,2025-12-27,Lumi-001,1,153000,,,paid
+TOKOP-20251228-001,tokopedia,2025-12-28,Lumi-001,1,152000,,,paid
+TIKTO-20251230-001,tiktok,2025-12-30,Lumi-001,1,160000,,,paid
+OFFLI-20251231-001,offline,2025-12-31,Lumi-001,1,0,,Kuku,paid
+TIKTO-20260101-001,tiktok,2026-01-01,Lumi-001,1,160000,,,paid

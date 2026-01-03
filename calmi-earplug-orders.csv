@@ -1,0 +1,7 @@
+order_id,channel,order_date,sku,quantity,selling_price,channel_fees,notes,status
+TOKOP-20251127-001,tokopedia,2025-11-27,Calmi-001,1,79000,,,paid
+TOKOP-20251201-001,tokopedia,2025-12-01,Calmi-001,1,38000,,,paid
+TOKOP-20251221-001,tokopedia,2025-12-21,Calmi-001,1,40000,,,paid
+TOKOP-20251221-002,tokopedia,2025-12-21,Calmi-001,1,40000,,,paid
+OFFLI-20251205-001,offline,2025-12-05,Calmi-001,1,0,,buat photo shoot,paid
+TOKOP-20251231-001,tokopedia,2025-12-31,Calmi-001,,0,,buat kuku,paid

@@ -1,0 +1,5 @@
+order_id,channel,order_date,sku,quantity,selling_price,channel_fees,notes,status
+TOKOP-20250808-001,tokopedia,2025-08-08,Cervi-002,1,146000,,,paid
+TOKOP-20250815-001,tokopedia,2025-08-15,Cervi-002,1,144000,,,paid
+SHOPE-20250802-001,shopee,2025-08-02,Cervi-002,1,91000,,Affiliate,paid
+TOKOP-20250820-001,tokopedia,2025-08-20,Cervi-002,1,165000,,,paid
