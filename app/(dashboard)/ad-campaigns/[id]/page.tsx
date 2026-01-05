@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { formatCurrency } from "@/lib/utils"
-import { ArrowLeft, TrendingUp, DollarSign, ShoppingCart, Target } from "lucide-react"
+import { ArrowLeft, TrendingUp, DollarSign, ShoppingCart, Target, Eye } from "lucide-react"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { AddSpendModal } from "@/components/ad-campaigns/add-spend-modal"
@@ -298,6 +298,20 @@ export default async function CampaignDetailPage({ params }: Props) {
                       </div>
                       <Badge variant="outline">{channelLabels[order.channel]}</Badge>
                     </div>
+
+                    {/* Products */}
+                    {order.line_items_with_names && order.line_items_with_names.length > 0 && (
+                      <div className="space-y-1 py-1 border-y border-dashed">
+                        {order.line_items_with_names.map((item: any, idx: number) => (
+                          <div key={idx} className="text-xs">
+                            <span className="text-muted-foreground">
+                              {item.quantity}x {item.product_name}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Revenue:</span>
                       <span className="font-medium">{formatCurrency(order.revenue)}</span>
@@ -307,6 +321,15 @@ export default async function CampaignDetailPage({ params }: Props) {
                       <span className={`font-medium ${order.net_profit >= 0 ? 'text-success' : 'text-destructive'}`}>
                         {formatCurrency(order.net_profit)}
                       </span>
+                    </div>
+
+                    <div className="flex justify-end pt-2">
+                      <Link href={`/orders/${order.id}`} className="w-full">
+                        <Button variant="outline" size="sm" className="w-full">
+                          <Eye className="h-4 w-4 mr-2" />
+                          View Order
+                        </Button>
+                      </Link>
                     </div>
                   </div>
                 ))}
@@ -320,9 +343,11 @@ export default async function CampaignDetailPage({ params }: Props) {
                       <TableHead>Order ID</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead>Channel</TableHead>
+                      <TableHead>Products</TableHead>
+                      <TableHead>Status</TableHead>
                       <TableHead className="text-right">Revenue</TableHead>
                       <TableHead className="text-right">Net Profit</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -343,6 +368,24 @@ export default async function CampaignDetailPage({ params }: Props) {
                         <TableCell>
                           <Badge variant="outline">{channelLabels[order.channel]}</Badge>
                         </TableCell>
+                        <TableCell>
+                          {order.line_items_with_names && order.line_items_with_names.length > 0 ? (
+                            <div className="space-y-1">
+                              {order.line_items_with_names.map((item: any, idx: number) => (
+                                <div key={idx} className="text-sm text-muted-foreground">
+                                  {item.quantity}x {item.product_name}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={order.status === 'paid' ? 'default' : 'secondary'}>
+                            {order.status}
+                          </Badge>
+                        </TableCell>
                         <TableCell className="text-right font-medium">
                           {formatCurrency(order.revenue)}
                         </TableCell>
@@ -351,10 +394,13 @@ export default async function CampaignDetailPage({ params }: Props) {
                         }`}>
                           {formatCurrency(order.net_profit)}
                         </TableCell>
-                        <TableCell>
-                          <Badge variant={order.status === 'paid' ? 'default' : 'secondary'}>
-                            {order.status}
-                          </Badge>
+                        <TableCell className="text-right">
+                          <Link href={`/orders/${order.id}`}>
+                            <Button variant="ghost" size="sm">
+                              <Eye className="h-4 w-4 mr-2" />
+                              View
+                            </Button>
+                          </Link>
                         </TableCell>
                       </TableRow>
                     ))}
