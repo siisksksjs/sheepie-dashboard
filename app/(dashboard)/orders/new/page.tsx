@@ -174,7 +174,7 @@ export default function NewOrderPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="order_id">
                   Order ID <span className="text-destructive">*</span>
@@ -207,7 +207,7 @@ export default function NewOrderPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="channel">
                   Sales Channel <span className="text-destructive">*</span>
@@ -251,7 +251,7 @@ export default function NewOrderPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="channel_fees">Channel Fees (IDR)</Label>
                 <Input
@@ -290,22 +290,15 @@ export default function NewOrderPage() {
                   </p>
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead className="w-24">Quantity</TableHead>
-                      <TableHead className="w-32">Price (IDR)</TableHead>
-                      <TableHead className="w-32 text-right">Subtotal</TableHead>
-                      <TableHead className="w-16"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+                <>
+                  {/* Mobile Card View */}
+                  <div className="md:hidden space-y-4">
                     {lineItems.map((item) => {
                       const product = products.find(p => p.sku === item.sku)
                       return (
-                        <TableRow key={item.id}>
-                          <TableCell>
+                        <div key={item.id} className="border rounded-lg p-4 space-y-3">
+                          <div className="space-y-2">
+                            <Label className="text-xs">Product</Label>
                             <Select
                               value={item.sku}
                               onValueChange={(value) => updateLineItem(item.id, "sku", value)}
@@ -317,34 +310,36 @@ export default function NewOrderPage() {
                                 {products.map((p) => (
                                   <SelectItem key={p.id} value={p.sku}>
                                     <span className="font-mono text-sm">{p.sku}</span> - {p.name}
-                                    {p.variant && <span className="text-muted-foreground"> ({p.variant})</span>}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              min="1"
-                              value={item.quantity}
-                              onChange={(e) => updateLineItem(item.id, "quantity", parseInt(e.target.value))}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              placeholder={product ? product.cost_per_unit.toString() : "0"}
-                              value={item.selling_price || ""}
-                              onChange={(e) => updateLineItem(item.id, "selling_price", parseFloat(e.target.value))}
-                            />
-                          </TableCell>
-                          <TableCell className="text-right font-medium">
-                            {formatCurrency(item.quantity * item.selling_price)}
-                          </TableCell>
-                          <TableCell>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-2">
+                              <Label className="text-xs">Quantity</Label>
+                              <Input
+                                type="number"
+                                min="1"
+                                value={item.quantity}
+                                onChange={(e) => updateLineItem(item.id, "quantity", parseInt(e.target.value))}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs">Price (IDR)</Label>
+                              <Input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={item.selling_price || ""}
+                                onChange={(e) => updateLineItem(item.id, "selling_price", parseFloat(e.target.value))}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-2 border-t">
+                            <span className="text-sm font-medium">Subtotal: {formatCurrency(item.quantity * item.selling_price)}</span>
                             <Button
                               type="button"
                               variant="ghost"
@@ -353,21 +348,100 @@ export default function NewOrderPage() {
                             >
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
-                          </TableCell>
-                        </TableRow>
+                          </div>
+                        </div>
                       )
                     })}
-                    <TableRow>
-                      <TableCell colSpan={3} className="text-right font-semibold">
-                        Total:
-                      </TableCell>
-                      <TableCell className="text-right font-bold text-lg">
-                        {formatCurrency(totalAmount)}
-                      </TableCell>
-                      <TableCell></TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
+                    <div className="border-t pt-4">
+                      <div className="flex justify-between items-center">
+                        <span className="font-semibold">Total:</span>
+                        <span className="font-bold text-lg">{formatCurrency(totalAmount)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Desktop Table View */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Product</TableHead>
+                          <TableHead className="w-24">Quantity</TableHead>
+                          <TableHead className="w-32">Price (IDR)</TableHead>
+                          <TableHead className="w-32 text-right">Subtotal</TableHead>
+                          <TableHead className="w-16"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {lineItems.map((item) => {
+                          const product = products.find(p => p.sku === item.sku)
+                          return (
+                            <TableRow key={item.id}>
+                              <TableCell>
+                                <Select
+                                  value={item.sku}
+                                  onValueChange={(value) => updateLineItem(item.id, "sku", value)}
+                                >
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select product" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {products.map((p) => (
+                                      <SelectItem key={p.id} value={p.sku}>
+                                        <span className="font-mono text-sm">{p.sku}</span> - {p.name}
+                                        {p.variant && <span className="text-muted-foreground"> ({p.variant})</span>}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </TableCell>
+                              <TableCell>
+                                <Input
+                                  type="number"
+                                  min="1"
+                                  value={item.quantity}
+                                  onChange={(e) => updateLineItem(item.id, "quantity", parseInt(e.target.value))}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  placeholder={product ? product.cost_per_unit.toString() : "0"}
+                                  value={item.selling_price || ""}
+                                  onChange={(e) => updateLineItem(item.id, "selling_price", parseFloat(e.target.value))}
+                                />
+                              </TableCell>
+                              <TableCell className="text-right font-medium">
+                                {formatCurrency(item.quantity * item.selling_price)}
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => removeLineItem(item.id)}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                        <TableRow>
+                          <TableCell colSpan={3} className="text-right font-semibold">
+                            Total:
+                          </TableCell>
+                          <TableCell className="text-right font-bold text-lg">
+                            {formatCurrency(totalAmount)}
+                          </TableCell>
+                          <TableCell></TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
+                </>
               )}
             </div>
 

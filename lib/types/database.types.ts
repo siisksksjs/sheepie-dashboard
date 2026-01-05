@@ -79,3 +79,31 @@ export type BundleComposition = {
   quantity: number
   created_at: string
 }
+
+export type AdPlatform = 'tiktok_ads' | 'shopee_ads' | 'facebook_ads' | 'google_ads'
+
+export type CampaignStatus = 'active' | 'completed' | 'paused'
+
+export type AdCampaign = {
+  id: string
+  campaign_name: string
+  platform: AdPlatform
+  start_date: string
+  end_date: string | null
+  total_spend: number
+  target_channels: Channel[]
+  notes: string | null
+  status: CampaignStatus
+  created_at: string
+  updated_at: string
+}
+
+export type AdSpendEntry = {
+  id: string
+  campaign_id: string
+  entry_date: string
+  amount: number
+  payment_method: string | null
+  notes: string | null
+  created_at: string
+}

@@ -55,57 +55,130 @@ export default async function OrdersPage() {
           </Link>
         </div>
       ) : (
-        <div className="border rounded-lg bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Order ID</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Channel</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Channel Fees</TableHead>
-                <TableHead>Notes</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {orders.map((order) => (
-                <TableRow key={order.id}>
-                  <TableCell className="font-medium">
-                    {order.order_id}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDate(order.order_date)}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">
+        <>
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-3">
+            {orders.map((order: any) => (
+              <div key={order.id} className="border rounded-lg p-4 bg-card space-y-3">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="font-medium font-mono text-sm">{order.order_id}</p>
+                    <p className="text-xs text-muted-foreground">{formatDate(order.order_date)}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Badge variant="outline" className="text-xs">
                       {channelLabels[order.channel]}
                     </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={statusBadges[order.status]}>
+                    <Badge variant={statusBadges[order.status]} className="text-xs">
                       {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
                     </Badge>
-                  </TableCell>
-                  <TableCell className="text-right text-muted-foreground">
-                    {order.channel_fees ? formatCurrency(order.channel_fees) : "-"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground max-w-xs truncate">
-                    {order.notes || "-"}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Link href={`/orders/${order.id}`}>
-                      <Button variant="ghost" size="sm">
-                        <Eye className="h-4 w-4 mr-2" />
-                        View
-                      </Button>
-                    </Link>
-                  </TableCell>
+                  </div>
+                </div>
+
+                {/* Products */}
+                {order.order_line_items && order.order_line_items.length > 0 && (
+                  <div className="space-y-1">
+                    {order.order_line_items.map((item: any, idx: number) => (
+                      <div key={idx} className="text-xs">
+                        <span className="text-muted-foreground">
+                          {item.quantity}x {item.product_name}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {order.notes && (
+                  <p className="text-xs text-muted-foreground line-clamp-2">{order.notes}</p>
+                )}
+
+                <div className="flex items-center justify-between pt-2 border-t">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-sm font-medium">
+                      Revenue: {formatCurrency(order.revenue)}
+                    </span>
+                    <span className="text-sm font-semibold text-success">
+                      Net Profit: {formatCurrency(order.net_profit)}
+                    </span>
+                  </div>
+                  <Link href={`/orders/${order.id}`}>
+                    <Button variant="ghost" size="sm">
+                      <Eye className="h-4 w-4 mr-2" />
+                      View
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block border rounded-lg bg-card overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Order ID</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Channel</TableHead>
+                  <TableHead>Products</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Revenue</TableHead>
+                  <TableHead className="text-right">Net Profit</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+              </TableHeader>
+              <TableBody>
+                {orders.map((order: any) => (
+                  <TableRow key={order.id}>
+                    <TableCell className="font-medium font-mono">
+                      {order.order_id}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatDate(order.order_date)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {channelLabels[order.channel]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {order.order_line_items && order.order_line_items.length > 0 ? (
+                        <div className="space-y-1">
+                          {order.order_line_items.map((item: any, idx: number) => (
+                            <div key={idx} className="text-sm text-muted-foreground">
+                              {item.quantity}x {item.product_name}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={statusBadges[order.status]}>
+                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-medium">
+                      {formatCurrency(order.revenue)}
+                    </TableCell>
+                    <TableCell className="text-right font-semibold text-success">
+                      {formatCurrency(order.net_profit)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Link href={`/orders/${order.id}`}>
+                        <Button variant="ghost" size="sm">
+                          <Eye className="h-4 w-4 mr-2" />
+                          View
+                        </Button>
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       )}
     </div>
   )

@@ -55,67 +55,119 @@ export default async function LedgerPage() {
           </Link>
         </div>
       ) : (
-        <div className="border rounded-lg bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>SKU</TableHead>
-                <TableHead>Product</TableHead>
-                <TableHead>Movement Type</TableHead>
-                <TableHead className="text-right">Quantity</TableHead>
-                <TableHead>Reference</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {entries.map((entry) => {
-                const product = productMap.get(entry.sku)
-                const movementInfo = movementTypeLabels[entry.movement_type]
-                const isInbound = entry.quantity > 0
+        <>
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-3">
+            {entries.map((entry) => {
+              const product = productMap.get(entry.sku)
+              const movementInfo = movementTypeLabels[entry.movement_type]
+              const isInbound = entry.quantity > 0
 
-                return (
-                  <TableRow key={entry.id}>
-                    <TableCell className="text-muted-foreground">
+              return (
+                <div key={entry.id} className="border rounded-lg p-4 bg-card space-y-3">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-mono text-sm font-medium">{entry.sku}</p>
+                      <p className="font-medium">{product?.name || "Unknown"}</p>
+                      {product?.variant && (
+                        <p className="text-xs text-muted-foreground">{product.variant}</p>
+                      )}
+                    </div>
+                    <Badge variant={movementInfo?.variant || "outline"} className="text-xs">
+                      {movementInfo?.label || entry.movement_type}
+                    </Badge>
+                  </div>
+
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground text-xs">
                       {formatDateTime(entry.entry_date)}
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {entry.sku}
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <div className="font-medium">{product?.name || "Unknown"}</div>
-                        {product?.variant && (
-                          <div className="text-sm text-muted-foreground">
-                            {product.variant}
-                          </div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={movementInfo?.variant || "outline"}>
-                        {movementInfo?.label || entry.movement_type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span
-                        className={
-                          isInbound
-                            ? "font-semibold text-success"
-                            : "font-semibold text-destructive"
-                        }
-                      >
-                        {isInbound ? "+" : ""}{entry.quantity}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground max-w-xs truncate">
-                      {entry.reference || "-"}
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </div>
+                    </span>
+                    <span
+                      className={
+                        isInbound
+                          ? "font-semibold text-success text-lg"
+                          : "font-semibold text-destructive text-lg"
+                      }
+                    >
+                      {isInbound ? "+" : ""}{entry.quantity}
+                    </span>
+                  </div>
+
+                  {entry.reference && (
+                    <div className="pt-2 border-t">
+                      <p className="text-xs text-muted-foreground line-clamp-2">
+                        {entry.reference}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block border rounded-lg bg-card overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>SKU</TableHead>
+                  <TableHead>Product</TableHead>
+                  <TableHead>Movement Type</TableHead>
+                  <TableHead className="text-right">Quantity</TableHead>
+                  <TableHead>Reference</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {entries.map((entry) => {
+                  const product = productMap.get(entry.sku)
+                  const movementInfo = movementTypeLabels[entry.movement_type]
+                  const isInbound = entry.quantity > 0
+
+                  return (
+                    <TableRow key={entry.id}>
+                      <TableCell className="text-muted-foreground">
+                        {formatDateTime(entry.entry_date)}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">
+                        {entry.sku}
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <div className="font-medium">{product?.name || "Unknown"}</div>
+                          {product?.variant && (
+                            <div className="text-sm text-muted-foreground">
+                              {product.variant}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={movementInfo?.variant || "outline"}>
+                          {movementInfo?.label || entry.movement_type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span
+                          className={
+                            isInbound
+                              ? "font-semibold text-success"
+                              : "font-semibold text-destructive"
+                          }
+                        >
+                          {isInbound ? "+" : ""}{entry.quantity}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground max-w-xs truncate">
+                        {entry.reference || "-"}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       )}
 
       <div className="mt-4 p-4 bg-muted/50 rounded-lg border">

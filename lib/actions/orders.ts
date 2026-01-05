@@ -14,7 +14,15 @@ export async function getOrders(filters?: {
 
   let query = supabase
     .from("orders")
-    .select("*")
+    .select(`
+      *,
+      order_line_items (
+        id,
+        sku,
+        quantity,
+        selling_price
+      )
+    `)
     .order("order_date", { ascending: false })
 
   if (filters?.status) {
@@ -36,7 +44,53 @@ export async function getOrders(filters?: {
     return []
   }
 
-  return data as Order[]
+  // Fetch all products to get names and costs
+  const { data: products } = await supabase
+    .from("products")
+    .select("sku, name, cost_per_unit")
+
+  const productMap = new Map(products?.map(p => [p.sku, p]) || [])
+
+  // Enhance orders with product details and profit calculation
+  const ordersWithDetails = data.map((order: any) => {
+    const lineItemsWithDetails = order.order_line_items?.map((item: any) => {
+      const product = productMap.get(item.sku)
+
+      return {
+        ...item,
+        product_name: product?.name || "Unknown",
+        cost_per_unit: product?.cost_per_unit || 0,
+      }
+    }) || []
+
+    // Total selling price
+    const totalSellingPrice = lineItemsWithDetails.reduce((sum: number, item: any) =>
+      sum + (item.selling_price * item.quantity), 0
+    )
+
+    const channelFees = order.channel_fees || 0
+
+    // Revenue = Total Selling Price - Channel Fees
+    const revenue = totalSellingPrice - channelFees
+
+    // Total COGS
+    const totalCogs = lineItemsWithDetails.reduce((sum: number, item: any) =>
+      sum + (item.cost_per_unit * item.quantity), 0
+    )
+
+    // Net Profit = Revenue - COGS = (Total Selling Price - Channel Fees) - COGS
+    const netProfit = revenue - totalCogs
+
+    return {
+      ...order,
+      order_line_items: lineItemsWithDetails,
+      revenue,
+      net_profit: netProfit,
+      total_cogs: totalCogs,
+    }
+  })
+
+  return ordersWithDetails
 }
 
 export async function getOrderById(id: string) {
@@ -305,14 +359,27 @@ export async function getOrderStats() {
   }
 }
 
-export async function getSalesReport() {
+export async function getSalesReport(year?: number, month?: number) {
   const supabase = await createClient()
 
   // Get all paid/shipped orders with their line items
-  const { data: orders } = await supabase
+  let query = supabase
     .from("orders")
     .select("*, order_line_items(*)")
     .in("status", ["paid", "shipped"])
+
+  // Apply year/month filters if provided
+  if (year && month) {
+    const startDate = `${year}-${month.toString().padStart(2, '0')}-01`
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0]
+    query = query.gte("order_date", startDate).lte("order_date", endDate)
+  } else if (year) {
+    const startDate = `${year}-01-01`
+    const endDate = `${year}-12-31`
+    query = query.gte("order_date", startDate).lte("order_date", endDate)
+  }
+
+  const { data: orders } = await query
 
   if (!orders) return { byProduct: [], byChannel: [] }
 

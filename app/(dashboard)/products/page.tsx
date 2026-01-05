@@ -51,99 +51,178 @@ export default async function ProductsPage() {
           </Link>
         </div>
       ) : (
-        <div className="border rounded-lg bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>SKU</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Variant</TableHead>
-                <TableHead>Cost/Unit</TableHead>
-                <TableHead>Stock</TableHead>
-                <TableHead>Reorder Point</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {products.map((product) => {
-                const stock = stockMap.get(product.sku)
-                const bundle = bundleMap.get(product.sku)
+        <>
+          {/* Mobile Card View */}
+          <div className="md:hidden space-y-3">
+            {products.map((product) => {
+              const stock = stockMap.get(product.sku)
+              const bundle = bundleMap.get(product.sku)
+              const currentStock = product.is_bundle
+                ? (bundle?.available_stock || 0)
+                : (stock?.current_stock || 0)
+              const isLowStock = product.is_bundle
+                ? (bundle?.is_low_stock || false)
+                : (stock?.is_low_stock || false)
 
-                // For bundles, use computed availability; for regular products, use ledger stock
-                const currentStock = product.is_bundle
-                  ? (bundle?.available_stock || 0)
-                  : (stock?.current_stock || 0)
+              return (
+                <div key={product.id} className="border rounded-lg p-4 bg-card space-y-3">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-mono font-medium text-sm">{product.sku}</p>
+                      <p className="font-medium">{product.name}</p>
+                      {product.variant && (
+                        <p className="text-xs text-muted-foreground">{product.variant}</p>
+                      )}
+                    </div>
+                    <div className="flex gap-1">
+                      {product.is_bundle ? (
+                        <Badge variant="secondary" className="text-xs">Bundle</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs">Single</Badge>
+                      )}
+                      {product.status === 'active' ? (
+                        <Badge variant="success" className="text-xs">Active</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs">Discontinued</Badge>
+                      )}
+                    </div>
+                  </div>
 
-                const isLowStock = product.is_bundle
-                  ? (bundle?.is_low_stock || false)
-                  : (stock?.is_low_stock || false)
-
-                return (
-                  <TableRow key={product.id}>
-                    <TableCell className="font-mono font-medium">
-                      {product.sku}
-                    </TableCell>
-                    <TableCell className="font-medium">{product.name}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {product.variant || '-'}
-                    </TableCell>
-                    <TableCell>{formatCurrency(product.cost_per_unit)}</TableCell>
-                    <TableCell>
-                      <span
-                        className={
-                          isLowStock
-                            ? "font-semibold text-warning"
-                            : "text-muted-foreground"
-                        }
-                      >
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Cost: </span>
+                      <span className="font-medium">{formatCurrency(product.cost_per_unit)}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Reorder: </span>
+                      <span>{product.reorder_point}</span>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="text-muted-foreground">Stock: </span>
+                      <span className={isLowStock ? "font-semibold text-warning" : ""}>
                         {currentStock}
                       </span>
                       {product.is_bundle && (
                         <span className="ml-1 text-xs text-muted-foreground">(computed)</span>
                       )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {product.reorder_point}
-                    </TableCell>
-                    <TableCell>
-                      {product.is_bundle ? (
-                        <Badge variant="secondary">Bundle</Badge>
-                      ) : (
-                        <Badge variant="outline">Single</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {product.status === 'active' ? (
-                        <Badge variant="success">Active</Badge>
-                      ) : (
-                        <Badge variant="outline">Discontinued</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex gap-1 justify-end">
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2 border-t">
+                    {product.is_bundle && (
+                      <Link href={`/products/${product.sku}/bundles`} className="flex-1">
+                        <Button variant="outline" size="sm" className="w-full">
+                          <Settings className="h-4 w-4 mr-1" />
+                          Bundle
+                        </Button>
+                      </Link>
+                    )}
+                    <Link href={`/products/${product.sku}/edit`} className="flex-1">
+                      <Button variant="ghost" size="sm" className="w-full">
+                        Edit
+                      </Button>
+                    </Link>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block border rounded-lg bg-card overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>SKU</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Variant</TableHead>
+                  <TableHead>Cost/Unit</TableHead>
+                  <TableHead>Stock</TableHead>
+                  <TableHead>Reorder Point</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {products.map((product) => {
+                  const stock = stockMap.get(product.sku)
+                  const bundle = bundleMap.get(product.sku)
+
+                  // For bundles, use computed availability; for regular products, use ledger stock
+                  const currentStock = product.is_bundle
+                    ? (bundle?.available_stock || 0)
+                    : (stock?.current_stock || 0)
+
+                  const isLowStock = product.is_bundle
+                    ? (bundle?.is_low_stock || false)
+                    : (stock?.is_low_stock || false)
+
+                  return (
+                    <TableRow key={product.id}>
+                      <TableCell className="font-mono font-medium">
+                        {product.sku}
+                      </TableCell>
+                      <TableCell className="font-medium">{product.name}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {product.variant || '-'}
+                      </TableCell>
+                      <TableCell>{formatCurrency(product.cost_per_unit)}</TableCell>
+                      <TableCell>
+                        <span
+                          className={
+                            isLowStock
+                              ? "font-semibold text-warning"
+                              : "text-muted-foreground"
+                          }
+                        >
+                          {currentStock}
+                        </span>
                         {product.is_bundle && (
-                          <Link href={`/products/${product.sku}/bundles`}>
+                          <span className="ml-1 text-xs text-muted-foreground">(computed)</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {product.reorder_point}
+                      </TableCell>
+                      <TableCell>
+                        {product.is_bundle ? (
+                          <Badge variant="secondary">Bundle</Badge>
+                        ) : (
+                          <Badge variant="outline">Single</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {product.status === 'active' ? (
+                          <Badge variant="success">Active</Badge>
+                        ) : (
+                          <Badge variant="outline">Discontinued</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex gap-1 justify-end">
+                          {product.is_bundle && (
+                            <Link href={`/products/${product.sku}/bundles`}>
+                              <Button variant="ghost" size="sm">
+                                <Settings className="h-4 w-4 mr-1" />
+                                Bundle
+                              </Button>
+                            </Link>
+                          )}
+                          <Link href={`/products/${product.sku}/edit`}>
                             <Button variant="ghost" size="sm">
-                              <Settings className="h-4 w-4 mr-1" />
-                              Bundle
+                              Edit
                             </Button>
                           </Link>
-                        )}
-                        <Link href={`/products/${product.sku}/edit`}>
-                          <Button variant="ghost" size="sm">
-                            Edit
-                          </Button>
-                        </Link>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       )}
     </div>
   )
