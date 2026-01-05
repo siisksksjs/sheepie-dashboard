@@ -17,6 +17,10 @@ const quicksand = Quicksand({
 export const metadata: Metadata = {
   title: "Sheepie | Inventory & Order Management",
   description: "Internal inventory and order management system for Sheepie",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function RootLayout({
