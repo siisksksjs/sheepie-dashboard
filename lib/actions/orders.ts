@@ -404,33 +404,49 @@ export async function getSalesReport(year?: number, month?: number) {
     orders: number
     revenue: number
     fees: number
-    net_revenue: number
+    cost: number
+    profit: number
   }>()
 
   for (const order of orders) {
+    const lineItems = (order as any).order_line_items || []
+
+    // Calculate total order value for proportional fee allocation
+    const totalOrderValue = lineItems.reduce((sum: number, item: any) =>
+      sum + (item.selling_price * item.quantity), 0
+    )
+
     // By channel
     const existing = channelSales.get(order.channel) || {
       channel: order.channel,
       orders: 0,
       revenue: 0,
       fees: 0,
-      net_revenue: 0,
+      cost: 0,
+      profit: 0,
     }
 
-    const lineItems = (order as any).order_line_items || []
-    const orderRevenue = lineItems.reduce((sum: number, item: any) =>
-      sum + (item.selling_price * item.quantity), 0
-    )
+    const orderRevenue = totalOrderValue - (order.channel_fees || 0)
+
+    // Calculate total cost for this order
+    let orderCost = 0
+    for (const item of lineItems) {
+      const product = productMap.get(item.sku)
+      if (product) {
+        orderCost += product.cost_per_unit * item.quantity
+      }
+    }
 
     channelSales.set(order.channel, {
       channel: order.channel,
       orders: existing.orders + 1,
       revenue: existing.revenue + orderRevenue,
       fees: existing.fees + (order.channel_fees || 0),
-      net_revenue: existing.net_revenue + orderRevenue - (order.channel_fees || 0),
+      cost: existing.cost + orderCost,
+      profit: existing.profit + (orderRevenue - orderCost),
     })
 
-    // By product
+    // By product - allocate channel fees proportionally
     for (const item of lineItems) {
       const product = productMap.get(item.sku)
       if (!product) continue
@@ -445,7 +461,16 @@ export async function getSalesReport(year?: number, month?: number) {
         profit: 0,
       }
 
-      const itemRevenue = item.selling_price * item.quantity
+      const itemTotalPrice = item.selling_price * item.quantity
+
+      // Allocate channel fees proportionally
+      let allocatedChannelFee = 0
+      if (totalOrderValue > 0 && order.channel_fees) {
+        const proportion = itemTotalPrice / totalOrderValue
+        allocatedChannelFee = order.channel_fees * proportion
+      }
+
+      const itemRevenue = itemTotalPrice - allocatedChannelFee
       const itemCost = product.cost_per_unit * item.quantity
 
       productSales.set(item.sku, {
@@ -521,6 +546,11 @@ export async function getMonthlySalesReport(year?: number, month?: number) {
     const orderMonth = order.order_date.substring(0, 7) // "YYYY-MM"
     const lineItems = (order as any).order_line_items || []
 
+    // Calculate total order value for proportional fee allocation
+    const totalOrderValue = lineItems.reduce((sum: number, item: any) =>
+      sum + (item.selling_price * item.quantity), 0
+    )
+
     // Monthly totals
     const existing = monthlySales.get(orderMonth) || {
       month: orderMonth,
@@ -539,7 +569,16 @@ export async function getMonthlySalesReport(year?: number, month?: number) {
       const product = productMap.get(item.sku)
       if (!product) continue
 
-      const itemRevenue = item.selling_price * item.quantity
+      const itemTotalPrice = item.selling_price * item.quantity
+
+      // Allocate channel fees proportionally
+      let allocatedChannelFee = 0
+      if (totalOrderValue > 0 && order.channel_fees) {
+        const proportion = itemTotalPrice / totalOrderValue
+        allocatedChannelFee = order.channel_fees * proportion
+      }
+
+      const itemRevenue = itemTotalPrice - allocatedChannelFee
       const itemCost = product.cost_per_unit * item.quantity
 
       orderRevenue += itemRevenue
@@ -628,6 +667,11 @@ export async function getChannelProductReport(year?: number, month?: number) {
     const channel = order.channel
     const lineItems = (order as any).order_line_items || []
 
+    // Calculate total order value for proportional fee allocation
+    const totalOrderValue = lineItems.reduce((sum: number, item: any) =>
+      sum + (item.selling_price * item.quantity), 0
+    )
+
     if (!channelProductSales.has(channel)) {
       channelProductSales.set(channel, new Map())
     }
@@ -647,7 +691,16 @@ export async function getChannelProductReport(year?: number, month?: number) {
         profit: 0,
       }
 
-      const itemRevenue = item.selling_price * item.quantity
+      const itemTotalPrice = item.selling_price * item.quantity
+
+      // Allocate channel fees proportionally
+      let allocatedChannelFee = 0
+      if (totalOrderValue > 0 && order.channel_fees) {
+        const proportion = itemTotalPrice / totalOrderValue
+        allocatedChannelFee = order.channel_fees * proportion
+      }
+
+      const itemRevenue = itemTotalPrice - allocatedChannelFee
       const itemCost = product.cost_per_unit * item.quantity
 
       channelMap.set(item.sku, {

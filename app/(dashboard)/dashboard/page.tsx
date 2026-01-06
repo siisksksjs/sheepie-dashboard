@@ -1,11 +1,12 @@
 import { getStockOnHand, getDashboardStats } from "@/lib/actions/inventory"
 import { getOrderStats, getSalesReport } from "@/lib/actions/orders"
 import { getAllBundlesWithAvailability } from "@/lib/actions/bundles"
+import { getProjectedRevenue } from "@/lib/actions/products"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { formatCurrency } from "@/lib/utils"
-import { Package, AlertTriangle, TrendingUp, Box } from "lucide-react"
+import { Package, AlertTriangle, TrendingUp, Box, DollarSign } from "lucide-react"
 
 export default async function DashboardPage() {
   const stats = await getDashboardStats()
@@ -13,6 +14,7 @@ export default async function DashboardPage() {
   const orderStats = await getOrderStats()
   const salesReport = await getSalesReport()
   const bundles = await getAllBundlesWithAvailability()
+  const projectedRevenue = await getProjectedRevenue()
 
   // Get low stock items (regular products)
   const lowStockItems = stockData.filter(item => item.is_low_stock && item.status === 'active' && !item.is_bundle)
@@ -93,6 +95,60 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Projected Revenue Card */}
+      <Card className="mb-8 border-primary/20 bg-primary/5">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <DollarSign className="h-5 w-5 text-primary" />
+            <CardTitle>Projected Revenue from Current Stock</CardTitle>
+          </div>
+          <CardDescription>
+            Potential revenue if all current stock sells at historical average prices
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="mb-6">
+            <div className="text-4xl font-bold text-primary">
+              {formatCurrency(projectedRevenue.total_projected_revenue)}
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              Based on {stats.totalStock} units in stock across {stats.totalProducts} products
+            </p>
+          </div>
+
+          {projectedRevenue.products_projection.length > 0 && (
+            <div>
+              <h4 className="text-sm font-semibold mb-3 text-muted-foreground">Top Products by Projected Revenue</h4>
+              <div className="space-y-3">
+                {projectedRevenue.products_projection.slice(0, 3).map((product) => (
+                  product.projected_revenue > 0 && (
+                    <div key={product.sku} className="flex items-center justify-between p-3 bg-card rounded-lg border">
+                      <div className="flex-1">
+                        <div className="font-medium">{product.name}</div>
+                        {product.variant && (
+                          <div className="text-sm text-muted-foreground">{product.variant}</div>
+                        )}
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {product.current_stock} units × {formatCurrency(product.avg_revenue_per_unit)}/unit avg
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-semibold text-primary">
+                          {formatCurrency(product.projected_revenue)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {product.total_units_sold > 0 ? `${product.total_units_sold} sold all time` : 'No sales yet'}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Low Stock Alerts */}
       {(lowStockItems.length > 0 || lowStockBundles.length > 0) && (

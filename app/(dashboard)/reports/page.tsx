@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { formatCurrency } from "@/lib/utils"
 import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingBag, ArrowUpRight, ArrowDownRight, Target } from "lucide-react"
 import Link from "next/link"
+import { InfoTooltip } from "@/components/ui/info-tooltip"
 import {
   LineChart,
   Line,
@@ -163,8 +164,12 @@ export default function ReportsPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center">
               Total Revenue
+              <InfoTooltip
+                content="Revenue calculation"
+                formula="Selling Price - Allocated Channel Fees"
+              />
             </CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -178,8 +183,12 @@ export default function ReportsPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center">
               Net Profit
+              <InfoTooltip
+                content="Profit calculation"
+                formula="Revenue - Cost"
+              />
             </CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -187,8 +196,12 @@ export default function ReportsPage() {
             <div className={`text-2xl font-bold ${totalProfit >= 0 ? 'text-success' : 'text-destructive'}`}>
               {formatCurrency(totalProfit)}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">
+            <p className="text-xs text-muted-foreground mt-1 flex items-center">
               {profitMargin.toFixed(1)}% margin
+              <InfoTooltip
+                content="Profit Margin calculation"
+                formula="(Profit ÷ Revenue) × 100"
+              />
             </p>
           </CardContent>
         </Card>
@@ -374,10 +387,34 @@ export default function ReportsPage() {
                     <TableRow>
                       <TableHead>Channel</TableHead>
                       <TableHead className="text-right">Orders</TableHead>
-                      <TableHead className="text-right">Revenue</TableHead>
                       <TableHead className="text-right">Fees</TableHead>
-                      <TableHead className="text-right">Net Revenue</TableHead>
-                      <TableHead className="text-right">Avg Order</TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center">
+                          Revenue
+                          <InfoTooltip
+                            content="Revenue calculation"
+                            formula="Selling Price - Allocated Channel Fees"
+                          />
+                        </span>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center">
+                          Profit
+                          <InfoTooltip
+                            content="Profit calculation"
+                            formula="Revenue - Cost"
+                          />
+                        </span>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center">
+                          Avg Order
+                          <InfoTooltip
+                            content="Average Order Value"
+                            formula="Total Revenue ÷ Number of Orders"
+                          />
+                        </span>
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -387,14 +424,16 @@ export default function ReportsPage() {
                           {channelLabels[channel.channel]}
                         </TableCell>
                         <TableCell className="text-right">{channel.orders}</TableCell>
-                        <TableCell className="text-right">
-                          {formatCurrency(channel.revenue)}
-                        </TableCell>
                         <TableCell className="text-right text-destructive">
                           {formatCurrency(channel.fees)}
                         </TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(channel.revenue)}
+                        </TableCell>
                         <TableCell className="text-right font-semibold">
-                          {formatCurrency(channel.net_revenue)}
+                          <span className={channel.profit >= 0 ? 'text-success' : 'text-destructive'}>
+                            {formatCurrency(channel.profit)}
+                          </span>
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground">
                           {formatCurrency(channel.revenue / channel.orders)}
@@ -483,10 +522,42 @@ export default function ReportsPage() {
                       <TableHead>SKU</TableHead>
                       <TableHead>Product</TableHead>
                       <TableHead className="text-right">Units Sold</TableHead>
-                      <TableHead className="text-right">Revenue</TableHead>
-                      <TableHead className="text-right">Cost</TableHead>
-                      <TableHead className="text-right">Profit</TableHead>
-                      <TableHead className="text-right">Margin %</TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center">
+                          Revenue
+                          <InfoTooltip
+                            content="Revenue calculation"
+                            formula="Selling Price - Allocated Channel Fees"
+                          />
+                        </span>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center">
+                          Cost
+                          <InfoTooltip
+                            content="Cost calculation (COGS)"
+                            formula="cost_per_unit × quantity"
+                          />
+                        </span>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center">
+                          Profit
+                          <InfoTooltip
+                            content="Profit calculation"
+                            formula="Revenue - Cost"
+                          />
+                        </span>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center">
+                          Margin %
+                          <InfoTooltip
+                            content="Profit Margin calculation"
+                            formula="(Profit ÷ Revenue) × 100"
+                          />
+                        </span>
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -548,9 +619,33 @@ export default function ReportsPage() {
                         <TableHead>Channel</TableHead>
                         <TableHead>Product</TableHead>
                         <TableHead className="text-right">Units</TableHead>
-                        <TableHead className="text-right">Revenue</TableHead>
-                        <TableHead className="text-right">Profit</TableHead>
-                        <TableHead className="text-right">Margin</TableHead>
+                        <TableHead className="text-right">
+                          <span className="inline-flex items-center">
+                            Revenue
+                            <InfoTooltip
+                              content="Revenue calculation"
+                              formula="Selling Price - Allocated Channel Fees"
+                            />
+                          </span>
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <span className="inline-flex items-center">
+                            Profit
+                            <InfoTooltip
+                              content="Profit calculation"
+                              formula="Revenue - Cost"
+                            />
+                          </span>
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <span className="inline-flex items-center">
+                            Margin
+                            <InfoTooltip
+                              content="Profit Margin calculation"
+                              formula="(Profit ÷ Revenue) × 100"
+                            />
+                          </span>
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -606,10 +701,42 @@ export default function ReportsPage() {
                       <TableHead>Month</TableHead>
                       <TableHead className="text-right">Orders</TableHead>
                       <TableHead className="text-right">Units</TableHead>
-                      <TableHead className="text-right">Revenue</TableHead>
-                      <TableHead className="text-right">Cost</TableHead>
-                      <TableHead className="text-right">Profit</TableHead>
-                      <TableHead className="text-right">Margin</TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center">
+                          Revenue
+                          <InfoTooltip
+                            content="Revenue calculation"
+                            formula="Selling Price - Allocated Channel Fees"
+                          />
+                        </span>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center">
+                          Cost
+                          <InfoTooltip
+                            content="Cost calculation (COGS)"
+                            formula="cost_per_unit × quantity"
+                          />
+                        </span>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center">
+                          Profit
+                          <InfoTooltip
+                            content="Profit calculation"
+                            formula="Revenue - Cost"
+                          />
+                        </span>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center">
+                          Margin
+                          <InfoTooltip
+                            content="Profit Margin calculation"
+                            formula="(Profit ÷ Revenue) × 100"
+                          />
+                        </span>
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -675,7 +802,13 @@ export default function ReportsPage() {
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">
-                      Total Revenue
+                      <span className="inline-flex items-center gap-1">
+                        Total Revenue
+                        <InfoTooltip
+                          content="Revenue from ad-driven orders"
+                          formula="Selling Price - Channel Fees"
+                        />
+                      </span>
                     </CardTitle>
                     <TrendingUp className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
@@ -692,7 +825,13 @@ export default function ReportsPage() {
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">
-                      Overall ROAS
+                      <span className="inline-flex items-center gap-1">
+                        Overall ROAS
+                        <InfoTooltip
+                          content="Return on Ad Spend"
+                          formula="Total Revenue ÷ Total Ad Spend"
+                        />
+                      </span>
                     </CardTitle>
                     <Target className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
@@ -713,7 +852,13 @@ export default function ReportsPage() {
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">
-                      Avg Cost/Order
+                      <span className="inline-flex items-center gap-1">
+                        Avg Cost/Order
+                        <InfoTooltip
+                          content="Average cost per order from ads"
+                          formula="Total Ad Spend ÷ Total Orders"
+                        />
+                      </span>
                     </CardTitle>
                     <ShoppingBag className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
@@ -795,9 +940,33 @@ export default function ReportsPage() {
                           <TableHead>Period</TableHead>
                           <TableHead className="text-right">Spend</TableHead>
                           <TableHead className="text-right">Orders</TableHead>
-                          <TableHead className="text-right">Revenue</TableHead>
-                          <TableHead className="text-right">ROAS</TableHead>
-                          <TableHead className="text-right">Cost/Order</TableHead>
+                          <TableHead className="text-right">
+                            <span className="inline-flex items-center">
+                              Revenue
+                              <InfoTooltip
+                                content="Revenue from campaign"
+                                formula="Selling Price - Channel Fees"
+                              />
+                            </span>
+                          </TableHead>
+                          <TableHead className="text-right">
+                            <span className="inline-flex items-center">
+                              ROAS
+                              <InfoTooltip
+                                content="Return on Ad Spend"
+                                formula="Revenue ÷ Ad Spend"
+                              />
+                            </span>
+                          </TableHead>
+                          <TableHead className="text-right">
+                            <span className="inline-flex items-center">
+                              Cost/Order
+                              <InfoTooltip
+                                content="Average cost per order"
+                                formula="Ad Spend ÷ Orders"
+                              />
+                            </span>
+                          </TableHead>
                           <TableHead>Status</TableHead>
                         </TableRow>
                       </TableHeader>
