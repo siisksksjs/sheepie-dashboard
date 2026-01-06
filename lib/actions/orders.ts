@@ -491,6 +491,69 @@ export async function getSalesReport(year?: number, month?: number) {
   }
 }
 
+export async function getReturnSummary(year?: number, month?: number) {
+  const supabase = await createClient()
+
+  let query = supabase
+    .from("orders")
+    .select("*, order_line_items(*)")
+    .eq("status", "returned")
+
+  if (year && month) {
+    const startDate = `${year}-${month.toString().padStart(2, '0')}-01`
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0]
+    query = query.gte("order_date", startDate).lte("order_date", endDate)
+  } else if (year) {
+    const startDate = `${year}-01-01`
+    const endDate = `${year}-12-31`
+    query = query.gte("order_date", startDate).lte("order_date", endDate)
+  }
+
+  const { data: orders } = await query
+  if (!orders) {
+    return {
+      returnedUnits: 0,
+      returnedRevenue: 0,
+      returnedCogs: 0,
+      returnedOrders: 0,
+      bySku: [],
+    }
+  }
+
+  const { data: products } = await supabase.from("products").select("*")
+  const productMap = new Map(products?.map(p => [p.sku, p]) || [])
+  const returnedBySku = new Map<string, number>()
+
+  let returnedUnits = 0
+  let returnedRevenue = 0
+  let returnedCogs = 0
+
+  for (const order of orders) {
+    const lineItems = (order as any).order_line_items || []
+    for (const item of lineItems) {
+      returnedUnits += item.quantity
+      returnedRevenue += (item.selling_price || 0) * item.quantity
+      returnedBySku.set(item.sku, (returnedBySku.get(item.sku) || 0) + item.quantity)
+
+      const product = productMap.get(item.sku)
+      if (product) {
+        returnedCogs += product.cost_per_unit * item.quantity
+      }
+    }
+  }
+
+  return {
+    returnedUnits,
+    returnedRevenue,
+    returnedCogs,
+    returnedOrders: orders.length,
+    bySku: Array.from(returnedBySku.entries()).map(([sku, units]) => ({
+      sku,
+      units,
+    })),
+  }
+}
+
 /**
  * Get monthly sales report with breakdown by product
  */

@@ -1,10 +1,11 @@
 import { getStockOnHand, getDashboardStats } from "@/lib/actions/inventory"
-import { getOrderStats, getSalesReport } from "@/lib/actions/orders"
+import { getOrderStats, getSalesReport, getReturnSummary } from "@/lib/actions/orders"
 import { getAllBundlesWithAvailability } from "@/lib/actions/bundles"
 import { getProjectedRevenue } from "@/lib/actions/products"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { InfoTooltip } from "@/components/ui/info-tooltip"
 import { formatCurrency } from "@/lib/utils"
 import { Package, AlertTriangle, TrendingUp, Box, DollarSign } from "lucide-react"
 
@@ -13,8 +14,15 @@ export default async function DashboardPage() {
   const stockData = await getStockOnHand()
   const orderStats = await getOrderStats()
   const salesReport = await getSalesReport()
+  const returnSummary = await getReturnSummary()
   const bundles = await getAllBundlesWithAvailability()
   const projectedRevenue = await getProjectedRevenue()
+  const totalUnitsSold = salesReport.byProduct.reduce((sum, product) => sum + product.units_sold, 0)
+  const returnedUnits = returnSummary.returnedUnits || 0
+  const grossUnitsSold = totalUnitsSold + returnedUnits
+  const returnedBySku = new Map<string, number>(
+    (returnSummary.bySku || []).map((item: any) => [item.sku, item.units])
+  )
 
   // Get low stock items (regular products)
   const lowStockItems = stockData.filter(item => item.is_low_stock && item.status === 'active' && !item.is_bundle)
@@ -101,7 +109,15 @@ export default async function DashboardPage() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <DollarSign className="h-5 w-5 text-primary" />
-            <CardTitle>Projected Revenue from Current Stock</CardTitle>
+            <CardTitle>
+              Projected Revenue from Current Stock
+              {returnedUnits > 0 && (
+                <InfoTooltip
+                  content="Net units exclude returns. Gross includes returns."
+                  formula={`Net: ${totalUnitsSold} · Returned: ${returnedUnits} · Gross: ${grossUnitsSold}`}
+                />
+              )}
+            </CardTitle>
           </div>
           <CardDescription>
             Potential revenue if all current stock sells at historical average prices
@@ -138,7 +154,19 @@ export default async function DashboardPage() {
                           {formatCurrency(product.projected_revenue)}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {product.total_units_sold > 0 ? `${product.total_units_sold} sold all time` : 'No sales yet'}
+                          {product.total_units_sold > 0 ? (
+                            <span className="inline-flex items-center gap-1">
+                              {product.total_units_sold} sold all time
+                              {(returnedBySku.get(product.sku) || 0) > 0 ? (
+                                <InfoTooltip
+                                  content="Net units exclude returns. Gross includes returns."
+                                  formula={`Net: ${product.total_units_sold} · Returned: ${returnedBySku.get(product.sku)} · Gross: ${product.total_units_sold + (returnedBySku.get(product.sku) || 0)}`}
+                                />
+                              ) : null}
+                            </span>
+                          ) : (
+                            'No sales yet'
+                          )}
                         </div>
                       </div>
                     </div>

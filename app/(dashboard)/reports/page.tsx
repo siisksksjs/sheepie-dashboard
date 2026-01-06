@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { getMonthlySalesReport, getChannelProductReport, getSalesReport } from "@/lib/actions/orders"
+import { getMonthlySalesReport, getChannelProductReport, getSalesReport, getReturnSummary } from "@/lib/actions/orders"
 import { getAdPerformanceSummary } from "@/lib/actions/ad-campaigns"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { formatCurrency } from "@/lib/utils"
-import { TrendingUp, TrendingDown, DollarSign, Package, ShoppingBag, ArrowUpRight, ArrowDownRight, Target } from "lucide-react"
+import { TrendingUp, DollarSign, Package, ShoppingBag, ArrowUpRight, Target } from "lucide-react"
 import Link from "next/link"
 import { InfoTooltip } from "@/components/ui/info-tooltip"
 import {
@@ -63,6 +63,7 @@ export default function ReportsPage() {
   const [monthlyReport, setMonthlyReport] = useState<any>(null)
   const [channelProductReport, setChannelProductReport] = useState<any>(null)
   const [adPerformance, setAdPerformance] = useState<any>(null)
+  const [returnSummary, setReturnSummary] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -72,17 +73,19 @@ export default function ReportsPage() {
   const loadAllReports = async () => {
     setLoading(true)
 
-    const [overview, monthly, channelProduct, adPerf] = await Promise.all([
+    const [overview, monthly, channelProduct, adPerf, returns] = await Promise.all([
       getSalesReport(selectedYear, selectedMonth),
       getMonthlySalesReport(selectedYear, selectedMonth),
       getChannelProductReport(selectedYear, selectedMonth),
       getAdPerformanceSummary(),
+      getReturnSummary(selectedYear, selectedMonth),
     ])
 
     setOverviewReport(overview)
     setMonthlyReport(monthly)
     setChannelProductReport(channelProduct)
     setAdPerformance(adPerf)
+    setReturnSummary(returns)
     setLoading(false)
   }
 
@@ -99,6 +102,11 @@ export default function ReportsPage() {
   const totalProfit = overviewReport?.byProduct.reduce((sum: number, p: any) => sum + p.profit, 0) || 0
   const totalUnitsSold = overviewReport?.byProduct.reduce((sum: number, p: any) => sum + p.units_sold, 0) || 0
   const totalOrders = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.orders, 0) || 0
+  const returnedUnits = returnSummary?.returnedUnits || 0
+  const returnedBySku = new Map<string, number>(
+    (returnSummary?.bySku || []).map((item: any) => [item.sku, item.units])
+  )
+  const grossUnitsSold = totalUnitsSold + returnedUnits
   const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
   const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0
 
@@ -210,6 +218,12 @@ export default function ReportsPage() {
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Units Sold
+              {returnedUnits > 0 && (
+                <InfoTooltip
+                  content="Net units exclude returns. Gross includes returns."
+                  formula={`Net: ${totalUnitsSold} · Returned: ${returnedUnits} · Gross: ${grossUnitsSold}`}
+                />
+              )}
             </CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -562,6 +576,7 @@ export default function ReportsPage() {
                   </TableHeader>
                   <TableBody>
                     {overviewReport.byProduct.map((product: any) => {
+                      const returnedForSku = returnedBySku.get(product.sku) || 0
                       const margin = product.revenue > 0
                         ? ((product.profit / product.revenue) * 100)
                         : 0
@@ -571,7 +586,15 @@ export default function ReportsPage() {
                           <TableCell className="font-mono text-sm">{product.sku}</TableCell>
                           <TableCell className="font-medium">{product.name}</TableCell>
                           <TableCell className="text-right font-medium">
-                            {product.units_sold}
+                            <span className="inline-flex items-center justify-end gap-1">
+                              {product.units_sold}
+                              {returnedForSku > 0 ? (
+                                <InfoTooltip
+                                  content="Net units exclude returns. Gross includes returns."
+                                  formula={`Net: ${product.units_sold} · Returned: ${returnedForSku} · Gross: ${product.units_sold + returnedForSku}`}
+                                />
+                              ) : null}
+                            </span>
                           </TableCell>
                           <TableCell className="text-right">
                             {formatCurrency(product.revenue)}
