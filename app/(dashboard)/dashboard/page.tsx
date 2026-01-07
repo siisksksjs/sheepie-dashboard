@@ -1,5 +1,5 @@
 import { getStockOnHand, getDashboardStats } from "@/lib/actions/inventory"
-import { getOrderStats, getSalesReport, getReturnSummary } from "@/lib/actions/orders"
+import { getOrderStats, getSalesReport, getReturnSummary, getReorderRecommendations } from "@/lib/actions/orders"
 import { getAllBundlesWithAvailability } from "@/lib/actions/bundles"
 import { getProjectedRevenue } from "@/lib/actions/products"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,6 +15,7 @@ export default async function DashboardPage() {
   const orderStats = await getOrderStats()
   const salesReport = await getSalesReport()
   const returnSummary = await getReturnSummary()
+  const reorderRecommendations = await getReorderRecommendations()
   const bundles = await getAllBundlesWithAvailability()
   const projectedRevenue = await getProjectedRevenue()
   const totalUnitsSold = salesReport.byProduct.reduce((sum, product) => sum + product.units_sold, 0)
@@ -175,6 +176,45 @@ export default async function DashboardPage() {
               </div>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle>Restock Guidance</CardTitle>
+          <CardDescription>
+            Based on average daily sales since {reorderRecommendations.startDate.toISOString().slice(0, 10)}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>SKU</TableHead>
+                <TableHead>Product</TableHead>
+                <TableHead>Mode</TableHead>
+                <TableHead className="text-right">Avg/Day</TableHead>
+                <TableHead className="text-right">Lead+Buffer</TableHead>
+                <TableHead className="text-right">Reorder Point</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {reorderRecommendations.recommendations.map((rec) => (
+                <TableRow key={`${rec.sku}-${rec.mode}`}>
+                  <TableCell className="font-mono text-sm">{rec.sku}</TableCell>
+                  <TableCell className="font-medium">{rec.name}</TableCell>
+                  <TableCell>{rec.mode}</TableCell>
+                  <TableCell className="text-right">{rec.avgDaily.toFixed(2)}</TableCell>
+                  <TableCell className="text-right">
+                    {rec.leadMin + rec.buffer}-{rec.leadMax + rec.buffer} days
+                  </TableCell>
+                  <TableCell className="text-right font-semibold">
+                    {rec.reorderMin}-{rec.reorderMax} units
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 

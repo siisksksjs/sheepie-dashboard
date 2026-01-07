@@ -554,6 +554,66 @@ export async function getReturnSummary(year?: number, month?: number) {
   }
 }
 
+export async function getReorderRecommendations() {
+  const supabase = await createClient()
+  const startDate = new Date("2025-12-27T00:00:00Z")
+  const endDate = new Date()
+  const days = Math.max(1, Math.floor((endDate.getTime() - startDate.getTime()) / 86400000) + 1)
+
+  const targetSkus = ["Cervi-001", "Lumi-001", "Calmi-001"]
+
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("order_date, order_line_items!inner(quantity, selling_price, sku)")
+    .in("status", ["paid", "shipped"])
+    .gte("order_date", startDate.toISOString())
+    .in("order_line_items.sku", targetSkus)
+
+  const unitsBySku = new Map<string, number>()
+  for (const sku of targetSkus) unitsBySku.set(sku, 0)
+
+  for (const order of orders || []) {
+    const lineItems = (order as any).order_line_items || []
+    for (const item of lineItems) {
+      if (item.selling_price > 0) {
+        unitsBySku.set(item.sku, (unitsBySku.get(item.sku) || 0) + item.quantity)
+      }
+    }
+  }
+
+  const configs = [
+    { sku: "Cervi-001", name: "CerviCloud Pillow", mode: "Sea", leadMin: 28, leadMax: 42, buffer: 14 },
+    { sku: "Lumi-001", name: "LumiCloud Eye Mask", mode: "Air", leadMin: 7, leadMax: 10, buffer: 7 },
+    { sku: "Calmi-001", name: "CalmiCloud Ear Plug", mode: "Air", leadMin: 7, leadMax: 10, buffer: 7 },
+    { sku: "Calmi-001", name: "CalmiCloud Ear Plug", mode: "Sea", leadMin: 28, leadMax: 42, buffer: 14 },
+  ]
+
+  const recommendations = configs.map((config) => {
+    const unitsSold = unitsBySku.get(config.sku) || 0
+    const avgDaily = unitsSold / days
+    const minPoint = Math.ceil(avgDaily * (config.leadMin + config.buffer))
+    const maxPoint = Math.ceil(avgDaily * (config.leadMax + config.buffer))
+
+    return {
+      sku: config.sku,
+      name: config.name,
+      mode: config.mode,
+      unitsSold,
+      days,
+      avgDaily,
+      leadMin: config.leadMin,
+      leadMax: config.leadMax,
+      buffer: config.buffer,
+      reorderMin: minPoint,
+      reorderMax: maxPoint,
+      startDate: startDate.toISOString().slice(0, 10),
+      endDate: endDate.toISOString().slice(0, 10),
+    }
+  })
+
+  return { days, startDate, endDate, recommendations }
+}
+
 /**
  * Get monthly sales report with breakdown by product
  */
