@@ -24,10 +24,11 @@ type LineItem = {
 
 // Default selling prices for each product
 const DEFAULT_PRICES: Record<string, number> = {
-  'Cervi-001': 880000,  // CerviCloud Pillow
-  'Cervi-002': 198000,  // Cervi Case
-  'Lumi-001': 180000,   // LumiCloud Eye Mask
-  'Calmi-001': 49000,   // CalmiCloud Ear Plug
+  'Cervi-001': 870000,       // CerviCloud Pillow
+  'Cervi-002': 198000,       // Cervi Case
+  'Lumi-001': 175000,        // LumiCloud Eye Mask
+  'Calmi-001': 49000,        // CalmiCloud Ear Plug
+  'Bundle-Cervi': 870000,    // CerviCloud + CalmiCloud bundle
 }
 
 export default function NewOrderPage() {

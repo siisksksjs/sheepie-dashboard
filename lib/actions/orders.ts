@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
+import { cache } from "react"
 import type { Order, OrderLineItem, Channel, OrderStatus } from "@/lib/types/database.types"
 import { createLedgerEntry } from "./inventory"
 
@@ -359,7 +360,7 @@ export async function getOrderStats() {
   }
 }
 
-export async function getSalesReport(year?: number, month?: number) {
+async function _getSalesReportInternal(year?: number, month?: number) {
   const supabase = await createClient()
 
   // Get all paid/shipped orders with their line items
@@ -491,7 +492,12 @@ export async function getSalesReport(year?: number, month?: number) {
   }
 }
 
-export async function getReturnSummary(year?: number, month?: number) {
+// Cached per request (deduplicates multiple calls in same render)
+export const getSalesReport = cache(async (year?: number, month?: number) => {
+  return _getSalesReportInternal(year, month)
+})
+
+async function _getReturnSummaryInternal(year?: number, month?: number) {
   const supabase = await createClient()
 
   let query = supabase
@@ -554,13 +560,19 @@ export async function getReturnSummary(year?: number, month?: number) {
   }
 }
 
+// Cached per request
+export const getReturnSummary = cache(async (year?: number, month?: number) => {
+  return _getReturnSummaryInternal(year, month)
+})
+
 export async function getReorderRecommendations() {
   const supabase = await createClient()
   const startDate = new Date("2025-12-27T00:00:00Z")
   const endDate = new Date()
   const days = Math.max(1, Math.floor((endDate.getTime() - startDate.getTime()) / 86400000) + 1)
 
-  const targetSkus = ["Cervi-001", "Lumi-001", "Calmi-001"]
+  // Include Bundle-Cervi to track its impact on component stock
+  const targetSkus = ["Cervi-001", "Lumi-001", "Calmi-001", "Bundle-Cervi"]
 
   const { data: orders } = await supabase
     .from("orders")
@@ -569,6 +581,7 @@ export async function getReorderRecommendations() {
     .gte("order_date", startDate.toISOString())
     .in("order_line_items.sku", targetSkus)
 
+  // Track units sold by SKU
   const unitsBySku = new Map<string, number>()
   for (const sku of targetSkus) unitsBySku.set(sku, 0)
 
@@ -581,6 +594,19 @@ export async function getReorderRecommendations() {
     }
   }
 
+  // Bundle-Cervi sales consume Cervi-001 and Calmi-001 components
+  // Add bundle sales to component totals for accurate restock calculation
+  const bundleSales = unitsBySku.get("Bundle-Cervi") || 0
+  const cerviTotal = (unitsBySku.get("Cervi-001") || 0) + bundleSales
+  const calmiTotal = (unitsBySku.get("Calmi-001") || 0) + bundleSales
+
+  // Use combined totals for restock calculation
+  const effectiveUnits = new Map<string, number>([
+    ["Cervi-001", cerviTotal],
+    ["Lumi-001", unitsBySku.get("Lumi-001") || 0],
+    ["Calmi-001", calmiTotal],
+  ])
+
   const configs = [
     { sku: "Cervi-001", name: "CerviCloud Pillow", mode: "Sea", leadMin: 28, leadMax: 42, buffer: 14 },
     { sku: "Lumi-001", name: "LumiCloud Eye Mask", mode: "Air", leadMin: 7, leadMax: 10, buffer: 7 },
@@ -589,7 +615,7 @@ export async function getReorderRecommendations() {
   ]
 
   const recommendations = configs.map((config) => {
-    const unitsSold = unitsBySku.get(config.sku) || 0
+    const unitsSold = effectiveUnits.get(config.sku) || 0
     const avgDaily = unitsSold / days
     const minPoint = Math.ceil(avgDaily * (config.leadMin + config.buffer))
     const maxPoint = Math.ceil(avgDaily * (config.leadMax + config.buffer))
@@ -617,7 +643,7 @@ export async function getReorderRecommendations() {
 /**
  * Get monthly sales report with breakdown by product
  */
-export async function getMonthlySalesReport(year?: number, month?: number) {
+async function _getMonthlySalesReportInternal(year?: number, month?: number) {
   const supabase = await createClient()
 
   let query = supabase
@@ -746,10 +772,15 @@ export async function getMonthlySalesReport(year?: number, month?: number) {
   }
 }
 
+// Cached per request
+export const getMonthlySalesReport = cache(async (year?: number, month?: number) => {
+  return _getMonthlySalesReportInternal(year, month)
+})
+
 /**
  * Get sales breakdown by channel and product (cross-tabulation)
  */
-export async function getChannelProductReport(year?: number, month?: number) {
+async function _getChannelProductReportInternal(year?: number, month?: number) {
   const supabase = await createClient()
 
   let query = supabase
@@ -859,6 +890,11 @@ export async function getChannelProductReport(year?: number, month?: number) {
 
   return { data: result.sort((a, b) => b.revenue - a.revenue) }
 }
+
+// Cached per request
+export const getChannelProductReport = cache(async (year?: number, month?: number) => {
+  return _getChannelProductReportInternal(year, month)
+})
 
 /**
  * Generate next order ID for a given channel and date

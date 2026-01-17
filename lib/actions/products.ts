@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
+import { cache } from "react"
 import type { Product } from "@/lib/types/database.types"
 
 export async function getProducts() {
@@ -96,7 +97,8 @@ export async function updateProduct(
   return { success: true, data }
 }
 
-export async function getProjectedRevenue() {
+// Internal function that does the actual work (optimized - single query instead of N+1)
+async function _getProjectedRevenueInternal() {
   const supabase = await createClient()
 
   try {
@@ -106,122 +108,93 @@ export async function getProjectedRevenue() {
       .select("sku, name, variant, current_stock, status")
       .eq("status", "active")
 
-    console.log("Products query result:", { products, productsError, count: products?.length })
-
-    if (productsError) {
-      console.error("Error fetching products:", JSON.stringify(productsError))
+    if (productsError || !products || products.length === 0) {
       return {
         total_projected_revenue: 0,
         products_projection: [],
       }
     }
 
-    if (!products || products.length === 0) {
-      console.log("No products found in database")
-      return {
-        total_projected_revenue: 0,
-        products_projection: [],
+    // OPTIMIZED: Fetch ALL orders with line items in ONE query instead of N queries
+    const { data: allOrders, error: ordersError } = await supabase
+      .from("orders")
+      .select(`
+        id,
+        channel_fees,
+        order_line_items(
+          quantity,
+          selling_price,
+          sku
+        )
+      `)
+      .in("status", ["paid", "shipped"])
+
+    if (ordersError) {
+      console.error("Error fetching orders:", ordersError)
+    }
+
+    // Build a map of SKU -> { totalRevenue, totalUnitsSold }
+    const skuStats = new Map<string, { totalRevenue: number; totalUnitsSold: number }>()
+
+    // Initialize all product SKUs
+    for (const product of products) {
+      skuStats.set(product.sku, { totalRevenue: 0, totalUnitsSold: 0 })
+    }
+
+    // Process all orders once
+    for (const order of allOrders || []) {
+      const lineItems = (order as any).order_line_items || []
+
+      // Calculate total order value for proportional fee allocation
+      const totalOrderValue = lineItems.reduce((sum: number, item: any) => {
+        return sum + (item.selling_price * item.quantity)
+      }, 0)
+
+      for (const item of lineItems) {
+        const stats = skuStats.get(item.sku)
+        if (!stats) continue // Skip if not an active product
+
+        const itemTotalPrice = item.selling_price * item.quantity
+
+        // Allocate channel fees proportionally
+        let allocatedChannelFee = 0
+        if (totalOrderValue > 0 && order.channel_fees) {
+          const proportion = itemTotalPrice / totalOrderValue
+          allocatedChannelFee = order.channel_fees * proportion
+        }
+
+        const itemRevenue = itemTotalPrice - allocatedChannelFee
+        stats.totalRevenue += itemRevenue
+        stats.totalUnitsSold += item.quantity
       }
     }
 
-    console.log(`Found ${products.length} active products`)
+    // Get Cervi-001 stats for fallback (used by Bundle-Cervi when it has no history)
+    const cerviStats = skuStats.get("Cervi-001") || { totalRevenue: 0, totalUnitsSold: 0 }
+    const cerviAvgRevenue = cerviStats.totalUnitsSold > 0 ? cerviStats.totalRevenue / cerviStats.totalUnitsSold : 0
 
-    // For each product, calculate avg revenue per unit from order history
-    const projectionsPromises = products.map(async (product) => {
-      // Get all line items for this product from paid/shipped orders
-      const { data: orders, error: ordersError } = await supabase
-        .from("orders")
-        .select(`
-          id,
-          status,
-          channel_fees,
-          order_line_items!inner(
-            quantity,
-            selling_price,
-            sku
-          )
-        `)
-        .in("status", ["paid", "shipped"])
-        .eq("order_line_items.sku", product.sku)
+    // Build projections from the aggregated stats
+    const productsProjection = products.map((product) => {
+      const stats = skuStats.get(product.sku) || { totalRevenue: 0, totalUnitsSold: 0 }
+      let avgRevenuePerUnit = stats.totalUnitsSold > 0 ? stats.totalRevenue / stats.totalUnitsSold : 0
 
-      if (ordersError) {
-        console.error(`Error fetching orders for ${product.sku}:`, JSON.stringify(ordersError))
+      // For Bundle-Cervi with no sales history, use Cervi-001's avg as fallback
+      // (Bundle is essentially Cervi + free CalmiCloud at same price point)
+      if (product.sku === "Bundle-Cervi" && stats.totalUnitsSold === 0 && cerviAvgRevenue > 0) {
+        avgRevenuePerUnit = cerviAvgRevenue
       }
 
-      console.log(`Product ${product.sku}: found ${orders?.length || 0} orders`)
-
-      if (ordersError || !orders || orders.length === 0) {
-        return {
-          sku: product.sku,
-          name: product.name,
-          variant: product.variant,
-          current_stock: product.current_stock,
-          total_units_sold: 0,
-          avg_revenue_per_unit: 0,
-          projected_revenue: 0,
-        }
-      }
-
-      // Calculate totals from all line items across all orders
-      let totalRevenue = 0
-      let totalUnitsSold = 0
-
-      orders.forEach((order: any) => {
-        // Each order has order_line_items array
-        if (Array.isArray(order.order_line_items)) {
-          // First, calculate total order value to allocate channel fees proportionally
-          const totalOrderValue = order.order_line_items.reduce((sum: number, item: any) => {
-            return sum + (item.selling_price * item.quantity)
-          }, 0)
-
-          order.order_line_items.forEach((item: any) => {
-            // Only count items matching this product's SKU
-            if (item.sku === product.sku) {
-              const itemTotalPrice = item.selling_price * item.quantity
-
-              // Allocate channel fees proportionally based on this item's contribution to total order
-              let allocatedChannelFee = 0
-              if (totalOrderValue > 0 && order.channel_fees) {
-                const proportion = itemTotalPrice / totalOrderValue
-                allocatedChannelFee = order.channel_fees * proportion
-              }
-
-              // Revenue = selling price - allocated channel fee
-              const itemRevenue = itemTotalPrice - allocatedChannelFee
-              totalRevenue += itemRevenue
-              totalUnitsSold += item.quantity
-            }
-          })
-        }
-      })
-
-      const avgRevenuePerUnit = totalUnitsSold > 0 ? totalRevenue / totalUnitsSold : 0
       const projectedRevenue = product.current_stock * avgRevenuePerUnit
-
-      console.log(`Product ${product.sku} calculation:`, {
-        totalUnitsSold,
-        totalRevenue,
-        avgRevenuePerUnit,
-        currentStock: product.current_stock,
-        projectedRevenue
-      })
 
       return {
         sku: product.sku,
         name: product.name,
         variant: product.variant,
         current_stock: product.current_stock,
-        total_units_sold: totalUnitsSold,
+        total_units_sold: stats.totalUnitsSold,
         avg_revenue_per_unit: avgRevenuePerUnit,
         projected_revenue: projectedRevenue,
       }
-    })
-
-    const productsProjection = await Promise.all(projectionsPromises)
-
-    console.log("Projections calculated:", {
-      totalProducts: productsProjection.length,
-      withRevenue: productsProjection.filter(p => p.projected_revenue > 0).length
     })
 
     // Calculate total
@@ -229,8 +202,6 @@ export async function getProjectedRevenue() {
       (sum, p) => sum + p.projected_revenue,
       0
     )
-
-    console.log("Total projected revenue:", totalProjectedRevenue)
 
     // Sort by projected revenue descending
     productsProjection.sort((a, b) => b.projected_revenue - a.projected_revenue)
@@ -247,3 +218,8 @@ export async function getProjectedRevenue() {
     }
   }
 }
+
+// Cached per request (deduplicates multiple calls in same render)
+export const getProjectedRevenue = cache(async () => {
+  return _getProjectedRevenueInternal()
+})

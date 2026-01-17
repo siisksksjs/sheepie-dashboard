@@ -25,8 +25,30 @@ export default async function DashboardPage() {
     (returnSummary.bySku || []).map((item: any) => [item.sku, item.units])
   )
 
-  // Get low stock items (regular products)
-  const lowStockItems = stockData.filter(item => item.is_low_stock && item.status === 'active' && !item.is_bundle)
+  // Build dynamic reorder points from sales velocity (use max for safety)
+  const dynamicReorderPoints = new Map<string, { min: number; max: number }>(
+    reorderRecommendations.recommendations.map((rec: any) => [
+      rec.sku,
+      { min: rec.reorderMin, max: rec.reorderMax }
+    ])
+  )
+
+  // Get low stock items based on dynamic reorder points from Restock Guidance
+  const lowStockItems = stockData
+    .filter(item => item.status === 'active' && !item.is_bundle)
+    .filter(item => {
+      const dynamicPoint = dynamicReorderPoints.get(item.sku)
+      if (dynamicPoint) {
+        // Use dynamic reorder point (max) based on sales velocity
+        return item.current_stock <= dynamicPoint.max
+      }
+      // Fall back to static reorder_point for products not in guidance
+      return item.is_low_stock
+    })
+    .map(item => ({
+      ...item,
+      dynamic_reorder_point: dynamicReorderPoints.get(item.sku)
+    }))
 
   // Get low stock bundles
   const lowStockBundles = bundles.filter(b => b.is_low_stock)
@@ -60,14 +82,14 @@ export default async function DashboardPage() {
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Low Stock Items
             </CardTitle>
-            <AlertTriangle className={`h-4 w-4 ${stats.lowStockItems > 0 ? 'text-warning' : 'text-muted-foreground'}`} />
+            <AlertTriangle className={`h-4 w-4 ${lowStockItems.length > 0 ? 'text-warning' : 'text-muted-foreground'}`} />
           </CardHeader>
           <CardContent>
-            <div className={`text-3xl font-bold ${stats.lowStockItems > 0 ? 'text-warning' : ''}`}>
-              {stats.lowStockItems}
+            <div className={`text-3xl font-bold ${lowStockItems.length > 0 ? 'text-warning' : ''}`}>
+              {lowStockItems.length}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              Below reorder point
+              Based on sales velocity
             </p>
           </CardContent>
         </Card>
@@ -136,10 +158,9 @@ export default async function DashboardPage() {
 
           {projectedRevenue.products_projection.length > 0 && (
             <div>
-              <h4 className="text-sm font-semibold mb-3 text-muted-foreground">Top Products by Projected Revenue</h4>
+              <h4 className="text-sm font-semibold mb-3 text-muted-foreground">Products by Projected Revenue</h4>
               <div className="space-y-3">
-                {projectedRevenue.products_projection.slice(0, 3).map((product) => (
-                  product.projected_revenue > 0 && (
+                {projectedRevenue.products_projection.filter(p => p.current_stock > 0).map((product) => (
                     <div key={product.sku} className="flex items-center justify-between p-3 bg-card rounded-lg border">
                       <div className="flex-1">
                         <div className="font-medium">{product.name}</div>
@@ -171,7 +192,6 @@ export default async function DashboardPage() {
                         </div>
                       </div>
                     </div>
-                  )
                 ))}
               </div>
             </div>
@@ -230,7 +250,7 @@ export default async function DashboardPage() {
                   <CardTitle>Low Stock Alert - Products</CardTitle>
                 </div>
                 <CardDescription>
-                  The following products are at or below their reorder point
+                  Based on sales velocity from Restock Guidance
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -241,11 +261,10 @@ export default async function DashboardPage() {
                       <TableHead>Product</TableHead>
                       <TableHead className="text-right">Current Stock</TableHead>
                       <TableHead className="text-right">Reorder Point</TableHead>
-                      <TableHead className="text-right">Cost/Unit</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {lowStockItems.map((item) => (
+                    {lowStockItems.map((item: any) => (
                       <TableRow key={item.id}>
                         <TableCell className="font-mono text-sm">{item.sku}</TableCell>
                         <TableCell>
@@ -260,10 +279,9 @@ export default async function DashboardPage() {
                           </span>
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground">
-                          {item.reorder_point}
-                        </TableCell>
-                        <TableCell className="text-right text-muted-foreground">
-                          {formatCurrency(item.cost_per_unit)}
+                          {item.dynamic_reorder_point
+                            ? `${item.dynamic_reorder_point.min}-${item.dynamic_reorder_point.max}`
+                            : item.reorder_point}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -332,7 +350,7 @@ export default async function DashboardPage() {
         <CardHeader>
           <CardTitle>Stock Overview</CardTitle>
           <CardDescription>
-            Current inventory levels across all products
+            Current inventory levels (bundles calculated from components)
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -352,7 +370,7 @@ export default async function DashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {stockData.map((item) => (
+                {stockData.filter(item => !item.is_bundle).map((item) => (
                   <TableRow key={item.id}>
                     <TableCell className="font-mono text-sm">{item.sku}</TableCell>
                     <TableCell>
@@ -381,6 +399,27 @@ export default async function DashboardPage() {
                       ) : (
                         <Badge variant="outline">Discontinued</Badge>
                       )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {/* Bundles with calculated availability */}
+                {bundles.map((bundle) => (
+                  <TableRow key={bundle.id} className="bg-muted/30">
+                    <TableCell className="font-mono text-sm">{bundle.sku}</TableCell>
+                    <TableCell>
+                      <div className="font-medium">{bundle.name}</div>
+                      <div className="text-xs text-muted-foreground">Bundle ({bundle.compositions?.length || 0} components)</div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <span className={bundle.is_low_stock ? "font-semibold text-warning" : "text-muted-foreground"}>
+                        {bundle.available_stock}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground">
+                      {bundle.reorder_point}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">Bundle</Badge>
                     </TableCell>
                   </TableRow>
                 ))}

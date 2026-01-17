@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
+import { cache } from "react"
 import type { BundleComposition } from "@/lib/types/database.types"
 
 export async function getBundleCompositions(bundleSku?: string) {
@@ -113,9 +114,9 @@ export async function getBundleAvailability(bundleSku: string): Promise<number> 
 }
 
 /**
- * Get all bundles with their availability
+ * Get all bundles with their availability (OPTIMIZED - batched queries)
  */
-export async function getAllBundlesWithAvailability() {
+async function _getAllBundlesWithAvailabilityInternal() {
   const supabase = await createClient()
 
   // Get all bundle products
@@ -129,20 +130,55 @@ export async function getAllBundlesWithAvailability() {
     return []
   }
 
-  // Calculate availability for each bundle
-  const bundlesWithAvailability = await Promise.all(
-    bundles.map(async (bundle) => {
-      const availability = await getBundleAvailability(bundle.sku)
-      const compositions = await getBundleCompositions(bundle.sku)
+  // OPTIMIZED: Fetch ALL compositions in ONE query
+  const bundleSkus = bundles.map(b => b.sku)
+  const { data: allCompositions } = await supabase
+    .from("bundle_compositions")
+    .select("*")
+    .in("bundle_sku", bundleSkus)
 
-      return {
-        ...bundle,
-        available_stock: availability,
-        is_low_stock: availability <= bundle.reorder_point,
-        compositions,
-      }
-    })
-  )
+  // OPTIMIZED: Get ALL component SKUs and fetch stock in ONE query
+  const allComponentSkus = [...new Set((allCompositions || []).map(c => c.component_sku))]
+  const { data: allStockData } = await supabase
+    .from("stock_on_hand")
+    .select("sku, current_stock")
+    .in("sku", allComponentSkus)
+
+  // Build lookup maps
+  const stockMap = new Map((allStockData || []).map(s => [s.sku, s.current_stock]))
+  const compositionsMap = new Map<string, BundleComposition[]>()
+  for (const comp of allCompositions || []) {
+    const existing = compositionsMap.get(comp.bundle_sku) || []
+    existing.push(comp)
+    compositionsMap.set(comp.bundle_sku, existing)
+  }
+
+  // Calculate availability for each bundle using the maps
+  const bundlesWithAvailability = bundles.map((bundle) => {
+    const compositions = compositionsMap.get(bundle.sku) || []
+
+    // Calculate min(component_stock / required_qty)
+    let minAvailable = Infinity
+    for (const comp of compositions) {
+      const componentStock = stockMap.get(comp.component_sku) || 0
+      const availableBundles = Math.floor(componentStock / comp.quantity)
+      minAvailable = Math.min(minAvailable, availableBundles)
+    }
+
+    const availability = compositions.length === 0 ? 0 : (minAvailable === Infinity ? 0 : minAvailable)
+
+    return {
+      ...bundle,
+      available_stock: availability,
+      is_low_stock: availability <= bundle.reorder_point,
+      compositions,
+    }
+  })
 
   return bundlesWithAvailability
 }
+
+// Cached per request (deduplicates multiple calls in same render)
+export const getAllBundlesWithAvailability = cache(async () => {
+  return _getAllBundlesWithAvailabilityInternal()
+})
