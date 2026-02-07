@@ -98,7 +98,8 @@ export default function EditProductPage({ params }: { params: Promise<{ sku: str
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
+            <input type="hidden" name="reorder_point" defaultValue={product.reorder_point} />
+
             <div className="space-y-2">
               <Label>SKU (Immutable)</Label>
               <Input
@@ -133,7 +134,7 @@ export default function EditProductPage({ params }: { params: Promise<{ sku: str
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="cost_per_unit">
                   Cost per Unit (IDR) <span className="text-destructive">*</span>
@@ -145,20 +146,6 @@ export default function EditProductPage({ params }: { params: Promise<{ sku: str
                   step="0.01"
                   min="0"
                   defaultValue={product.cost_per_unit}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="reorder_point">
-                  Reorder Point <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="reorder_point"
-                  name="reorder_point"
-                  type="number"
-                  min="0"
-                  defaultValue={product.reorder_point}
                   required
                 />
               </div>

@@ -1,6 +1,7 @@
 import { getProducts } from "@/lib/actions/products"
 import { getStockOnHand } from "@/lib/actions/inventory"
 import { getAllBundlesWithAvailability } from "@/lib/actions/bundles"
+import { getReorderRecommendations } from "@/lib/actions/orders"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -12,12 +13,21 @@ export default async function ProductsPage() {
   const products = await getProducts()
   const stockData = await getStockOnHand()
   const bundles = await getAllBundlesWithAvailability()
+  const reorderRecommendations = await getReorderRecommendations()
 
   // Create a map for quick stock lookup
   const stockMap = new Map(stockData.map(s => [s.sku, s]))
 
   // Create bundle availability map
   const bundleMap = new Map(bundles.map(b => [b.sku, b]))
+
+  // Build dynamic reorder points from sales velocity
+  const dynamicReorderPoints = new Map<string, { min: number; max: number }>(
+    reorderRecommendations.recommendations.map((rec: any) => [
+      rec.sku,
+      { min: rec.reorderMin, max: rec.reorderMax }
+    ])
+  )
 
   return (
     <div>
@@ -64,6 +74,8 @@ export default async function ProductsPage() {
                 ? (bundle?.is_low_stock || false)
                 : (stock?.is_low_stock || false)
 
+              const dynamicPoint = dynamicReorderPoints.get(product.sku)
+
               return (
                 <div key={product.id} className="border rounded-lg p-4 bg-card space-y-3">
                   <div className="flex items-start justify-between">
@@ -95,7 +107,11 @@ export default async function ProductsPage() {
                     </div>
                     <div>
                       <span className="text-muted-foreground">Reorder: </span>
-                      <span>{product.reorder_point}</span>
+                      <span>
+                        {dynamicPoint
+                          ? `${dynamicPoint.min}-${dynamicPoint.max}`
+                          : product.reorder_point}
+                      </span>
                     </div>
                     <div className="col-span-2">
                       <span className="text-muted-foreground">Stock: </span>
@@ -158,6 +174,8 @@ export default async function ProductsPage() {
                     ? (bundle?.is_low_stock || false)
                     : (stock?.is_low_stock || false)
 
+                  const dynamicPoint = dynamicReorderPoints.get(product.sku)
+
                   return (
                     <TableRow key={product.id}>
                       <TableCell className="font-mono font-medium">
@@ -183,7 +201,9 @@ export default async function ProductsPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {product.reorder_point}
+                        {dynamicPoint
+                          ? `${dynamicPoint.min}-${dynamicPoint.max}`
+                          : product.reorder_point}
                       </TableCell>
                       <TableCell>
                         {product.is_bundle ? (

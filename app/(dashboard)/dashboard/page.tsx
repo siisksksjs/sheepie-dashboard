@@ -365,7 +365,6 @@ export default async function DashboardPage() {
                   <TableHead>SKU</TableHead>
                   <TableHead>Product</TableHead>
                   <TableHead className="text-right">Current Stock</TableHead>
-                  <TableHead className="text-right">Reorder Point</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
@@ -390,9 +389,6 @@ export default async function DashboardPage() {
                         {item.current_stock}
                       </span>
                     </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {item.reorder_point}
-                    </TableCell>
                     <TableCell>
                       {item.status === 'active' ? (
                         <Badge variant="success">Active</Badge>
@@ -414,9 +410,6 @@ export default async function DashboardPage() {
                       <span className={bundle.is_low_stock ? "font-semibold text-warning" : "text-muted-foreground"}>
                         {bundle.available_stock}
                       </span>
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {bundle.reorder_point}
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">Bundle</Badge>

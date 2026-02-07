@@ -60,7 +60,8 @@ export default function NewProductPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
+            <input type="hidden" name="reorder_point" value="0" />
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="sku">
@@ -118,7 +119,7 @@ export default function NewProductPage() {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="cost_per_unit">
                   Cost per Unit (IDR) <span className="text-destructive">*</span>
@@ -132,24 +133,6 @@ export default function NewProductPage() {
                   placeholder="150000"
                   required
                 />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="reorder_point">
-                  Reorder Point <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="reorder_point"
-                  name="reorder_point"
-                  type="number"
-                  min="0"
-                  placeholder="10"
-                  defaultValue="0"
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  Alert when stock falls below this
-                </p>
               </div>
             </div>
 
