@@ -98,6 +98,7 @@ export default function EditProductPage({ params }: { params: Promise<{ sku: str
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
             <input type="hidden" name="reorder_point" defaultValue={product.reorder_point} />
 
             <div className="space-y-2">

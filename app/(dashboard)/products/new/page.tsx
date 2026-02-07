@@ -60,6 +60,7 @@ export default function NewProductPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
             <input type="hidden" name="reorder_point" value="0" />
 
             <div className="grid grid-cols-2 gap-4">
