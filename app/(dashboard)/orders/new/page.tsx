@@ -27,7 +27,7 @@ const DEFAULT_PRICES: Record<string, number> = {
   'Cervi-001': 870000,       // CerviCloud Pillow
   'Cervi-002': 198000,       // Cervi Case
   'Lumi-001': 175000,        // LumiCloud Eye Mask
-  'Calmi-001': 49000,        // CalmiCloud Ear Plug
+  'Calmi-001': 75000,        // CalmiCloud Ear Plug
   'Bundle-Cervi': 870000,    // CerviCloud + CalmiCloud bundle
 }
 
