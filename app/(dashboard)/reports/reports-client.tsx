@@ -99,6 +99,20 @@ export function ReportsClient({
   const grossUnitsSold = totalUnitsSold + returnedUnits
   const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
   const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0
+  const trendData = (selectedMonth && monthlyReport?.byDay?.length > 0)
+    ? monthlyReport.byDay
+    : (monthlyReport?.byMonth || [])
+  const isDailyTrend = selectedMonth && monthlyReport?.byDay?.length > 0
+  const trendXAxisTickFormatter = (value: string) => {
+    if (!isDailyTrend) return value
+    return value?.split("-")?.[2] || value
+  }
+  const trendTooltipLabelFormatter = (label: string) => {
+    if (!isDailyTrend) return label
+    const parsed = new Date(`${label}T00:00:00`)
+    if (Number.isNaN(parsed.getTime())) return label
+    return parsed.toLocaleDateString("default", { month: "short", day: "numeric" })
+  }
 
   return (
     <div className="space-y-8">
@@ -255,21 +269,24 @@ export function ReportsClient({
 
         {/* Trends Tab */}
         <TabsContent value="trends" className="space-y-4">
-          {monthlyReport?.byMonth && monthlyReport.byMonth.length > 0 ? (
+          {trendData.length > 0 ? (
             <>
               <Card>
                 <CardHeader>
                   <CardTitle>Revenue & Profit Trends</CardTitle>
-                  <CardDescription>Monthly performance over time</CardDescription>
+                  <CardDescription>
+                    {isDailyTrend ? "Daily performance through selected month" : "Monthly performance over time"}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <ResponsiveContainer width="100%" height={350}>
-                    <LineChart data={monthlyReport.byMonth}>
+                    <LineChart data={trendData}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
+                      <XAxis dataKey="month" tickFormatter={trendXAxisTickFormatter} />
                       <YAxis />
                       <Tooltip
                         formatter={(value) => formatCurrency(Number(value))}
+                        labelFormatter={trendTooltipLabelFormatter}
                         contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
                       />
                       <Legend />
@@ -284,15 +301,18 @@ export function ReportsClient({
               <Card>
                 <CardHeader>
                   <CardTitle>Units Sold Trend</CardTitle>
-                  <CardDescription>Product volumes over time</CardDescription>
+                  <CardDescription>
+                    {isDailyTrend ? "Daily product volume through selected month" : "Product volumes over time"}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={monthlyReport.byMonth}>
+                    <BarChart data={trendData}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" />
+                      <XAxis dataKey="month" tickFormatter={trendXAxisTickFormatter} />
                       <YAxis />
                       <Tooltip
+                        labelFormatter={trendTooltipLabelFormatter}
                         contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
                       />
                       <Legend />

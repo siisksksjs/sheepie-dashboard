@@ -664,7 +664,7 @@ async function _getMonthlySalesReportInternal(year?: number, month?: number) {
 
   const { data: orders } = await query
 
-  if (!orders) return { byMonth: [], byProduct: [] }
+  if (!orders) return { byMonth: [], byDay: [], byProduct: [] }
 
   // Get products for cost lookup
   const { data: products } = await supabase.from("products").select("*")
@@ -672,6 +672,16 @@ async function _getMonthlySalesReportInternal(year?: number, month?: number) {
 
   // Group by month
   const monthlySales = new Map<string, {
+    month: string
+    orders: number
+    units_sold: number
+    revenue: number
+    cost: number
+    profit: number
+  }>()
+
+  // Group by day for month-specific trends
+  const dailySales = new Map<string, {
     month: string
     orders: number
     units_sold: number
@@ -693,6 +703,7 @@ async function _getMonthlySalesReportInternal(year?: number, month?: number) {
 
   for (const order of orders) {
     const orderMonth = order.order_date.substring(0, 7) // "YYYY-MM"
+    const orderDay = order.order_date.substring(0, 10) // "YYYY-MM-DD"
     const lineItems = (order as any).order_line_items || []
 
     // Calculate total order value for proportional fee allocation
@@ -703,6 +714,15 @@ async function _getMonthlySalesReportInternal(year?: number, month?: number) {
     // Monthly totals
     const existing = monthlySales.get(orderMonth) || {
       month: orderMonth,
+      orders: 0,
+      units_sold: 0,
+      revenue: 0,
+      cost: 0,
+      profit: 0,
+    }
+
+    const dailyExisting = dailySales.get(orderDay) || {
+      month: orderDay,
       orders: 0,
       units_sold: 0,
       revenue: 0,
@@ -764,10 +784,53 @@ async function _getMonthlySalesReportInternal(year?: number, month?: number) {
       cost: existing.cost + orderCost,
       profit: existing.profit + (orderRevenue - orderCost),
     })
+
+    if (year && month) {
+      dailySales.set(orderDay, {
+        month: orderDay,
+        orders: dailyExisting.orders + 1,
+        units_sold: dailyExisting.units_sold + orderUnits,
+        revenue: dailyExisting.revenue + orderRevenue,
+        cost: dailyExisting.cost + orderCost,
+        profit: dailyExisting.profit + (orderRevenue - orderCost),
+      })
+    }
+  }
+
+  let byDay: {
+    month: string
+    orders: number
+    units_sold: number
+    revenue: number
+    cost: number
+    profit: number
+  }[] = []
+
+  if (year && month && dailySales.size > 0) {
+    const daysInMonth = new Date(year, month, 0).getDate()
+    const monthPrefix = `${year}-${month.toString().padStart(2, "0")}`
+
+    byDay = Array.from({ length: daysInMonth }, (_, idx) => {
+      const day = (idx + 1).toString().padStart(2, "0")
+      const dateKey = `${monthPrefix}-${day}`
+      const dayData = dailySales.get(dateKey)
+
+      return (
+        dayData || {
+          month: dateKey,
+          orders: 0,
+          units_sold: 0,
+          revenue: 0,
+          cost: 0,
+          profit: 0,
+        }
+      )
+    })
   }
 
   return {
     byMonth: Array.from(monthlySales.values()).sort((a, b) => a.month.localeCompare(b.month)),
+    byDay,
     byProduct: Array.from(productSales.values()).sort((a, b) => b.units_sold - a.units_sold),
   }
 }

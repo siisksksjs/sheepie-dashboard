@@ -110,7 +110,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const netProfit = grossProfit - (order.channel_fees || 0)
 
   return (
-    <div>
+    <div className="space-y-4 pb-6">
       <Link href="/orders">
         <Button variant="ghost" className="mb-4">
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -118,25 +118,25 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         </Button>
       </Link>
 
-      <div className="grid gap-6 max-w-5xl">
+      <div className="grid gap-4 md:gap-6 max-w-5xl">
         {/* Order Header */}
         <Card>
           <CardHeader>
-            <div className="flex items-start justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <CardTitle>Order {order.order_id}</CardTitle>
                 <CardDescription>
                   Created on {formatDate(order.order_date)}
                 </CardDescription>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 self-start">
                 <Badge variant={statusBadges[order.status]} className="text-sm">
                   {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
                 </Badge>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-4">
+          <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <p className="text-sm text-muted-foreground mb-1">Sales Channel</p>
               <p className="font-medium">{channelLabels[order.channel]}</p>
@@ -153,7 +153,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </div>
             <div>
               <p className="text-sm text-muted-foreground mb-1">Notes</p>
-              <p className="font-medium">{order.notes || "-"}</p>
+              <p className="font-medium break-words">{order.notes || "-"}</p>
             </div>
           </CardContent>
         </Card>
@@ -167,7 +167,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex items-end gap-4">
+            <div className="flex flex-col items-end gap-4 sm:flex-row">
               <div className="flex-1">
                 <Select
                   defaultValue={order.status}
@@ -212,38 +212,73 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             <CardTitle>Order Items</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Product</TableHead>
-                  <TableHead className="text-right">Quantity</TableHead>
-                  <TableHead className="text-right">Unit Price</TableHead>
-                  <TableHead className="text-right">Subtotal</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {lineItems.map((item) => {
-                  const product = productMap.get(item.sku)
-                  return (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-mono text-sm">{item.sku}</TableCell>
-                      <TableCell>
-                        <div className="font-medium">{product?.name || "Unknown"}</div>
-                        {product?.variant && (
-                          <div className="text-sm text-muted-foreground">{product.variant}</div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">{item.quantity}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(item.selling_price)}</TableCell>
-                      <TableCell className="text-right font-medium">
-                        {formatCurrency(item.quantity * item.selling_price)}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
+            {/* Mobile card view */}
+            <div className="md:hidden space-y-3">
+              {lineItems.map((item) => {
+                const product = productMap.get(item.sku)
+                return (
+                  <div key={item.id} className="rounded-lg border p-3 space-y-2">
+                    <div>
+                      <p className="font-medium">{product?.name || "Unknown"}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{item.sku}</p>
+                      {product?.variant && (
+                        <p className="text-xs text-muted-foreground">{product.variant}</p>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-sm">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Qty</p>
+                        <p className="font-medium">{item.quantity}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Unit</p>
+                        <p className="font-medium">{formatCurrency(item.selling_price)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-muted-foreground">Subtotal</p>
+                        <p className="font-medium">{formatCurrency(item.quantity * item.selling_price)}</p>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Desktop table view */}
+            <div className="hidden md:block overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>SKU</TableHead>
+                    <TableHead>Product</TableHead>
+                    <TableHead className="text-right">Quantity</TableHead>
+                    <TableHead className="text-right">Unit Price</TableHead>
+                    <TableHead className="text-right">Subtotal</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lineItems.map((item) => {
+                    const product = productMap.get(item.sku)
+                    return (
+                      <TableRow key={item.id}>
+                        <TableCell className="font-mono text-sm">{item.sku}</TableCell>
+                        <TableCell>
+                          <div className="font-medium">{product?.name || "Unknown"}</div>
+                          {product?.variant && (
+                            <div className="text-sm text-muted-foreground">{product.variant}</div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">{item.quantity}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(item.selling_price)}</TableCell>
+                        <TableCell className="text-right font-medium">
+                          {formatCurrency(item.quantity * item.selling_price)}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
 
             <div className="mt-4 space-y-2 border-t pt-4">
               <div className="flex justify-between text-sm">

@@ -22,13 +22,74 @@ type LineItem = {
   selling_price: number
 }
 
-// Default selling prices for each product
-const DEFAULT_PRICES: Record<string, number> = {
+// Base default selling prices (Tokopedia/TikTok)
+const BASE_DEFAULT_PRICES: Record<string, number> = {
   'Cervi-001': 870000,       // CerviCloud Pillow
   'Cervi-002': 198000,       // Cervi Case
   'Lumi-001': 175000,        // LumiCloud Eye Mask
   'Calmi-001': 75000,        // CalmiCloud Ear Plug
   'Bundle-Cervi': 870000,    // CerviCloud + CalmiCloud bundle
+}
+
+// Channel-specific overrides
+const SHOPEE_LIKE_DEFAULT_PRICES: Record<string, number> = {
+  'Cervi-001': 880000,
+  'Lumi-001': 180000,
+  'Calmi-001': 80000,
+  'Bundle-Cervi': 880000,
+}
+
+const CHANNEL_PRICE_OVERRIDES: Partial<Record<Channel, Record<string, number>>> = {
+  shopee: SHOPEE_LIKE_DEFAULT_PRICES,
+  offline: SHOPEE_LIKE_DEFAULT_PRICES,
+}
+
+function getDefaultPriceForChannel(sku: string, channel?: Channel | ""): number {
+  const channelOverride = channel ? CHANNEL_PRICE_OVERRIDES[channel]?.[sku] : undefined
+  if (typeof channelOverride === "number") return channelOverride
+  return BASE_DEFAULT_PRICES[sku] || 0
+}
+
+function allocatePricesByDefaultRatio(
+  items: LineItem[],
+  channel: Channel,
+  grossRevenue: number
+): LineItem[] {
+  const ratioBaseByItem = items.map((item) => {
+    const defaultPrice = getDefaultPriceForChannel(item.sku, channel)
+    return defaultPrice * item.quantity
+  })
+
+  const totalBase = ratioBaseByItem.reduce((sum, value) => sum + value, 0)
+  if (totalBase <= 0) return items
+
+  const grossRounded = Math.round(grossRevenue)
+  const rawAllocations = ratioBaseByItem.map((base) => (base / totalBase) * grossRounded)
+  const allocatedTotals = rawAllocations.map((value) => Math.floor(value))
+
+  let remainder = grossRounded - allocatedTotals.reduce((sum, value) => sum + value, 0)
+  if (remainder > 0) {
+    const byLargestFraction = rawAllocations
+      .map((value, idx) => ({ idx, fraction: value - allocatedTotals[idx] }))
+      .sort((a, b) => b.fraction - a.fraction)
+
+    for (let i = 0; i < remainder; i += 1) {
+      const pick = byLargestFraction[i % byLargestFraction.length]
+      allocatedTotals[pick.idx] += 1
+    }
+  }
+
+  return items.map((item, idx) => {
+    const allocatedTotal = allocatedTotals[idx]
+    const perUnit = item.quantity > 0
+      ? Number((allocatedTotal / item.quantity).toFixed(2))
+      : item.selling_price
+
+    return {
+      ...item,
+      selling_price: perUnit,
+    }
+  })
 }
 
 export default function NewOrderPage() {
@@ -41,6 +102,7 @@ export default function NewOrderPage() {
   const [selectedChannel, setSelectedChannel] = useState<Channel | "">("")
   const [orderDate, setOrderDate] = useState<string>(new Date().toISOString().split('T')[0])
   const [orderId, setOrderId] = useState<string>("")
+  const [actualGrossRevenue, setActualGrossRevenue] = useState<string>("")
 
   useEffect(() => {
     loadProducts()
@@ -52,6 +114,20 @@ export default function NewOrderPage() {
       generateOrderId(selectedChannel, orderDate)
     }
   }, [selectedChannel, orderDate])
+
+  // Re-apply default prices when channel changes
+  useEffect(() => {
+    if (!selectedChannel) return
+
+    setLineItems((prev) =>
+      prev.map((item) => {
+        if (!item.sku) return item
+        const defaultPrice = getDefaultPriceForChannel(item.sku, selectedChannel)
+        if (!defaultPrice) return item
+        return { ...item, selling_price: defaultPrice }
+      })
+    )
+  }, [selectedChannel])
 
   const loadProducts = async () => {
     const data = await getProducts()
@@ -84,8 +160,8 @@ export default function NewOrderPage() {
           const updatedItem = { ...item, [field]: value }
 
           // Auto-populate selling price when SKU is selected
-          if (field === 'sku' && value && DEFAULT_PRICES[value]) {
-            updatedItem.selling_price = DEFAULT_PRICES[value]
+          if (field === 'sku' && value) {
+            updatedItem.selling_price = getDefaultPriceForChannel(value, selectedChannel)
           }
 
           return updatedItem
@@ -97,6 +173,36 @@ export default function NewOrderPage() {
 
   const removeLineItem = (id: string) => {
     setLineItems(lineItems.filter((item) => item.id !== id))
+  }
+
+  const applyGrossRevenueAllocation = () => {
+    if (!selectedChannel || selectedChannel === "offline") return
+
+    const grossRevenue = parseFloat(actualGrossRevenue)
+    if (!Number.isFinite(grossRevenue) || grossRevenue <= 0) {
+      setError("Please enter a valid Actual Gross Revenue amount")
+      return
+    }
+
+    if (lineItems.length < 2) {
+      setError("Add at least 2 order items to use ratio allocation")
+      return
+    }
+
+    if (lineItems.some((item) => !item.sku || item.quantity <= 0)) {
+      setError("Please select SKU and quantity for all order items before allocating")
+      return
+    }
+
+    const uniqueSkuCount = new Set(lineItems.map((item) => item.sku)).size
+    if (uniqueSkuCount < 2) {
+      setError("Ratio allocation requires at least 2 different products")
+      return
+    }
+
+    const reallocated = allocatePricesByDefaultRatio(lineItems, selectedChannel, grossRevenue)
+    setLineItems(reallocated)
+    setError(null)
   }
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -147,6 +253,12 @@ export default function NewOrderPage() {
   const totalAmount = lineItems.reduce(
     (sum, item) => sum + item.quantity * item.selling_price,
     0
+  )
+  const uniqueSkuCount = new Set(lineItems.filter((item) => item.sku).map((item) => item.sku)).size
+  const canUseGrossRevenueAllocation = Boolean(
+    selectedChannel &&
+    selectedChannel !== "offline" &&
+    uniqueSkuCount >= 2
   )
 
   if (loading) {
@@ -229,6 +341,9 @@ export default function NewOrderPage() {
                     <SelectItem value="offline">Offline</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Product prices auto-fill based on selected channel
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -283,6 +398,35 @@ export default function NewOrderPage() {
                   Add Product
                 </Button>
               </div>
+
+              {canUseGrossRevenueAllocation && (
+                <div className="mb-4 p-3 border rounded-lg bg-muted/30">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                    <div className="space-y-2 md:col-span-2">
+                      <Label htmlFor="actual_gross_revenue">Actual Gross Revenue (IDR)</Label>
+                      <Input
+                        id="actual_gross_revenue"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={actualGrossRevenue}
+                        onChange={(e) => setActualGrossRevenue(e.target.value)}
+                        placeholder="e.g. 1000000"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Enter settlement "Total Revenue", then apply ratio allocation to overwrite line item prices.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={applyGrossRevenueAllocation}
+                    >
+                      Apply Ratio Allocation
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {lineItems.length === 0 ? (
                 <div className="text-center py-8 border rounded-lg bg-muted/50">
