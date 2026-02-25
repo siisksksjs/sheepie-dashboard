@@ -1,6 +1,7 @@
 "use client"
 
-import { useRouter, useSearchParams } from "next/navigation"
+import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -8,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { formatCurrency } from "@/lib/utils"
 import { TrendingUp, DollarSign, Package, ShoppingBag, Target } from "lucide-react"
 import Link from "next/link"
@@ -51,12 +53,16 @@ const channelColors: Record<string, string> = {
   offline: '#8b5cf6',
 }
 
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+type HeatmapMetric = "units" | "orders" | "revenue"
+
 type Props = {
   initialOverview: any
   initialMonthly: any
   initialChannelProduct: any
   initialAdPerformance: any
   initialReturnSummary: any
+  initialCalendarDetails: any
   selectedYear: number
   selectedMonth: number | undefined
 }
@@ -67,11 +73,13 @@ export function ReportsClient({
   initialChannelProduct,
   initialAdPerformance,
   initialReturnSummary,
+  initialCalendarDetails,
   selectedYear,
   selectedMonth,
 }: Props) {
   const router = useRouter()
-  const searchParams = useSearchParams()
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null)
+  const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>("units")
 
   // Update URL when filters change (navigates to new page with server-side data fetch)
   const updateFilters = (year: number | undefined, month: number | undefined) => {
@@ -103,6 +111,44 @@ export function ReportsClient({
     ? monthlyReport.byDay
     : (monthlyReport?.byMonth || [])
   const isDailyTrend = selectedMonth && monthlyReport?.byDay?.length > 0
+  const selectedMonthKey = selectedMonth
+    ? `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`
+    : null
+  const byDay = monthlyReport?.byDay || []
+  const detailedByDate = initialCalendarDetails?.byDate || {}
+  const byDateMap = new Map<string, any>(
+    byDay.map((day: any) => [day.month, day])
+  )
+  const maxDayUnits = byDay.length > 0
+    ? Math.max(...byDay.map((day: any) => day.units_sold || 0))
+    : 0
+  const maxDayOrders = byDay.length > 0
+    ? Math.max(...byDay.map((day: any) => day.orders || 0))
+    : 0
+  const maxDayRevenue = byDay.length > 0
+    ? Math.max(...byDay.map((day: any) => day.revenue || 0))
+    : 0
+  const maxHeatmapValue = heatmapMetric === "units"
+    ? maxDayUnits
+    : heatmapMetric === "orders"
+      ? maxDayOrders
+      : maxDayRevenue
+  const calendarCells: Array<{ date: string; day: number } | null> = []
+
+  if (selectedMonth) {
+    const firstDayWeekIndex = new Date(selectedYear, selectedMonth - 1, 1).getDay()
+    const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate()
+
+    for (let i = 0; i < firstDayWeekIndex; i += 1) {
+      calendarCells.push(null)
+    }
+
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const isoDate = `${selectedYear}-${String(selectedMonth).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+      calendarCells.push({ date: isoDate, day })
+    }
+  }
+
   const trendXAxisTickFormatter = (value: string) => {
     if (!isDailyTrend) return value
     return value?.split("-")?.[2] || value
@@ -113,6 +159,9 @@ export function ReportsClient({
     if (Number.isNaN(parsed.getTime())) return label
     return parsed.toLocaleDateString("default", { month: "short", day: "numeric" })
   }
+  const selectedCalendarDetails = selectedCalendarDate ? detailedByDate[selectedCalendarDate] : null
+  const selectedCalendarItems = selectedCalendarDetails?.items || []
+  const selectedCalendarTotalRevenue = selectedCalendarItems.reduce((sum: number, item: any) => sum + item.revenue, 0)
 
   return (
     <div className="space-y-8">
@@ -269,6 +318,92 @@ export function ReportsClient({
 
         {/* Trends Tab */}
         <TabsContent value="trends" className="space-y-4">
+          {selectedMonth && selectedMonthKey && (
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <CardTitle>Daily Calendar View ({selectedMonthKey})</CardTitle>
+                    <CardDescription>
+                      Orders and units per day with heatmap intensity by selected metric
+                    </CardDescription>
+                  </div>
+                  <div className="w-full md:w-[220px]">
+                    <Label htmlFor="heatmap-metric">Heatmap Basis</Label>
+                    <Select value={heatmapMetric} onValueChange={(value) => setHeatmapMetric(value as HeatmapMetric)}>
+                      <SelectTrigger id="heatmap-metric">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="units">Units Sold</SelectItem>
+                        <SelectItem value="orders">Order Count</SelectItem>
+                        <SelectItem value="revenue">Revenue</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>Low</span>
+                  <div className="h-3 w-6 rounded border bg-[rgba(16,185,129,0.12)]" />
+                  <div className="h-3 w-6 rounded border bg-[rgba(16,185,129,0.3)]" />
+                  <div className="h-3 w-6 rounded border bg-[rgba(16,185,129,0.5)]" />
+                  <span>High</span>
+                </div>
+
+                <div className="grid grid-cols-7 gap-2">
+                  {WEEKDAY_LABELS.map((label) => (
+                    <div key={label} className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                      {label}
+                    </div>
+                  ))}
+
+                  {calendarCells.map((cell, idx) => {
+                    if (!cell) {
+                      return <div key={`empty-${idx}`} className="min-h-[84px] rounded-md border border-dashed border-muted/40" />
+                    }
+
+                    const dayData = byDateMap.get(cell.date)
+                    const orders = dayData?.orders || 0
+                    const units = dayData?.units_sold || 0
+                    const revenue = dayData?.revenue || 0
+                    const heatmapValue = heatmapMetric === "units"
+                      ? units
+                      : heatmapMetric === "orders"
+                        ? orders
+                        : revenue
+                    const heatmapIntensity = maxHeatmapValue > 0 ? heatmapValue / maxHeatmapValue : 0
+                    const backgroundColor = heatmapIntensity > 0
+                      ? `rgba(16,185,129,${(0.12 + heatmapIntensity * 0.42).toFixed(3)})`
+                      : undefined
+
+                    return (
+                      <div
+                        key={cell.date}
+                        className="min-h-[84px] cursor-pointer rounded-md border p-2 transition hover:border-primary/60 hover:shadow-sm"
+                        style={backgroundColor ? { backgroundColor } : undefined}
+                        title={`${cell.date}: ${orders} orders, ${units} units, ${formatCurrency(revenue)}`}
+                        onClick={() => setSelectedCalendarDate(cell.date)}
+                      >
+                        <div className="text-xs font-semibold">{cell.day}</div>
+                        <div className="mt-2 space-y-1 text-[11px] leading-tight text-muted-foreground">
+                          <div>{orders} orders</div>
+                          <div>{units} units</div>
+                          <div>{formatCurrency(revenue)}</div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="mt-3 text-xs text-muted-foreground">
+                  Peak day in selected month: {maxDayOrders} orders / {maxDayUnits} units / {formatCurrency(maxDayRevenue)}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {trendData.length > 0 ? (
             <>
               <Card>
@@ -1117,6 +1252,46 @@ export function ReportsClient({
           )}
         </TabsContent>
       </Tabs>
+
+      <Dialog open={Boolean(selectedCalendarDate)} onOpenChange={(open) => !open && setSelectedCalendarDate(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Daily Item Details</DialogTitle>
+            <DialogDescription>
+              {selectedCalendarDate || "-"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="text-sm text-muted-foreground">
+            Total Revenue: <span className="font-semibold text-foreground">{formatCurrency(selectedCalendarTotalRevenue)}</span>
+          </div>
+
+          {selectedCalendarItems.length === 0 ? (
+            <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+              No sold items for this day.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Item Sold</TableHead>
+                  <TableHead className="text-right">Quantity</TableHead>
+                  <TableHead className="text-right">Revenue</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {selectedCalendarItems.map((item: any) => (
+                  <TableRow key={item.sku}>
+                    <TableCell className="font-medium">{item.name}</TableCell>
+                    <TableCell className="text-right">{item.quantity}</TableCell>
+                    <TableCell className="text-right font-semibold">{formatCurrency(item.revenue)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

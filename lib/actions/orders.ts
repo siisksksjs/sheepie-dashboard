@@ -360,6 +360,137 @@ export async function getOrderStats() {
   }
 }
 
+export async function getDailySalesSnippet(date?: string) {
+  const supabase = await createClient()
+  const targetDate = date || new Date().toISOString().split("T")[0]
+
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("channel, channel_fees, order_line_items!inner(sku, quantity, selling_price)")
+    .in("status", ["paid", "shipped"])
+    .eq("order_date", targetDate)
+
+  if (!orders || orders.length === 0) {
+    return {
+      date: targetDate,
+      totalOrders: 0,
+      totalUnits: 0,
+      totalRevenue: 0,
+      items: [] as {
+        sku: string
+        productName: string
+        platform: Channel
+        quantity: number
+        revenue: number
+      }[],
+    }
+  }
+
+  const { data: products } = await supabase
+    .from("products")
+    .select("sku, name, variant")
+
+  const productMap = new Map(
+    (products || []).map((product) => [
+      product.sku,
+      product.variant ? `${product.name} - ${product.variant}` : product.name,
+    ])
+  )
+
+  const byProductAndChannel = new Map<string, {
+    sku: string
+    productName: string
+    platform: Channel
+    quantity: number
+    revenue: number
+  }>()
+
+  let totalUnits = 0
+  let totalRevenue = 0
+
+  for (const order of orders as any[]) {
+    const lineItems = order.order_line_items || []
+    const totalOrderValue = lineItems.reduce(
+      (sum: number, item: any) => sum + ((item.selling_price || 0) * (item.quantity || 0)),
+      0
+    )
+
+    for (const item of lineItems) {
+      totalUnits += item.quantity
+      const itemGross = (item.selling_price || 0) * (item.quantity || 0)
+      const allocatedFee = totalOrderValue > 0
+        ? ((order.channel_fees || 0) * itemGross) / totalOrderValue
+        : 0
+      const itemRevenue = itemGross - allocatedFee
+      totalRevenue += itemRevenue
+      const key = `${item.sku}__${order.channel}`
+      const existing = byProductAndChannel.get(key)
+
+      if (existing) {
+        existing.quantity += item.quantity
+        existing.revenue += itemRevenue
+      } else {
+        byProductAndChannel.set(key, {
+          sku: item.sku,
+          productName: productMap.get(item.sku) || item.sku,
+          platform: order.channel as Channel,
+          quantity: item.quantity,
+          revenue: itemRevenue,
+        })
+      }
+    }
+  }
+
+  return {
+    date: targetDate,
+    totalOrders: orders.length,
+    totalUnits,
+    totalRevenue,
+    items: Array.from(byProductAndChannel.values()).sort((a, b) => b.revenue - a.revenue),
+  }
+}
+
+export async function getMonthlySalesByDay(month: string) {
+  const supabase = await createClient()
+
+  const monthPattern = /^\d{4}-\d{2}$/
+  if (!monthPattern.test(month)) {
+    return [] as { date: string; orders: number; units: number }[]
+  }
+
+  const [year, monthNumber] = month.split("-").map((value) => parseInt(value, 10))
+  const startDate = `${month}-01`
+  const endDate = new Date(year, monthNumber, 0).toISOString().split("T")[0]
+
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("order_date, order_line_items!inner(quantity)")
+    .in("status", ["paid", "shipped"])
+    .gte("order_date", startDate)
+    .lte("order_date", endDate)
+
+  if (!orders || orders.length === 0) {
+    return [] as { date: string; orders: number; units: number }[]
+  }
+
+  const byDate = new Map<string, { date: string; orders: number; units: number }>()
+
+  for (const order of orders as any[]) {
+    const date = order.order_date?.slice(0, 10)
+    if (!date) continue
+
+    const existing = byDate.get(date) || { date, orders: 0, units: 0 }
+    existing.orders += 1
+    existing.units += (order.order_line_items || []).reduce(
+      (sum: number, item: any) => sum + (item.quantity || 0),
+      0
+    )
+    byDate.set(date, existing)
+  }
+
+  return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date))
+}
+
 async function _getSalesReportInternal(year?: number, month?: number) {
   const supabase = await createClient()
 
@@ -838,6 +969,89 @@ async function _getMonthlySalesReportInternal(year?: number, month?: number) {
 // Cached per request
 export const getMonthlySalesReport = cache(async (year?: number, month?: number) => {
   return _getMonthlySalesReportInternal(year, month)
+})
+
+async function _getMonthlyCalendarDetailsInternal(year?: number, month?: number) {
+  if (!year || !month) {
+    return { byDate: {} as Record<string, { items: { sku: string; name: string; quantity: number; revenue: number }[] }> }
+  }
+
+  const supabase = await createClient()
+
+  const startDate = `${year}-${month.toString().padStart(2, "0")}-01`
+  const endDate = new Date(year, month, 0).toISOString().split("T")[0]
+
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("order_date, channel_fees, order_line_items!inner(sku, quantity, selling_price)")
+    .in("status", ["paid", "shipped"])
+    .gte("order_date", startDate)
+    .lte("order_date", endDate)
+
+  if (!orders || orders.length === 0) {
+    return { byDate: {} as Record<string, { items: { sku: string; name: string; quantity: number; revenue: number }[] }> }
+  }
+
+  const { data: products } = await supabase
+    .from("products")
+    .select("sku, name, variant")
+
+  const productNameBySku = new Map(
+    (products || []).map((product) => [
+      product.sku,
+      product.variant ? `${product.name} - ${product.variant}` : product.name,
+    ])
+  )
+
+  const detailByDate = new Map<string, Map<string, { sku: string; name: string; quantity: number; revenue: number }>>()
+
+  for (const order of orders as any[]) {
+    const dateKey = order.order_date?.slice(0, 10)
+    if (!dateKey) continue
+
+    if (!detailByDate.has(dateKey)) {
+      detailByDate.set(dateKey, new Map())
+    }
+
+    const itemsBySku = detailByDate.get(dateKey)!
+    const lineItems = order.order_line_items || []
+    const totalOrderValue = lineItems.reduce(
+      (sum: number, item: any) => sum + ((item.selling_price || 0) * (item.quantity || 0)),
+      0
+    )
+
+    for (const item of lineItems) {
+      const itemGross = (item.selling_price || 0) * (item.quantity || 0)
+      const allocatedFee = totalOrderValue > 0
+        ? ((order.channel_fees || 0) * itemGross) / totalOrderValue
+        : 0
+      const itemRevenue = itemGross - allocatedFee
+      const existing = itemsBySku.get(item.sku) || {
+        sku: item.sku,
+        name: productNameBySku.get(item.sku) || item.sku,
+        quantity: 0,
+        revenue: 0,
+      }
+
+      existing.quantity += item.quantity
+      existing.revenue += itemRevenue
+      itemsBySku.set(item.sku, existing)
+    }
+  }
+
+  const byDate: Record<string, { items: { sku: string; name: string; quantity: number; revenue: number }[] }> = {}
+
+  for (const [date, itemsBySku] of detailByDate.entries()) {
+    byDate[date] = {
+      items: Array.from(itemsBySku.values()).sort((a, b) => b.revenue - a.revenue),
+    }
+  }
+
+  return { byDate }
+}
+
+export const getMonthlyCalendarDetails = cache(async (year?: number, month?: number) => {
+  return _getMonthlyCalendarDetailsInternal(year, month)
 })
 
 /**

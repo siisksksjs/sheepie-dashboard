@@ -1,4 +1,4 @@
-import { getMonthlySalesReport, getChannelProductReport, getSalesReport, getReturnSummary } from "@/lib/actions/orders"
+import { getMonthlySalesReport, getChannelProductReport, getSalesReport, getReturnSummary, getMonthlyCalendarDetails } from "@/lib/actions/orders"
 import { getAdPerformanceSummary } from "@/lib/actions/ad-campaigns"
 import { ReportsClient } from "./reports-client"
 
@@ -13,12 +13,13 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
   const selectedMonth = params.month ? parseInt(params.month) : undefined
 
   // Fetch all data in parallel on the server
-  const [overview, monthly, channelProduct, adPerf, returns] = await Promise.all([
+  const [overview, monthly, channelProduct, adPerf, returns, calendarDetails] = await Promise.all([
     getSalesReport(selectedYear, selectedMonth),
     getMonthlySalesReport(selectedYear, selectedMonth),
     getChannelProductReport(selectedYear, selectedMonth),
     getAdPerformanceSummary(),
     getReturnSummary(selectedYear, selectedMonth),
+    getMonthlyCalendarDetails(selectedYear, selectedMonth),
   ])
 
   return (
@@ -28,6 +29,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
       initialChannelProduct={channelProduct}
       initialAdPerformance={adPerf}
       initialReturnSummary={returns}
+      initialCalendarDetails={calendarDetails}
       selectedYear={selectedYear}
       selectedMonth={selectedMonth}
     />

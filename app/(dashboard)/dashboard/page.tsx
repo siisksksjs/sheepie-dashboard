@@ -1,21 +1,39 @@
 import { getStockOnHand, getDashboardStats } from "@/lib/actions/inventory"
-import { getOrderStats, getSalesReport, getReturnSummary, getReorderRecommendations } from "@/lib/actions/orders"
+import { getOrderStats, getSalesReport, getReturnSummary, getReorderRecommendations, getDailySalesSnippet } from "@/lib/actions/orders"
 import { getAllBundlesWithAvailability } from "@/lib/actions/bundles"
 import { getProjectedRevenue } from "@/lib/actions/products"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { InfoTooltip } from "@/components/ui/info-tooltip"
 import { formatCurrency } from "@/lib/utils"
 import { Package, AlertTriangle, TrendingUp, Box, DollarSign } from "lucide-react"
+import Link from "next/link"
+import { DateFilter } from "./date-filter"
 
-export default async function DashboardPage() {
+const channelLabels: Record<string, string> = {
+  shopee: "Shopee",
+  tokopedia: "Tokopedia",
+  tiktok: "TikTok",
+  offline: "Offline",
+}
+
+type SearchParams = Promise<{ date?: string }>
+
+export default async function DashboardPage({ searchParams }: { searchParams: SearchParams }) {
+  const params = await searchParams
+  const today = new Date().toISOString().split("T")[0]
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/
+  const selectedDate = params.date && datePattern.test(params.date) ? params.date : today
+
   const stats = await getDashboardStats()
   const stockData = await getStockOnHand()
   const orderStats = await getOrderStats()
   const salesReport = await getSalesReport()
   const returnSummary = await getReturnSummary()
   const reorderRecommendations = await getReorderRecommendations()
+  const dailySales = await getDailySalesSnippet(selectedDate)
   const bundles = await getAllBundlesWithAvailability()
   const projectedRevenue = await getProjectedRevenue()
   const totalUnitsSold = salesReport.byProduct.reduce((sum, product) => sum + product.units_sold, 0)
@@ -126,6 +144,60 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mb-8">
+        <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <CardTitle>Orders</CardTitle>
+            <CardDescription>
+              Quick order action and daily sales by selected date
+            </CardDescription>
+          </div>
+          <Link href="/orders/new">
+            <Button>Create Order</Button>
+          </Link>
+        </CardHeader>
+        <CardContent>
+          <DateFilter selectedDate={selectedDate} />
+
+          <div className="mb-4 text-sm text-muted-foreground">
+            {dailySales.totalOrders} orders and {dailySales.totalUnits} units sold on {dailySales.date}
+          </div>
+          <div className="mb-4 text-sm">
+            Daily Total Revenue: <span className="font-semibold">{formatCurrency(dailySales.totalRevenue)}</span>
+          </div>
+          {dailySales.items.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+              No paid or shipped sales recorded for this day.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Product</TableHead>
+                  <TableHead className="text-right">Quantity</TableHead>
+                  <TableHead className="text-right">Revenue</TableHead>
+                  <TableHead>Platform</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {dailySales.items.map((item) => (
+                  <TableRow key={`${item.sku}-${item.platform}`}>
+                    <TableCell className="font-medium">{item.productName}</TableCell>
+                    <TableCell className="text-right font-semibold">{item.quantity}</TableCell>
+                    <TableCell className="text-right font-semibold">{formatCurrency(item.revenue)}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {channelLabels[item.platform] || item.platform}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Projected Revenue Card */}
       <Card className="mb-8 border-primary/20 bg-primary/5">
