@@ -69,6 +69,7 @@ export type OrderLineItem = {
   sku: string
   quantity: number
   selling_price: number
+  cost_per_unit_snapshot: number | null
   created_at: string
 }
 

@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import type { AdCampaign, AdSpendEntry, Channel, AdPlatform, CampaignStatus } from "@/lib/types/database.types"
+import { getLineItemTotalCost } from "@/lib/line-item-costs"
 
 // ============================================================================
 // CAMPAIGN CRUD OPERATIONS
@@ -244,7 +245,8 @@ export async function getCampaignMetrics(campaignId: string) {
         id,
         sku,
         quantity,
-        selling_price
+        selling_price,
+        cost_per_unit_snapshot
       )
     `)
     .in("channel", campaign.target_channels)
@@ -285,7 +287,7 @@ export async function getCampaignMetrics(campaignId: string) {
     // Calculate COGS
     const totalCogs = lineItems.reduce((sum: number, item: any) => {
       const product = productMap.get(item.sku)
-      return sum + ((product?.cost_per_unit || 0) * item.quantity)
+      return sum + getLineItemTotalCost(item, product)
     }, 0)
 
     // Net profit

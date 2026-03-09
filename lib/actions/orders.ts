@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 import { cache } from "react"
 import type { Order, OrderLineItem, Channel, OrderStatus } from "@/lib/types/database.types"
 import { createLedgerEntry } from "./inventory"
+import { getLineItemCostPerUnit, getLineItemTotalCost } from "@/lib/line-item-costs"
 
 export async function getOrders(filters?: {
   status?: OrderStatus
@@ -21,7 +22,8 @@ export async function getOrders(filters?: {
         id,
         sku,
         quantity,
-        selling_price
+        selling_price,
+        cost_per_unit_snapshot
       )
     `)
     .order("order_date", { ascending: false })
@@ -60,7 +62,7 @@ export async function getOrders(filters?: {
       return {
         ...item,
         product_name: product?.name || "Unknown",
-        cost_per_unit: product?.cost_per_unit || 0,
+        cost_per_unit: getLineItemCostPerUnit(item, product),
       }
     }) || []
 
@@ -139,6 +141,24 @@ export async function createOrder(formData: {
 }) {
   const supabase = await createClient()
 
+  const uniqueSkus = [...new Set(formData.line_items.map(item => item.sku))]
+  const { data: products, error: productsError } = await supabase
+    .from("products")
+    .select("sku, cost_per_unit")
+    .in("sku", uniqueSkus)
+
+  if (productsError) {
+    console.error("Error fetching product costs:", productsError)
+    return { success: false, error: productsError.message }
+  }
+
+  const productCosts = new Map(products?.map(product => [product.sku, product.cost_per_unit]) || [])
+  const missingSkus = uniqueSkus.filter(sku => !productCosts.has(sku))
+
+  if (missingSkus.length > 0) {
+    return { success: false, error: `Missing product cost for SKU(s): ${missingSkus.join(", ")}` }
+  }
+
   // Create order
   const { data: order, error: orderError } = await supabase
     .from("orders")
@@ -164,6 +184,7 @@ export async function createOrder(formData: {
     sku: item.sku,
     quantity: item.quantity,
     selling_price: item.selling_price,
+    cost_per_unit_snapshot: productCosts.get(item.sku) ?? 0,
   }))
 
   const { error: lineItemsError } = await supabase
@@ -565,7 +586,7 @@ async function _getSalesReportInternal(year?: number, month?: number) {
     for (const item of lineItems) {
       const product = productMap.get(item.sku)
       if (product) {
-        orderCost += product.cost_per_unit * item.quantity
+        orderCost += getLineItemTotalCost(item, product)
       }
     }
 
@@ -603,7 +624,7 @@ async function _getSalesReportInternal(year?: number, month?: number) {
       }
 
       const itemRevenue = itemTotalPrice - allocatedChannelFee
-      const itemCost = product.cost_per_unit * item.quantity
+      const itemCost = getLineItemTotalCost(item, product)
 
       productSales.set(item.sku, {
         sku: item.sku,
@@ -674,7 +695,7 @@ async function _getReturnSummaryInternal(year?: number, month?: number) {
 
       const product = productMap.get(item.sku)
       if (product) {
-        returnedCogs += product.cost_per_unit * item.quantity
+        returnedCogs += getLineItemTotalCost(item, product)
       }
     }
   }
@@ -879,7 +900,7 @@ async function _getMonthlySalesReportInternal(year?: number, month?: number) {
       }
 
       const itemRevenue = itemTotalPrice - allocatedChannelFee
-      const itemCost = product.cost_per_unit * item.quantity
+      const itemCost = getLineItemTotalCost(item, product)
 
       orderRevenue += itemRevenue
       orderCost += itemCost
@@ -1132,7 +1153,7 @@ async function _getChannelProductReportInternal(year?: number, month?: number) {
       }
 
       const itemRevenue = itemTotalPrice - allocatedChannelFee
-      const itemCost = product.cost_per_unit * item.quantity
+      const itemCost = getLineItemTotalCost(item, product)
 
       channelMap.set(item.sku, {
         sku: item.sku,

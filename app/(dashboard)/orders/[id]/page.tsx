@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCurrency, formatDate } from "@/lib/utils"
+import { getLineItemTotalCost } from "@/lib/line-item-costs"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import type { Order, OrderLineItem, OrderStatus, Product } from "@/lib/types/database.types"
@@ -104,7 +105,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const totalAmount = lineItems.reduce((sum, item) => sum + item.quantity * item.selling_price, 0)
   const totalCost = lineItems.reduce((sum, item) => {
     const product = productMap.get(item.sku)
-    return sum + (product ? product.cost_per_unit * item.quantity : 0)
+    return sum + getLineItemTotalCost(item, product)
   }, 0)
   const grossProfit = totalAmount - totalCost
   const netProfit = grossProfit - (order.channel_fees || 0)

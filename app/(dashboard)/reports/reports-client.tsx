@@ -695,7 +695,7 @@ export function ReportsClient({
                           Cost
                           <InfoTooltip
                             content="Cost calculation (COGS)"
-                            formula="cost_per_unit × quantity"
+                            formula="line item COGS snapshot × quantity"
                           />
                         </span>
                       </TableHead>
@@ -883,7 +883,7 @@ export function ReportsClient({
                           Cost
                           <InfoTooltip
                             content="Cost calculation (COGS)"
-                            formula="cost_per_unit × quantity"
+                            formula="line item COGS snapshot × quantity"
                           />
                         </span>
                       </TableHead>

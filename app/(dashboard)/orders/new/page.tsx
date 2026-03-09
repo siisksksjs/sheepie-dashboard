@@ -32,16 +32,28 @@ const BASE_DEFAULT_PRICES: Record<string, number> = {
 }
 
 // Channel-specific overrides
-const SHOPEE_LIKE_DEFAULT_PRICES: Record<string, number> = {
+const SHOPEE_DEFAULT_PRICES: Record<string, number> = {
+  'Cervi-001': 880000,
+  'Lumi-001': 198000,
+  'Calmi-001': 80000,
+  'Bundle-Cervi': 880000,
+}
+
+const OFFLINE_DEFAULT_PRICES: Record<string, number> = {
   'Cervi-001': 880000,
   'Lumi-001': 180000,
   'Calmi-001': 80000,
   'Bundle-Cervi': 880000,
 }
 
+const TOKOPEDIA_DEFAULT_PRICES: Record<string, number> = {
+  'Lumi-001': 193000,
+}
+
 const CHANNEL_PRICE_OVERRIDES: Partial<Record<Channel, Record<string, number>>> = {
-  shopee: SHOPEE_LIKE_DEFAULT_PRICES,
-  offline: SHOPEE_LIKE_DEFAULT_PRICES,
+  shopee: SHOPEE_DEFAULT_PRICES,
+  tokopedia: TOKOPEDIA_DEFAULT_PRICES,
+  offline: OFFLINE_DEFAULT_PRICES,
 }
 
 function getDefaultPriceForChannel(sku: string, channel?: Channel | ""): number {
@@ -243,7 +255,7 @@ export default function NewOrderPage() {
     const result = await createOrder(data)
 
     if (result.success) {
-      router.push("/orders")
+      router.push("/dashboard")
     } else {
       setError(result.error || "Failed to create order")
       setSaving(false)
