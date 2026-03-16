@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server"
 import { createProduct } from "./products"
 import { createOrder } from "./orders"
 import { createLedgerEntry } from "./inventory"
+import { safeRecordAutomaticChangelogEntry } from "./changelog"
+import { buildChangeItem } from "@/lib/changelog"
 
 // CSV parsing utility
 function parseCSV(csvText: string): Record<string, string>[] {
@@ -247,6 +249,14 @@ export async function clearLedgerAndOrders() {
   const supabase = await createClient()
 
   try {
+    const { count: orderCount } = await supabase
+      .from('orders')
+      .select('*', { count: 'exact', head: true })
+
+    const { count: ledgerCount } = await supabase
+      .from('inventory_ledger')
+      .select('*', { count: 'exact', head: true })
+
     // Delete in correct order due to foreign key constraints
     // 1. Delete order line items first
     const { error: lineItemsError } = await supabase
@@ -291,6 +301,17 @@ export async function clearLedgerAndOrders() {
         }
       }
     }
+
+    await safeRecordAutomaticChangelogEntry({
+      area: "admin",
+      action_summary: "Cleared ledger and order data",
+      entity_type: "system",
+      entity_label: "Import tools",
+      items: [
+        buildChangeItem("Orders cleared", null, orderCount || 0),
+        buildChangeItem("Ledger entries cleared", null, ledgerCount || 0),
+      ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+    })
 
     return {
       success: true,

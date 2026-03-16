@@ -17,8 +17,10 @@ const movementTypeLabels: Record<string, { label: string; variant: "default" | "
 }
 
 export default async function LedgerPage() {
-  const entries = await getLedgerEntries({ limit: 100 })
-  const products = await getProducts()
+  const [entries, products] = await Promise.all([
+    getLedgerEntries({ limit: 100 }),
+    getProducts(),
+  ])
 
   // Create product map for name lookup
   const productMap = new Map(products.map(p => [p.sku, p]))

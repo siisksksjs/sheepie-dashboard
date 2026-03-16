@@ -108,3 +108,34 @@ export type AdSpendEntry = {
   notes: string | null
   created_at: string
 }
+
+export type ChangelogSource = 'manual' | 'automatic'
+
+export type ChangelogEntry = {
+  id: string
+  logged_at: string
+  area: string
+  source: ChangelogSource
+  action_summary: string
+  entity_type: string
+  entity_id: string | null
+  entity_label: string
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ChangelogItem = {
+  id: string
+  entry_id: string
+  field_name: string
+  old_value: string | null
+  new_value: string | null
+  display_order: number
+  created_at: string
+}
+
+export type ChangelogEntryWithItems = ChangelogEntry & {
+  changelog_items: ChangelogItem[]
+}

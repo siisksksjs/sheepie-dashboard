@@ -10,10 +10,12 @@ import { Plus, Package, Settings } from "lucide-react"
 import Link from "next/link"
 
 export default async function ProductsPage() {
-  const products = await getProducts()
-  const stockData = await getStockOnHand()
-  const bundles = await getAllBundlesWithAvailability()
-  const reorderRecommendations = await getReorderRecommendations()
+  const [products, stockData, bundles, reorderRecommendations] = await Promise.all([
+    getProducts(),
+    getStockOnHand(),
+    getAllBundlesWithAvailability(),
+    getReorderRecommendations(),
+  ])
 
   // Create a map for quick stock lookup
   const stockMap = new Map(stockData.map(s => [s.sku, s]))

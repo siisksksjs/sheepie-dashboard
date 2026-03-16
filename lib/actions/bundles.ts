@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import { cache } from "react"
 import type { BundleComposition } from "@/lib/types/database.types"
+import { safeRecordAutomaticChangelogEntry } from "./changelog"
+import { buildChangeItem } from "@/lib/changelog"
 
 export async function getBundleCompositions(bundleSku?: string) {
   const supabase = await createClient()
@@ -48,11 +50,29 @@ export async function createBundleComposition(formData: {
   revalidatePath("/products")
   revalidatePath("/dashboard")
 
+  await safeRecordAutomaticChangelogEntry({
+    area: "bundles",
+    action_summary: "Added bundle composition",
+    entity_type: "bundle",
+    entity_id: data.bundle_sku,
+    entity_label: `Bundle ${data.bundle_sku}`,
+    items: [
+      buildChangeItem("Component SKU", null, data.component_sku),
+      buildChangeItem("Quantity", null, data.quantity),
+    ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+  })
+
   return { success: true, data }
 }
 
 export async function deleteBundleComposition(id: string) {
   const supabase = await createClient()
+
+  const { data: existing } = await supabase
+    .from("bundle_compositions")
+    .select("*")
+    .eq("id", id)
+    .single()
 
   const { error } = await supabase
     .from("bundle_compositions")
@@ -66,6 +86,20 @@ export async function deleteBundleComposition(id: string) {
 
   revalidatePath("/products")
   revalidatePath("/dashboard")
+
+  if (existing) {
+    await safeRecordAutomaticChangelogEntry({
+      area: "bundles",
+      action_summary: "Removed bundle composition",
+      entity_type: "bundle",
+      entity_id: existing.bundle_sku,
+      entity_label: `Bundle ${existing.bundle_sku}`,
+      items: [
+        buildChangeItem("Component SKU", existing.component_sku, null),
+        buildChangeItem("Quantity", existing.quantity, null),
+      ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+    })
+  }
 
   return { success: true }
 }

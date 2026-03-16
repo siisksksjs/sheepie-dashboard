@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { Fragment, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -55,6 +55,21 @@ const channelColors: Record<string, string> = {
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 type HeatmapMetric = "units" | "orders" | "revenue"
+type CalendarDaySummary = {
+  orders: number
+  units: number
+  revenue: number
+  items: { sku: string; name: string; quantity: number; revenue: number }[]
+}
+type ChannelProductRow = {
+  channel: string
+  sku: string
+  name: string
+  units_sold: number
+  revenue: number
+  cost: number
+  profit: number
+}
 
 type Props = {
   initialOverview: any
@@ -79,6 +94,8 @@ export function ReportsClient({
 }: Props) {
   const router = useRouter()
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null)
+  const [selectedYearlyMonth, setSelectedYearlyMonth] = useState<number | null>(null)
+  const [selectedYearlyCalendarDate, setSelectedYearlyCalendarDate] = useState<string | null>(null)
   const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>("units")
 
   // Update URL when filters change (navigates to new page with server-side data fetch)
@@ -115,18 +132,30 @@ export function ReportsClient({
     ? `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`
     : null
   const byDay = monthlyReport?.byDay || []
-  const detailedByDate = initialCalendarDetails?.byDate || {}
-  const byDateMap = new Map<string, any>(
-    byDay.map((day: any) => [day.month, day])
+  const detailedByDate: Record<string, CalendarDaySummary> = initialCalendarDetails?.byDate || {}
+  const detailedByDateEntries = Object.entries(detailedByDate)
+  const byDateMap = new Map<string, {
+    orders: number
+    units_sold: number
+    revenue: number
+  }>(
+    detailedByDateEntries.map(([date, value]) => [
+      date,
+      {
+        orders: value.orders || 0,
+        units_sold: value.units || 0,
+        revenue: value.revenue || 0,
+      },
+    ])
   )
-  const maxDayUnits = byDay.length > 0
-    ? Math.max(...byDay.map((day: any) => day.units_sold || 0))
+  const maxDayUnits = byDateMap.size > 0
+    ? Math.max(...Array.from(byDateMap.values()).map((day) => day.units_sold || 0))
     : 0
-  const maxDayOrders = byDay.length > 0
-    ? Math.max(...byDay.map((day: any) => day.orders || 0))
+  const maxDayOrders = byDateMap.size > 0
+    ? Math.max(...Array.from(byDateMap.values()).map((day) => day.orders || 0))
     : 0
-  const maxDayRevenue = byDay.length > 0
-    ? Math.max(...byDay.map((day: any) => day.revenue || 0))
+  const maxDayRevenue = byDateMap.size > 0
+    ? Math.max(...Array.from(byDateMap.values()).map((day) => day.revenue || 0))
     : 0
   const maxHeatmapValue = heatmapMetric === "units"
     ? maxDayUnits
@@ -149,6 +178,64 @@ export function ReportsClient({
     }
   }
 
+  const yearCalendarMonths = !selectedMonth
+    ? Array.from({ length: 12 }, (_, monthIndex) => {
+        const monthNumber = monthIndex + 1
+        const monthKey = `${selectedYear}-${String(monthNumber).padStart(2, "0")}`
+        const firstDayWeekIndex = new Date(selectedYear, monthIndex, 1).getDay()
+        const daysInMonth = new Date(selectedYear, monthNumber, 0).getDate()
+        const cells: Array<{ date: string; day: number } | null> = []
+        const summary = monthlyReport?.byMonth?.find((item: any) => item.month === monthKey) || {
+          month: monthKey,
+          orders: 0,
+          units_sold: 0,
+          revenue: 0,
+          cost: 0,
+          profit: 0,
+        }
+
+        for (let i = 0; i < firstDayWeekIndex; i += 1) {
+          cells.push(null)
+        }
+
+        for (let day = 1; day <= daysInMonth; day += 1) {
+          const isoDate = `${selectedYear}-${String(monthNumber).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+          cells.push({ date: isoDate, day })
+        }
+
+        return {
+          monthNumber,
+          monthKey,
+          monthLabel: new Date(selectedYear, monthIndex).toLocaleString("default", { month: "long" }),
+          summary,
+          cells,
+        }
+      })
+    : []
+  const maxMonthUnits = yearCalendarMonths.length > 0
+    ? Math.max(...yearCalendarMonths.map((month) => month.summary.units_sold || 0))
+    : 0
+  const maxMonthOrders = yearCalendarMonths.length > 0
+    ? Math.max(...yearCalendarMonths.map((month) => month.summary.orders || 0))
+    : 0
+  const maxMonthRevenue = yearCalendarMonths.length > 0
+    ? Math.max(...yearCalendarMonths.map((month) => month.summary.revenue || 0))
+    : 0
+  const maxYearMonthValue = heatmapMetric === "units"
+    ? maxMonthUnits
+    : heatmapMetric === "orders"
+      ? maxMonthOrders
+      : maxMonthRevenue
+  const selectedYearlyMonthBlock = selectedYearlyMonth
+    ? yearCalendarMonths.find((month) => month.monthNumber === selectedYearlyMonth) || null
+    : null
+  const selectedYearlyMonthDetails = selectedYearlyMonthBlock
+    ? selectedYearlyMonthBlock.cells
+    : []
+  const selectedYearlyDayDetails = selectedYearlyCalendarDate
+    ? detailedByDate[selectedYearlyCalendarDate]
+    : null
+
   const trendXAxisTickFormatter = (value: string) => {
     if (!isDailyTrend) return value
     return value?.split("-")?.[2] || value
@@ -162,6 +249,25 @@ export function ReportsClient({
   const selectedCalendarDetails = selectedCalendarDate ? detailedByDate[selectedCalendarDate] : null
   const selectedCalendarItems = selectedCalendarDetails?.items || []
   const selectedCalendarTotalRevenue = selectedCalendarItems.reduce((sum: number, item: any) => sum + item.revenue, 0)
+  const groupedChannelProductData = ((channelProductReport?.data || []) as ChannelProductRow[]).reduce((groups: Array<{
+    sku: string
+    name: string
+    items: ChannelProductRow[]
+  }>, item) => {
+    const lastGroup = groups[groups.length - 1]
+
+    if (lastGroup && lastGroup.sku === item.sku) {
+      lastGroup.items.push(item)
+      return groups
+    }
+
+    groups.push({
+      sku: item.sku,
+      name: item.name,
+      items: [item],
+    })
+    return groups
+  }, [])
 
   return (
     <div className="space-y-8">
@@ -399,6 +505,107 @@ export function ReportsClient({
 
                 <div className="mt-3 text-xs text-muted-foreground">
                   Peak day in selected month: {maxDayOrders} orders / {maxDayUnits} units / {formatCurrency(maxDayRevenue)}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {!selectedMonth && yearCalendarMonths.length > 0 && (
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <CardTitle>Daily Calendar View ({selectedYear})</CardTitle>
+                    <CardDescription>
+                      Orders and units per day across all months with heatmap intensity by selected metric
+                    </CardDescription>
+                  </div>
+                  <div className="w-full md:w-[220px]">
+                    <Label htmlFor="heatmap-metric-year">Heatmap Basis</Label>
+                    <Select value={heatmapMetric} onValueChange={(value) => setHeatmapMetric(value as HeatmapMetric)}>
+                      <SelectTrigger id="heatmap-metric-year">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="units">Units Sold</SelectItem>
+                        <SelectItem value="orders">Order Count</SelectItem>
+                        <SelectItem value="revenue">Revenue</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-5 flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>Low</span>
+                  <div className="h-3 w-6 rounded border bg-[rgba(16,185,129,0.12)]" />
+                  <div className="h-3 w-6 rounded border bg-[rgba(16,185,129,0.3)]" />
+                  <div className="h-3 w-6 rounded border bg-[rgba(16,185,129,0.5)]" />
+                  <span>High</span>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
+                  {yearCalendarMonths.map((monthBlock) => (
+                    (() => {
+                      const monthValue = heatmapMetric === "units"
+                        ? monthBlock.summary.units_sold
+                        : heatmapMetric === "orders"
+                          ? monthBlock.summary.orders
+                          : monthBlock.summary.revenue
+                      const monthIntensity = maxYearMonthValue > 0 ? monthValue / maxYearMonthValue : 0
+                      const backgroundColor = monthIntensity > 0
+                        ? `rgba(16,185,129,${(0.12 + monthIntensity * 0.42).toFixed(3)})`
+                        : undefined
+
+                      return (
+                        <button
+                          key={monthBlock.monthNumber}
+                          type="button"
+                          className="rounded-lg border bg-card p-3 text-left transition hover:border-primary/60 hover:shadow-sm"
+                          style={backgroundColor ? { backgroundColor } : undefined}
+                          onClick={() => {
+                            setSelectedYearlyMonth(monthBlock.monthNumber)
+                            setSelectedYearlyCalendarDate(null)
+                          }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-semibold">{monthBlock.monthLabel}</h3>
+                            <span className="text-[10px] text-muted-foreground">
+                              {selectedYear}-{String(monthBlock.monthNumber).padStart(2, "0")}
+                            </span>
+                          </div>
+                          <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                            <div>
+                              <div className="text-[10px] text-muted-foreground">Orders</div>
+                              <div className="font-semibold leading-tight">{monthBlock.summary.orders}</div>
+                            </div>
+                            <div>
+                              <div className="text-[10px] text-muted-foreground">Units</div>
+                              <div className="font-semibold leading-tight">{monthBlock.summary.units_sold}</div>
+                            </div>
+                            <div>
+                              <div className="text-[10px] text-muted-foreground">Revenue</div>
+                              <div className="text-xs font-semibold leading-tight">{formatCurrency(monthBlock.summary.revenue)}</div>
+                            </div>
+                            <div>
+                              <div className="text-[10px] text-muted-foreground">Profit</div>
+                              <div
+                                className={`text-xs font-semibold leading-tight ${
+                                  monthBlock.summary.profit >= 0 ? "text-success" : "text-destructive"
+                                }`}
+                              >
+                                {formatCurrency(monthBlock.summary.profit)}
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })()
+                  ))}
+                </div>
+
+                <div className="mt-3 text-xs text-muted-foreground">
+                  Peak day in selected year: {maxDayOrders} orders / {maxDayUnits} units / {formatCurrency(maxDayRevenue)}
                 </div>
               </CardContent>
             </Card>
@@ -817,34 +1024,48 @@ export function ReportsClient({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {channelProductReport.data.map((item: any, idx: number) => {
-                        const margin = item.revenue > 0
-                          ? ((item.profit / item.revenue) * 100)
-                          : 0
-
-                        return (
-                          <TableRow key={`${item.channel}-${item.sku}-${idx}`}>
-                            <TableCell className="font-medium">
-                              {channelLabels[item.channel]}
-                            </TableCell>
-                            <TableCell>{item.name}</TableCell>
-                            <TableCell className="text-right">{item.units_sold}</TableCell>
-                            <TableCell className="text-right">
-                              {formatCurrency(item.revenue)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <span className={item.profit >= 0 ? 'text-success' : 'text-destructive'}>
-                                {formatCurrency(item.profit)}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <span className={margin >= 0 ? 'text-success' : 'text-destructive'}>
-                                {margin.toFixed(1)}%
-                              </span>
+                      {groupedChannelProductData.map((group) => (
+                        <Fragment key={`${group.sku}-group`}>
+                          <TableRow key={`${group.sku}-group`} className="bg-muted/40 hover:bg-muted/40">
+                            <TableCell colSpan={6} className="py-3">
+                              <div className="flex items-center justify-between gap-4">
+                                <div className="font-semibold">{group.name}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {group.items.length} channel{group.items.length > 1 ? "s" : ""}
+                                </div>
+                              </div>
                             </TableCell>
                           </TableRow>
-                        )
-                      })}
+                          {group.items.map((item, idx: number) => {
+                            const margin = item.revenue > 0
+                              ? ((item.profit / item.revenue) * 100)
+                              : 0
+
+                            return (
+                              <TableRow key={`${item.channel}-${item.sku}-${idx}`}>
+                                <TableCell className="font-medium">
+                                  {channelLabels[item.channel]}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">{item.name}</TableCell>
+                                <TableCell className="text-right">{item.units_sold}</TableCell>
+                                <TableCell className="text-right">
+                                  {formatCurrency(item.revenue)}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <span className={item.profit >= 0 ? 'text-success' : 'text-destructive'}>
+                                    {formatCurrency(item.profit)}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <span className={margin >= 0 ? 'text-success' : 'text-destructive'}>
+                                    {margin.toFixed(1)}%
+                                  </span>
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })}
+                        </Fragment>
+                      ))}
                     </TableBody>
                   </Table>
                 </div>
@@ -1290,6 +1511,118 @@ export function ReportsClient({
               </TableBody>
             </Table>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(selectedYearlyMonth)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedYearlyMonth(null)
+            setSelectedYearlyCalendarDate(null)
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedYearlyMonthBlock?.monthLabel} {selectedYear} Heatmap
+            </DialogTitle>
+            <DialogDescription>
+              Daily orders, units, and revenue for the selected month.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedYearlyMonthBlock ? (
+            <div className="space-y-5">
+              <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Low</span>
+                <div className="h-3 w-6 rounded border bg-[rgba(16,185,129,0.12)]" />
+                <div className="h-3 w-6 rounded border bg-[rgba(16,185,129,0.3)]" />
+                <div className="h-3 w-6 rounded border bg-[rgba(16,185,129,0.5)]" />
+                <span>High</span>
+              </div>
+
+              <div className="grid grid-cols-7 gap-2">
+                {WEEKDAY_LABELS.map((label) => (
+                  <div key={`modal-${label}`} className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                    {label}
+                  </div>
+                ))}
+
+                {selectedYearlyMonthDetails.map((cell, idx) => {
+                  if (!cell) {
+                    return <div key={`modal-empty-${idx}`} className="min-h-[84px] rounded-md border border-dashed border-muted/40" />
+                  }
+
+                  const dayData = byDateMap.get(cell.date)
+                  const orders = dayData?.orders || 0
+                  const units = dayData?.units_sold || 0
+                  const revenue = dayData?.revenue || 0
+                  const heatmapValue = heatmapMetric === "units"
+                    ? units
+                    : heatmapMetric === "orders"
+                      ? orders
+                      : revenue
+                  const heatmapIntensity = maxHeatmapValue > 0 ? heatmapValue / maxHeatmapValue : 0
+                  const backgroundColor = heatmapIntensity > 0
+                    ? `rgba(16,185,129,${(0.12 + heatmapIntensity * 0.42).toFixed(3)})`
+                    : undefined
+
+                  return (
+                    <div
+                      key={cell.date}
+                      className="min-h-[84px] cursor-pointer rounded-md border p-2 transition hover:border-primary/60 hover:shadow-sm"
+                      style={backgroundColor ? { backgroundColor } : undefined}
+                      title={`${cell.date}: ${orders} orders, ${units} units, ${formatCurrency(revenue)}`}
+                      onClick={() => setSelectedYearlyCalendarDate(cell.date)}
+                    >
+                      <div className="text-xs font-semibold">{cell.day}</div>
+                      <div className="mt-2 space-y-1 text-[11px] leading-tight text-muted-foreground">
+                        <div>{orders} orders</div>
+                        <div>{units} units</div>
+                        <div>{formatCurrency(revenue)}</div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {selectedYearlyDayDetails ? (
+                <div className="rounded-lg border p-4">
+                  <div className="mb-3">
+                    <h3 className="font-semibold">{selectedYearlyCalendarDate}</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedYearlyDayDetails.orders} orders • {selectedYearlyDayDetails.units} units • {formatCurrency(selectedYearlyDayDetails.revenue)}
+                    </p>
+                  </div>
+
+                  {selectedYearlyDayDetails.items.length > 0 ? (
+                    <div className="space-y-2">
+                      {selectedYearlyDayDetails.items.map((item) => (
+                        <div key={`${selectedYearlyCalendarDate}-${item.sku}`} className="flex items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-sm">
+                          <div>
+                            <div className="font-medium">{item.name}</div>
+                            <div className="text-xs text-muted-foreground">{item.sku}</div>
+                          </div>
+                          <div className="text-right">
+                            <div>{item.quantity} units</div>
+                            <div className="text-xs text-muted-foreground">{formatCurrency(item.revenue)}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">No item details for this day.</div>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                  Click a day to inspect the item-level breakdown.
+                </div>
+              )}
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>

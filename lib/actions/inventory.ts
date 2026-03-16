@@ -3,6 +3,8 @@
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import type { InventoryLedger, StockOnHand, MovementType } from "@/lib/types/database.types"
+import { safeRecordAutomaticChangelogEntry } from "./changelog"
+import { buildChangeItem } from "@/lib/changelog"
 
 export async function getStockOnHand() {
   const supabase = await createClient()
@@ -60,6 +62,10 @@ export async function createLedgerEntry(formData: {
   quantity: number
   reference: string | null
   entry_date?: string | null
+}, options?: {
+  skipChangelog?: boolean
+  actionSummary?: string
+  notes?: string | null
 }) {
   const supabase = await createClient()
 
@@ -90,6 +96,33 @@ export async function createLedgerEntry(formData: {
   revalidatePath("/ledger")
   revalidatePath("/dashboard")
   revalidatePath("/products")
+
+  if (!options?.skipChangelog) {
+    const { data: product } = await supabase
+      .from("products")
+      .select("sku, name, variant")
+      .eq("sku", data.sku)
+      .single()
+
+    const productLabel = product
+      ? `${product.name}${product.variant ? ` - ${product.variant}` : ""} (${product.sku})`
+      : data.sku
+
+    await safeRecordAutomaticChangelogEntry({
+      area: "inventory",
+      action_summary: options?.actionSummary || "Added inventory ledger entry",
+      entity_type: "product",
+      entity_id: data.sku,
+      entity_label: productLabel,
+      notes: options?.notes || null,
+      items: [
+        buildChangeItem("Movement type", null, data.movement_type),
+        buildChangeItem("Quantity", null, data.quantity),
+        buildChangeItem("Entry date", null, data.entry_date),
+        buildChangeItem("Reference", null, data.reference),
+      ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+    })
+  }
 
   return { success: true, data }
 }

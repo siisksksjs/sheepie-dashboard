@@ -3,9 +3,11 @@
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import { cache } from "react"
-import type { Order, OrderLineItem, Channel, OrderStatus } from "@/lib/types/database.types"
+import type { Order, OrderLineItem, Product, Channel, OrderStatus } from "@/lib/types/database.types"
 import { createLedgerEntry } from "./inventory"
 import { getLineItemCostPerUnit, getLineItemTotalCost } from "@/lib/line-item-costs"
+import { safeRecordAutomaticChangelogEntry } from "./changelog"
+import { buildChangeItem, summarizeLineItems } from "@/lib/changelog"
 
 export async function getOrders(filters?: {
   status?: OrderStatus
@@ -223,6 +225,8 @@ export async function createOrder(formData: {
               movement_type: "OUT_SALE",
               quantity: -(comp.quantity * item.quantity), // Component qty × bundle qty
               reference: `Order ${formData.order_id} (Bundle: ${item.sku})`,
+            }, {
+              skipChangelog: true,
             })
           }
         }
@@ -233,6 +237,8 @@ export async function createOrder(formData: {
           movement_type: "OUT_SALE",
           quantity: -item.quantity,
           reference: `Order ${formData.order_id}`,
+        }, {
+          skipChangelog: true,
         })
       }
     }
@@ -241,6 +247,22 @@ export async function createOrder(formData: {
   revalidatePath("/orders")
   revalidatePath("/dashboard")
   revalidatePath("/ledger")
+
+  await safeRecordAutomaticChangelogEntry({
+    area: "orders",
+    action_summary: "Created order",
+    entity_type: "order",
+    entity_id: order.id,
+    entity_label: `Order ${order.order_id}`,
+    notes: order.notes,
+    items: [
+      buildChangeItem("Channel", null, order.channel),
+      buildChangeItem("Order date", null, order.order_date),
+      buildChangeItem("Status", null, order.status),
+      buildChangeItem("Channel fees", null, order.channel_fees),
+      buildChangeItem("Line items", null, summarizeLineItems(formData.line_items)),
+    ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+  })
 
   return { success: true, data: order }
 }
@@ -301,6 +323,8 @@ export async function updateOrderStatus(
               movement_type: "RETURN",
               quantity: comp.quantity * item.quantity,
               reference: `Order ${order.order_id} - ${newStatus === "cancelled" ? "Cancelled" : "Returned"} (Bundle: ${item.sku})`,
+            }, {
+              skipChangelog: true,
             })
           }
         }
@@ -311,6 +335,8 @@ export async function updateOrderStatus(
           movement_type: "RETURN",
           quantity: item.quantity,
           reference: `Order ${order.order_id} - ${newStatus === "cancelled" ? "Cancelled" : "Returned"}`,
+        }, {
+          skipChangelog: true,
         })
       }
     }
@@ -341,6 +367,8 @@ export async function updateOrderStatus(
               movement_type: "OUT_SALE",
               quantity: -(comp.quantity * item.quantity),
               reference: `Order ${order.order_id} (Bundle: ${item.sku})`,
+            }, {
+              skipChangelog: true,
             })
           }
         }
@@ -351,6 +379,8 @@ export async function updateOrderStatus(
           movement_type: "OUT_SALE",
           quantity: -item.quantity,
           reference: `Order ${order.order_id}`,
+        }, {
+          skipChangelog: true,
         })
       }
     }
@@ -359,6 +389,25 @@ export async function updateOrderStatus(
   revalidatePath("/orders")
   revalidatePath("/dashboard")
   revalidatePath("/ledger")
+
+  let stockEffect: string | null = null
+  if (previousStatus === "paid" && (newStatus === "cancelled" || newStatus === "returned")) {
+    stockEffect = "Created RETURN ledger entries to restore stock."
+  } else if (previousStatus !== "paid" && newStatus === "paid") {
+    stockEffect = "Created OUT_SALE ledger entries to reduce stock."
+  }
+
+  await safeRecordAutomaticChangelogEntry({
+    area: "orders",
+    action_summary: "Updated order status",
+    entity_type: "order",
+    entity_id: order.id,
+    entity_label: `Order ${order.order_id}`,
+    notes: stockEffect,
+    items: [
+      buildChangeItem("Status", previousStatus, newStatus),
+    ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+  })
 
   return { success: true }
 }
@@ -512,65 +561,233 @@ export async function getMonthlySalesByDay(month: string) {
   return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date))
 }
 
-async function _getSalesReportInternal(year?: number, month?: number) {
-  const supabase = await createClient()
+type ReportOrder = Pick<Order, "id" | "channel" | "order_date" | "status" | "channel_fees"> & {
+  order_line_items: Array<Pick<OrderLineItem, "sku" | "quantity" | "selling_price" | "cost_per_unit_snapshot">>
+}
 
-  // Get all paid/shipped orders with their line items
-  let query = supabase
-    .from("orders")
-    .select("*, order_line_items(*)")
-    .in("status", ["paid", "shipped"])
+type ReportProduct = Pick<Product, "sku" | "name" | "variant" | "cost_per_unit">
 
-  // Apply year/month filters if provided
+type ProductSalesRow = {
+  sku: string
+  name: string
+  variant: string | null
+  units_sold: number
+  revenue: number
+  cost: number
+  profit: number
+}
+
+type ChannelSalesRow = {
+  channel: Channel
+  orders: number
+  revenue: number
+  fees: number
+  cost: number
+  profit: number
+}
+
+type MonthlySalesRow = {
+  month: string
+  orders: number
+  units_sold: number
+  revenue: number
+  cost: number
+  profit: number
+}
+
+type CalendarItemRow = {
+  sku: string
+  name: string
+  quantity: number
+  revenue: number
+}
+
+type CalendarDayRow = {
+  orders: number
+  units: number
+  revenue: number
+  items: CalendarItemRow[]
+}
+
+type ChannelProductRow = {
+  channel: Channel
+  sku: string
+  name: string
+  units_sold: number
+  revenue: number
+  cost: number
+  profit: number
+}
+
+type ReturnSummary = {
+  returnedUnits: number
+  returnedRevenue: number
+  returnedCogs: number
+  returnedOrders: number
+  bySku: Array<{ sku: string; units: number }>
+}
+
+type ReportsAggregate = {
+  overview: {
+    byProduct: ProductSalesRow[]
+    byChannel: ChannelSalesRow[]
+  }
+  monthly: {
+    byMonth: MonthlySalesRow[]
+    byDay: MonthlySalesRow[]
+    byProduct: ProductSalesRow[]
+  }
+  channelProduct: {
+    data: ChannelProductRow[]
+  }
+  returns: ReturnSummary
+  calendar: {
+    byDate: Record<string, CalendarDayRow>
+  }
+}
+
+function applyOrderDateFilter<T>(query: T, year?: number, month?: number) {
   if (year && month) {
-    const startDate = `${year}-${month.toString().padStart(2, '0')}-01`
-    const endDate = new Date(year, month, 0).toISOString().split('T')[0]
-    query = query.gte("order_date", startDate).lte("order_date", endDate)
-  } else if (year) {
-    const startDate = `${year}-01-01`
-    const endDate = `${year}-12-31`
-    query = query.gte("order_date", startDate).lte("order_date", endDate)
+    const startDate = `${year}-${month.toString().padStart(2, "0")}-01`
+    const endDate = new Date(year, month, 0).toISOString().split("T")[0]
+    return (query as any).gte("order_date", startDate).lte("order_date", endDate) as T
   }
 
-  const { data: orders } = await query
+  if (year) {
+    const startDate = `${year}-01-01`
+    const endDate = `${year}-12-31`
+    return (query as any).gte("order_date", startDate).lte("order_date", endDate) as T
+  }
 
-  if (!orders) return { byProduct: [], byChannel: [] }
+  return query
+}
 
-  // Get products for cost lookup
-  const { data: products } = await supabase.from("products").select("*")
-  const productMap = new Map(products?.map(p => [p.sku, p]) || [])
+const EMPTY_REPORTS_AGGREGATE: ReportsAggregate = {
+  overview: {
+    byProduct: [],
+    byChannel: [],
+  },
+  monthly: {
+    byMonth: [],
+    byDay: [],
+    byProduct: [],
+  },
+  channelProduct: {
+    data: [],
+  },
+  returns: {
+    returnedUnits: 0,
+    returnedRevenue: 0,
+    returnedCogs: 0,
+    returnedOrders: 0,
+    bySku: [],
+  },
+  calendar: {
+    byDate: {},
+  },
+}
 
-  // Sales by product
-  const productSales = new Map<string, {
-    sku: string
-    name: string
-    variant: string | null
-    units_sold: number
-    revenue: number
-    cost: number
-    profit: number
-  }>()
+const getReportsAggregate = cache(async (year?: number, month?: number): Promise<ReportsAggregate> => {
+  const supabase = await createClient()
 
-  // Sales by channel
-  const channelSales = new Map<Channel, {
-    channel: Channel
+  const ordersQuery = applyOrderDateFilter(
+    supabase
+      .from("orders")
+      .select(`
+        id,
+        channel,
+        order_date,
+        status,
+        channel_fees,
+        order_line_items (
+          sku,
+          quantity,
+          selling_price,
+          cost_per_unit_snapshot
+        )
+      `)
+      .in("status", ["paid", "shipped", "returned"]),
+    year,
+    month
+  )
+
+  const [ordersResult, productsResult] = await Promise.all([
+    ordersQuery,
+    supabase.from("products").select("sku, name, variant, cost_per_unit"),
+  ])
+
+  if (ordersResult.error) {
+    console.error("Error fetching report orders:", ordersResult.error)
+    return EMPTY_REPORTS_AGGREGATE
+  }
+
+  if (productsResult.error) {
+    console.error("Error fetching report products:", productsResult.error)
+    return EMPTY_REPORTS_AGGREGATE
+  }
+
+  const orders = (ordersResult.data || []) as ReportOrder[]
+  const products = (productsResult.data || []) as ReportProduct[]
+
+  if (orders.length === 0) {
+    return EMPTY_REPORTS_AGGREGATE
+  }
+
+  const productMap = new Map(products.map((product) => [product.sku, product]))
+  const productLabelBySku = new Map(
+    products.map((product) => [
+      product.sku,
+      product.variant ? `${product.name} - ${product.variant}` : product.name,
+    ])
+  )
+
+  const productSales = new Map<string, ProductSalesRow>()
+  const channelSales = new Map<Channel, ChannelSalesRow>()
+  const monthlySales = new Map<string, MonthlySalesRow>()
+  const dailySales = new Map<string, MonthlySalesRow>()
+  const calendarSales = new Map<string, {
     orders: number
+    units: number
     revenue: number
-    fees: number
-    cost: number
-    profit: number
+    itemsBySku: Map<string, CalendarItemRow>
   }>()
+  const channelProductSales = new Map<Channel, Map<string, Omit<ChannelProductRow, "channel">>>()
+  const returnedBySku = new Map<string, number>()
+
+  let returnedUnits = 0
+  let returnedRevenue = 0
+  let returnedCogs = 0
+  let returnedOrders = 0
 
   for (const order of orders) {
-    const lineItems = (order as any).order_line_items || []
-
-    // Calculate total order value for proportional fee allocation
-    const totalOrderValue = lineItems.reduce((sum: number, item: any) =>
-      sum + (item.selling_price * item.quantity), 0
+    const lineItems = order.order_line_items || []
+    const totalOrderValue = lineItems.reduce(
+      (sum, item) => sum + ((item.selling_price || 0) * (item.quantity || 0)),
+      0
     )
 
-    // By channel
-    const existing = channelSales.get(order.channel) || {
+    if (order.status === "returned") {
+      returnedOrders += 1
+
+      for (const item of lineItems) {
+        returnedUnits += item.quantity
+        returnedRevenue += (item.selling_price || 0) * item.quantity
+        returnedBySku.set(item.sku, (returnedBySku.get(item.sku) || 0) + item.quantity)
+
+        const product = productMap.get(item.sku)
+        if (product) {
+          returnedCogs += getLineItemTotalCost(item, product)
+        }
+      }
+
+      continue
+    }
+
+    const orderMonth = order.order_date.substring(0, 7)
+    const orderDay = order.order_date.substring(0, 10)
+    const orderRevenue = totalOrderValue - (order.channel_fees || 0)
+
+    const channelExisting = channelSales.get(order.channel) || {
       channel: order.channel,
       orders: 0,
       revenue: 0,
@@ -578,33 +795,75 @@ async function _getSalesReportInternal(year?: number, month?: number) {
       cost: 0,
       profit: 0,
     }
-
-    const orderRevenue = totalOrderValue - (order.channel_fees || 0)
-
-    // Calculate total cost for this order
-    let orderCost = 0
-    for (const item of lineItems) {
-      const product = productMap.get(item.sku)
-      if (product) {
-        orderCost += getLineItemTotalCost(item, product)
-      }
+    const monthlyExisting = monthlySales.get(orderMonth) || {
+      month: orderMonth,
+      orders: 0,
+      units_sold: 0,
+      revenue: 0,
+      cost: 0,
+      profit: 0,
+    }
+    const dailyExisting = dailySales.get(orderDay) || {
+      month: orderDay,
+      orders: 0,
+      units_sold: 0,
+      revenue: 0,
+      cost: 0,
+      profit: 0,
     }
 
-    channelSales.set(order.channel, {
-      channel: order.channel,
-      orders: existing.orders + 1,
-      revenue: existing.revenue + orderRevenue,
-      fees: existing.fees + (order.channel_fees || 0),
-      cost: existing.cost + orderCost,
-      profit: existing.profit + (orderRevenue - orderCost),
-    })
+    if (!calendarSales.has(orderDay)) {
+      calendarSales.set(orderDay, {
+        orders: 0,
+        units: 0,
+        revenue: 0,
+        itemsBySku: new Map(),
+      })
+    }
 
-    // By product - allocate channel fees proportionally
+    if (!channelProductSales.has(order.channel)) {
+      channelProductSales.set(order.channel, new Map())
+    }
+
+    const calendarExisting = calendarSales.get(orderDay)!
+    const channelProductMap = channelProductSales.get(order.channel)!
+
+    calendarExisting.orders += 1
+
+    let orderCost = 0
+    let orderUnits = 0
+
     for (const item of lineItems) {
       const product = productMap.get(item.sku)
+      const itemTotalPrice = (item.selling_price || 0) * item.quantity
+      const allocatedChannelFee = totalOrderValue > 0 && order.channel_fees
+        ? (order.channel_fees * itemTotalPrice) / totalOrderValue
+        : 0
+      const itemRevenue = itemTotalPrice - allocatedChannelFee
+
+      orderUnits += item.quantity
+      calendarExisting.units += item.quantity
+      calendarExisting.revenue += itemRevenue
+
+      const calendarItemExisting = calendarExisting.itemsBySku.get(item.sku) || {
+        sku: item.sku,
+        name: productLabelBySku.get(item.sku) || item.sku,
+        quantity: 0,
+        revenue: 0,
+      }
+
+      calendarExisting.itemsBySku.set(item.sku, {
+        ...calendarItemExisting,
+        quantity: calendarItemExisting.quantity + item.quantity,
+        revenue: calendarItemExisting.revenue + itemRevenue,
+      })
+
       if (!product) continue
 
-      const existing = productSales.get(item.sku) || {
+      const itemCost = getLineItemTotalCost(item, product)
+      orderCost += itemCost
+
+      const productExisting = productSales.get(item.sku) || {
         sku: item.sku,
         name: product.name,
         variant: product.variant,
@@ -614,107 +873,157 @@ async function _getSalesReportInternal(year?: number, month?: number) {
         profit: 0,
       }
 
-      const itemTotalPrice = item.selling_price * item.quantity
-
-      // Allocate channel fees proportionally
-      let allocatedChannelFee = 0
-      if (totalOrderValue > 0 && order.channel_fees) {
-        const proportion = itemTotalPrice / totalOrderValue
-        allocatedChannelFee = order.channel_fees * proportion
-      }
-
-      const itemRevenue = itemTotalPrice - allocatedChannelFee
-      const itemCost = getLineItemTotalCost(item, product)
-
       productSales.set(item.sku, {
         sku: item.sku,
         name: product.name,
         variant: product.variant,
-        units_sold: existing.units_sold + item.quantity,
-        revenue: existing.revenue + itemRevenue,
-        cost: existing.cost + itemCost,
-        profit: existing.profit + (itemRevenue - itemCost),
+        units_sold: productExisting.units_sold + item.quantity,
+        revenue: productExisting.revenue + itemRevenue,
+        cost: productExisting.cost + itemCost,
+        profit: productExisting.profit + (itemRevenue - itemCost),
+      })
+
+      const channelProductExisting = channelProductMap.get(item.sku) || {
+        sku: item.sku,
+        name: product.name,
+        units_sold: 0,
+        revenue: 0,
+        cost: 0,
+        profit: 0,
+      }
+
+      channelProductMap.set(item.sku, {
+        sku: item.sku,
+        name: product.name,
+        units_sold: channelProductExisting.units_sold + item.quantity,
+        revenue: channelProductExisting.revenue + itemRevenue,
+        cost: channelProductExisting.cost + itemCost,
+        profit: channelProductExisting.profit + (itemRevenue - itemCost),
+      })
+    }
+
+    channelSales.set(order.channel, {
+      channel: order.channel,
+      orders: channelExisting.orders + 1,
+      revenue: channelExisting.revenue + orderRevenue,
+      fees: channelExisting.fees + (order.channel_fees || 0),
+      cost: channelExisting.cost + orderCost,
+      profit: channelExisting.profit + (orderRevenue - orderCost),
+    })
+
+    monthlySales.set(orderMonth, {
+      month: orderMonth,
+      orders: monthlyExisting.orders + 1,
+      units_sold: monthlyExisting.units_sold + orderUnits,
+      revenue: monthlyExisting.revenue + orderRevenue,
+      cost: monthlyExisting.cost + orderCost,
+      profit: monthlyExisting.profit + (orderRevenue - orderCost),
+    })
+
+    if (year && month) {
+      dailySales.set(orderDay, {
+        month: orderDay,
+        orders: dailyExisting.orders + 1,
+        units_sold: dailyExisting.units_sold + orderUnits,
+        revenue: dailyExisting.revenue + orderRevenue,
+        cost: dailyExisting.cost + orderCost,
+        profit: dailyExisting.profit + (orderRevenue - orderCost),
       })
     }
   }
 
-  return {
-    byProduct: Array.from(productSales.values()).sort((a, b) => b.units_sold - a.units_sold),
-    byChannel: Array.from(channelSales.values()).sort((a, b) => b.revenue - a.revenue),
+  let byDay: MonthlySalesRow[] = []
+  if (year && month) {
+    const daysInMonth = new Date(year, month, 0).getDate()
+    const monthPrefix = `${year}-${month.toString().padStart(2, "0")}`
+
+    byDay = Array.from({ length: daysInMonth }, (_, idx) => {
+      const day = String(idx + 1).padStart(2, "0")
+      const dateKey = `${monthPrefix}-${day}`
+      return dailySales.get(dateKey) || {
+        month: dateKey,
+        orders: 0,
+        units_sold: 0,
+        revenue: 0,
+        cost: 0,
+        profit: 0,
+      }
+    })
   }
-}
+
+  const channelProductData: ChannelProductRow[] = []
+  for (const [channel, itemsBySku] of channelProductSales.entries()) {
+    for (const item of itemsBySku.values()) {
+      channelProductData.push({
+        channel,
+        ...item,
+      })
+    }
+  }
+
+  const byDate = Object.fromEntries(
+    Array.from(calendarSales.entries()).map(([date, summary]) => [
+      date,
+      {
+        orders: summary.orders,
+        units: summary.units,
+        revenue: summary.revenue,
+        items: Array.from(summary.itemsBySku.values()).sort((a, b) => b.revenue - a.revenue),
+      },
+    ])
+  ) as Record<string, CalendarDayRow>
+
+  return {
+    overview: {
+      byProduct: Array.from(productSales.values()).sort((a, b) => b.units_sold - a.units_sold),
+      byChannel: Array.from(channelSales.values()).sort((a, b) => b.revenue - a.revenue),
+    },
+    monthly: {
+      byMonth: Array.from(monthlySales.values()).sort((a, b) => a.month.localeCompare(b.month)),
+      byDay,
+      byProduct: Array.from(productSales.values()).sort((a, b) => b.units_sold - a.units_sold),
+    },
+    channelProduct: {
+      data: channelProductData.sort((a, b) => {
+        const nameCompare = a.name.localeCompare(b.name)
+        if (nameCompare !== 0) return nameCompare
+
+        const skuCompare = a.sku.localeCompare(b.sku)
+        if (skuCompare !== 0) return skuCompare
+
+        return a.channel.localeCompare(b.channel)
+      }),
+    },
+    returns: {
+      returnedUnits,
+      returnedRevenue,
+      returnedCogs,
+      returnedOrders,
+      bySku: Array.from(returnedBySku.entries()).map(([sku, units]) => ({
+        sku,
+        units,
+      })),
+    },
+    calendar: {
+      byDate,
+    },
+  }
+})
+
+export const getReportsBundle = cache(async (year?: number, month?: number) => {
+  return getReportsAggregate(year, month)
+})
 
 // Cached per request (deduplicates multiple calls in same render)
 export const getSalesReport = cache(async (year?: number, month?: number) => {
-  return _getSalesReportInternal(year, month)
+  const reports = await getReportsAggregate(year, month)
+  return reports.overview
 })
-
-async function _getReturnSummaryInternal(year?: number, month?: number) {
-  const supabase = await createClient()
-
-  let query = supabase
-    .from("orders")
-    .select("*, order_line_items(*)")
-    .eq("status", "returned")
-
-  if (year && month) {
-    const startDate = `${year}-${month.toString().padStart(2, '0')}-01`
-    const endDate = new Date(year, month, 0).toISOString().split('T')[0]
-    query = query.gte("order_date", startDate).lte("order_date", endDate)
-  } else if (year) {
-    const startDate = `${year}-01-01`
-    const endDate = `${year}-12-31`
-    query = query.gte("order_date", startDate).lte("order_date", endDate)
-  }
-
-  const { data: orders } = await query
-  if (!orders) {
-    return {
-      returnedUnits: 0,
-      returnedRevenue: 0,
-      returnedCogs: 0,
-      returnedOrders: 0,
-      bySku: [],
-    }
-  }
-
-  const { data: products } = await supabase.from("products").select("*")
-  const productMap = new Map(products?.map(p => [p.sku, p]) || [])
-  const returnedBySku = new Map<string, number>()
-
-  let returnedUnits = 0
-  let returnedRevenue = 0
-  let returnedCogs = 0
-
-  for (const order of orders) {
-    const lineItems = (order as any).order_line_items || []
-    for (const item of lineItems) {
-      returnedUnits += item.quantity
-      returnedRevenue += (item.selling_price || 0) * item.quantity
-      returnedBySku.set(item.sku, (returnedBySku.get(item.sku) || 0) + item.quantity)
-
-      const product = productMap.get(item.sku)
-      if (product) {
-        returnedCogs += getLineItemTotalCost(item, product)
-      }
-    }
-  }
-
-  return {
-    returnedUnits,
-    returnedRevenue,
-    returnedCogs,
-    returnedOrders: orders.length,
-    bySku: Array.from(returnedBySku.entries()).map(([sku, units]) => ({
-      sku,
-      units,
-    })),
-  }
-}
 
 // Cached per request
 export const getReturnSummary = cache(async (year?: number, month?: number) => {
-  return _getReturnSummaryInternal(year, month)
+  const reports = await getReportsAggregate(year, month)
+  return reports.returns
 })
 
 export async function getReorderRecommendations() {
@@ -989,18 +1298,30 @@ async function _getMonthlySalesReportInternal(year?: number, month?: number) {
 
 // Cached per request
 export const getMonthlySalesReport = cache(async (year?: number, month?: number) => {
-  return _getMonthlySalesReportInternal(year, month)
+  const reports = await getReportsAggregate(year, month)
+  return reports.monthly
 })
 
 async function _getMonthlyCalendarDetailsInternal(year?: number, month?: number) {
-  if (!year || !month) {
-    return { byDate: {} as Record<string, { items: { sku: string; name: string; quantity: number; revenue: number }[] }> }
+  if (!year) {
+    return {
+      byDate: {} as Record<string, {
+        orders: number
+        units: number
+        revenue: number
+        items: { sku: string; name: string; quantity: number; revenue: number }[]
+      }>,
+    }
   }
 
   const supabase = await createClient()
 
-  const startDate = `${year}-${month.toString().padStart(2, "0")}-01`
-  const endDate = new Date(year, month, 0).toISOString().split("T")[0]
+  const startDate = month
+    ? `${year}-${month.toString().padStart(2, "0")}-01`
+    : `${year}-01-01`
+  const endDate = month
+    ? new Date(year, month, 0).toISOString().split("T")[0]
+    : `${year}-12-31`
 
   const { data: orders } = await supabase
     .from("orders")
@@ -1010,7 +1331,14 @@ async function _getMonthlyCalendarDetailsInternal(year?: number, month?: number)
     .lte("order_date", endDate)
 
   if (!orders || orders.length === 0) {
-    return { byDate: {} as Record<string, { items: { sku: string; name: string; quantity: number; revenue: number }[] }> }
+    return {
+      byDate: {} as Record<string, {
+        orders: number
+        units: number
+        revenue: number
+        items: { sku: string; name: string; quantity: number; revenue: number }[]
+      }>,
+    }
   }
 
   const { data: products } = await supabase
@@ -1024,22 +1352,35 @@ async function _getMonthlyCalendarDetailsInternal(year?: number, month?: number)
     ])
   )
 
-  const detailByDate = new Map<string, Map<string, { sku: string; name: string; quantity: number; revenue: number }>>()
+  const detailByDate = new Map<string, {
+    orders: number
+    units: number
+    revenue: number
+    itemsBySku: Map<string, { sku: string; name: string; quantity: number; revenue: number }>
+  }>()
 
   for (const order of orders as any[]) {
     const dateKey = order.order_date?.slice(0, 10)
     if (!dateKey) continue
 
     if (!detailByDate.has(dateKey)) {
-      detailByDate.set(dateKey, new Map())
+      detailByDate.set(dateKey, {
+        orders: 0,
+        units: 0,
+        revenue: 0,
+        itemsBySku: new Map(),
+      })
     }
 
-    const itemsBySku = detailByDate.get(dateKey)!
+    const summary = detailByDate.get(dateKey)!
+    const itemsBySku = summary.itemsBySku
     const lineItems = order.order_line_items || []
     const totalOrderValue = lineItems.reduce(
       (sum: number, item: any) => sum + ((item.selling_price || 0) * (item.quantity || 0)),
       0
     )
+
+    summary.orders += 1
 
     for (const item of lineItems) {
       const itemGross = (item.selling_price || 0) * (item.quantity || 0)
@@ -1057,14 +1398,24 @@ async function _getMonthlyCalendarDetailsInternal(year?: number, month?: number)
       existing.quantity += item.quantity
       existing.revenue += itemRevenue
       itemsBySku.set(item.sku, existing)
+      summary.units += item.quantity
+      summary.revenue += itemRevenue
     }
   }
 
-  const byDate: Record<string, { items: { sku: string; name: string; quantity: number; revenue: number }[] }> = {}
+  const byDate: Record<string, {
+    orders: number
+    units: number
+    revenue: number
+    items: { sku: string; name: string; quantity: number; revenue: number }[]
+  }> = {}
 
-  for (const [date, itemsBySku] of detailByDate.entries()) {
+  for (const [date, summary] of detailByDate.entries()) {
     byDate[date] = {
-      items: Array.from(itemsBySku.values()).sort((a, b) => b.revenue - a.revenue),
+      orders: summary.orders,
+      units: summary.units,
+      revenue: summary.revenue,
+      items: Array.from(summary.itemsBySku.values()).sort((a, b) => b.revenue - a.revenue),
     }
   }
 
@@ -1072,7 +1423,8 @@ async function _getMonthlyCalendarDetailsInternal(year?: number, month?: number)
 }
 
 export const getMonthlyCalendarDetails = cache(async (year?: number, month?: number) => {
-  return _getMonthlyCalendarDetailsInternal(year, month)
+  const reports = await getReportsAggregate(year, month)
+  return reports.calendar
 })
 
 /**
@@ -1186,12 +1538,23 @@ async function _getChannelProductReportInternal(year?: number, month?: number) {
     }
   }
 
-  return { data: result.sort((a, b) => b.revenue - a.revenue) }
+  return {
+    data: result.sort((a, b) => {
+      const nameCompare = a.name.localeCompare(b.name)
+      if (nameCompare !== 0) return nameCompare
+
+      const skuCompare = a.sku.localeCompare(b.sku)
+      if (skuCompare !== 0) return skuCompare
+
+      return a.channel.localeCompare(b.channel)
+    }),
+  }
 }
 
 // Cached per request
 export const getChannelProductReport = cache(async (year?: number, month?: number) => {
-  return _getChannelProductReportInternal(year, month)
+  const reports = await getReportsAggregate(year, month)
+  return reports.channelProduct
 })
 
 /**

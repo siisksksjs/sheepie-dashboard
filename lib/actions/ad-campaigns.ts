@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import type { AdCampaign, AdSpendEntry, Channel, AdPlatform, CampaignStatus } from "@/lib/types/database.types"
 import { getLineItemTotalCost } from "@/lib/line-item-costs"
+import { safeRecordAutomaticChangelogEntry } from "./changelog"
+import { buildChangeItem } from "@/lib/changelog"
 
 // ============================================================================
 // CAMPAIGN CRUD OPERATIONS
@@ -58,6 +60,24 @@ export async function createCampaign(formData: {
   }
 
   revalidatePath("/ad-campaigns")
+
+  await safeRecordAutomaticChangelogEntry({
+    area: "ads",
+    action_summary: "Created ad campaign",
+    entity_type: "campaign",
+    entity_id: campaign.id,
+    entity_label: campaign.campaign_name,
+    notes: campaign.notes,
+    items: [
+      buildChangeItem("Platform", null, campaign.platform),
+      buildChangeItem("Start date", null, campaign.start_date),
+      buildChangeItem("End date", null, campaign.end_date),
+      buildChangeItem("Target channels", null, campaign.target_channels),
+      buildChangeItem("Status", null, campaign.status),
+      buildChangeItem("Initial spend", null, formData.initial_spend ?? null),
+    ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+  })
+
   return { success: true, data: campaign }
 }
 
@@ -73,6 +93,11 @@ export async function updateCampaign(
 ) {
   const supabase = await createClient()
 
+  const previousCampaign = await getCampaignById(id)
+  if (!previousCampaign) {
+    return { success: false, error: "Campaign not found" }
+  }
+
   const { data, error } = await supabase
     .from("ad_campaigns")
     .update(formData)
@@ -87,11 +112,33 @@ export async function updateCampaign(
 
   revalidatePath("/ad-campaigns")
   revalidatePath(`/ad-campaigns/${id}`)
+
+  const items = [
+    buildChangeItem("Campaign name", previousCampaign.campaign_name, data.campaign_name),
+    buildChangeItem("End date", previousCampaign.end_date, data.end_date),
+    buildChangeItem("Target channels", previousCampaign.target_channels, data.target_channels),
+    buildChangeItem("Notes", previousCampaign.notes, data.notes),
+    buildChangeItem("Status", previousCampaign.status, data.status),
+  ].filter((item): item is NonNullable<typeof item> => Boolean(item))
+
+  if (items.length > 0) {
+    await safeRecordAutomaticChangelogEntry({
+      area: "ads",
+      action_summary: "Updated ad campaign",
+      entity_type: "campaign",
+      entity_id: data.id,
+      entity_label: data.campaign_name,
+      items,
+    })
+  }
+
   return { success: true, data }
 }
 
 export async function deleteCampaign(id: string) {
   const supabase = await createClient()
+
+  const existingCampaign = await getCampaignById(id)
 
   const { error } = await supabase
     .from("ad_campaigns")
@@ -104,6 +151,25 @@ export async function deleteCampaign(id: string) {
   }
 
   revalidatePath("/ad-campaigns")
+
+  if (existingCampaign) {
+    await safeRecordAutomaticChangelogEntry({
+      area: "ads",
+      action_summary: "Deleted ad campaign",
+      entity_type: "campaign",
+      entity_id: existingCampaign.id,
+      entity_label: existingCampaign.campaign_name,
+      notes: existingCampaign.notes,
+      items: [
+        buildChangeItem("Platform", existingCampaign.platform, null),
+        buildChangeItem("Start date", existingCampaign.start_date, null),
+        buildChangeItem("End date", existingCampaign.end_date, null),
+        buildChangeItem("Target channels", existingCampaign.target_channels, null),
+        buildChangeItem("Status", existingCampaign.status, null),
+      ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+    })
+  }
+
   return { success: true }
 }
 
@@ -181,6 +247,22 @@ export async function addSpendEntry(formData: {
 
   revalidatePath("/ad-campaigns")
   revalidatePath(`/ad-campaigns/${formData.campaign_id}`)
+
+  const campaign = await getCampaignById(formData.campaign_id)
+  await safeRecordAutomaticChangelogEntry({
+    area: "ads",
+    action_summary: "Added ad spend entry",
+    entity_type: "campaign",
+    entity_id: formData.campaign_id,
+    entity_label: campaign?.campaign_name || `Campaign ${formData.campaign_id}`,
+    notes: data.notes,
+    items: [
+      buildChangeItem("Entry date", null, data.entry_date),
+      buildChangeItem("Amount", null, data.amount),
+      buildChangeItem("Payment method", null, data.payment_method),
+    ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+  })
+
   return { success: true, data }
 }
 
@@ -204,6 +286,12 @@ export async function getSpendEntries(campaignId: string) {
 export async function deleteSpendEntry(id: string, campaignId: string) {
   const supabase = await createClient()
 
+  const { data: existingSpend } = await supabase
+    .from("ad_spend_entries")
+    .select("*")
+    .eq("id", id)
+    .single()
+
   const { error } = await supabase
     .from("ad_spend_entries")
     .delete()
@@ -216,6 +304,24 @@ export async function deleteSpendEntry(id: string, campaignId: string) {
 
   revalidatePath("/ad-campaigns")
   revalidatePath(`/ad-campaigns/${campaignId}`)
+
+  if (existingSpend) {
+    const campaign = await getCampaignById(campaignId)
+    await safeRecordAutomaticChangelogEntry({
+      area: "ads",
+      action_summary: "Deleted ad spend entry",
+      entity_type: "campaign",
+      entity_id: campaignId,
+      entity_label: campaign?.campaign_name || `Campaign ${campaignId}`,
+      notes: existingSpend.notes,
+      items: [
+        buildChangeItem("Entry date", existingSpend.entry_date, null),
+        buildChangeItem("Amount", existingSpend.amount, null),
+        buildChangeItem("Payment method", existingSpend.payment_method, null),
+      ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+    })
+  }
+
   return { success: true }
 }
 
@@ -223,112 +329,228 @@ export async function deleteSpendEntry(id: string, campaignId: string) {
 // ANALYTICS & METRICS
 // ============================================================================
 
-export async function getCampaignMetrics(campaignId: string) {
+type AttributedOrderMetric = {
+  id: string
+  order_id: string
+  channel: Channel
+  order_date: string
+  status: string
+  revenue: number
+  net_profit: number
+  line_items_with_names: Array<{
+    id: string
+    sku: string
+    quantity: number
+    selling_price: number
+    cost_per_unit_snapshot: number | null
+    product_name: string
+  }>
+}
+
+type CampaignMetric = {
+  campaign: AdCampaign
+  total_spend: number
+  orders_count: number
+  revenue: number
+  profit: number
+  roas: number
+  cost_per_order: number
+  attributed_orders: AttributedOrderMetric[]
+}
+
+async function getCampaignMetricsBatch(options?: {
+  campaignIds?: string[]
+  status?: CampaignStatus
+  includeAttributedOrders?: boolean
+}) {
   const supabase = await createClient()
 
-  // Get campaign details
-  const campaign = await getCampaignById(campaignId)
-  if (!campaign) {
-    return null
+  let campaignsQuery = supabase
+    .from("ad_campaigns")
+    .select("*")
+    .order("start_date", { ascending: false })
+
+  if (options?.status) {
+    campaignsQuery = campaignsQuery.eq("status", options.status)
   }
 
-  // Build date filter for orders
-  const startDate = campaign.start_date
-  const endDate = campaign.end_date || new Date().toISOString().split('T')[0]
+  if (options?.campaignIds?.length) {
+    campaignsQuery = campaignsQuery.in("id", options.campaignIds)
+  }
 
-  // Get attributed orders (orders from target channels within campaign period)
-  const { data: orders } = await supabase
-    .from("orders")
-    .select(`
-      *,
-      order_line_items (
-        id,
-        sku,
-        quantity,
-        selling_price,
-        cost_per_unit_snapshot
-      )
-    `)
-    .in("channel", campaign.target_channels)
-    .gte("order_date", startDate)
-    .lte("order_date", endDate)
-    .in("status", ["paid", "shipped"])
+  const { data: campaigns, error: campaignsError } = await campaignsQuery
 
-  if (!orders) {
+  if (campaignsError) {
+    console.error("Error fetching campaigns for metrics:", campaignsError)
     return {
-      campaign,
-      total_spend: campaign.total_spend,
-      orders_count: 0,
-      revenue: 0,
-      roas: 0,
-      cost_per_order: 0,
-      attributed_orders: [],
+      campaigns: [] as AdCampaign[],
+      summaries: [] as Array<{
+        id: string
+        campaign_name: string
+        platform: AdPlatform
+        start_date: string
+        end_date: string | null
+        target_channels: Channel[]
+        status: CampaignStatus
+        total_spend: number
+        orders_count: number
+        revenue: number
+        profit: number
+        roas: number
+        cost_per_order: number
+      }>,
+      metricsById: new Map<string, CampaignMetric>(),
     }
   }
 
-  // Get products for cost calculation
-  const { data: products } = await supabase
-    .from("products")
-    .select("sku, name, cost_per_unit")
+  if (!campaigns || campaigns.length === 0) {
+    return {
+      campaigns: [] as AdCampaign[],
+      summaries: [] as Array<{
+        id: string
+        campaign_name: string
+        platform: AdPlatform
+        start_date: string
+        end_date: string | null
+        target_channels: Channel[]
+        status: CampaignStatus
+        total_spend: number
+        orders_count: number
+        revenue: number
+        profit: number
+        roas: number
+        cost_per_order: number
+      }>,
+      metricsById: new Map<string, CampaignMetric>(),
+    }
+  }
 
-  const productMap = new Map(products?.map(p => [p.sku, p]) || [])
+  const today = new Date().toISOString().split("T")[0]
+  const allChannels = Array.from(new Set(campaigns.flatMap((campaign) => campaign.target_channels)))
+  const globalStartDate = campaigns.reduce(
+    (min, campaign) => campaign.start_date < min ? campaign.start_date : min,
+    campaigns[0].start_date
+  )
+  const globalEndDate = campaigns.reduce((max, campaign) => {
+    const campaignEnd = campaign.end_date || today
+    return campaignEnd > max ? campaignEnd : max
+  }, campaigns[0].end_date || today)
 
-  // Calculate metrics
-  const ordersWithMetrics = orders.map((order: any) => {
+  const [ordersResult, productsResult] = await Promise.all([
+    allChannels.length > 0
+      ? supabase
+          .from("orders")
+          .select(`
+            id,
+            order_id,
+            channel,
+            order_date,
+            status,
+            channel_fees,
+            order_line_items (
+              id,
+              sku,
+              quantity,
+              selling_price,
+              cost_per_unit_snapshot
+            )
+          `)
+          .in("channel", allChannels)
+          .gte("order_date", globalStartDate)
+          .lte("order_date", globalEndDate)
+          .in("status", ["paid", "shipped"])
+      : Promise.resolve({ data: [], error: null }),
+    supabase.from("products").select("sku, name, cost_per_unit"),
+  ])
+
+  if (ordersResult.error) {
+    console.error("Error fetching attributed orders:", ordersResult.error)
+  }
+
+  if (productsResult.error) {
+    console.error("Error fetching products for campaign metrics:", productsResult.error)
+  }
+
+  const productMap = new Map((productsResult.data || []).map((product) => [product.sku, product]))
+  const decoratedOrdersByChannel = new Map<Channel, AttributedOrderMetric[]>()
+
+  for (const order of (ordersResult.data || []) as any[]) {
     const lineItems = order.order_line_items || []
-
-    // Calculate revenue (total selling price - channel fees)
-    const totalSellingPrice = lineItems.reduce((sum: number, item: any) =>
-      sum + (item.selling_price * item.quantity), 0
+    const totalSellingPrice = lineItems.reduce(
+      (sum: number, item: any) => sum + (item.selling_price * item.quantity),
+      0
     )
-    const channelFees = order.channel_fees || 0
-    const revenue = totalSellingPrice - channelFees
-
-    // Calculate COGS
+    const revenue = totalSellingPrice - (order.channel_fees || 0)
     const totalCogs = lineItems.reduce((sum: number, item: any) => {
       const product = productMap.get(item.sku)
       return sum + getLineItemTotalCost(item, product)
     }, 0)
 
-    // Net profit
-    const net_profit = revenue - totalCogs
-
-    return {
-      ...order,
+    const decoratedOrder: AttributedOrderMetric = {
+      id: order.id,
+      order_id: order.order_id,
+      channel: order.channel,
+      order_date: order.order_date,
+      status: order.status,
       revenue,
-      net_profit,
+      net_profit: revenue - totalCogs,
       line_items_with_names: lineItems.map((item: any) => ({
         ...item,
         product_name: productMap.get(item.sku)?.name || "Unknown",
       })),
     }
-  })
 
-  const totalRevenue = ordersWithMetrics.reduce((sum, order) => sum + order.revenue, 0)
-  const totalProfit = ordersWithMetrics.reduce((sum, order) => sum + order.net_profit, 0)
-  const ordersCount = orders.length
-
-  const roas = campaign.total_spend > 0 ? totalRevenue / campaign.total_spend : 0
-  const costPerOrder = ordersCount > 0 ? campaign.total_spend / ordersCount : 0
-
-  return {
-    campaign,
-    total_spend: campaign.total_spend,
-    orders_count: ordersCount,
-    revenue: totalRevenue,
-    profit: totalProfit,
-    roas,
-    cost_per_order: costPerOrder,
-    attributed_orders: ordersWithMetrics,
+    const existing = decoratedOrdersByChannel.get(order.channel) || []
+    existing.push(decoratedOrder)
+    decoratedOrdersByChannel.set(order.channel, existing)
   }
-}
 
-export async function getAllCampaignsMetrics(filters?: { status?: CampaignStatus }) {
-  const campaigns = await getCampaigns(filters)
+  for (const orders of decoratedOrdersByChannel.values()) {
+    orders.sort((a, b) => b.order_date.localeCompare(a.order_date))
+  }
 
-  const metricsPromises = campaigns.map(async (campaign) => {
-    const metrics = await getCampaignMetrics(campaign.id)
-    return {
+  const metricsById = new Map<string, CampaignMetric>()
+  const summaries: Array<{
+    id: string
+    campaign_name: string
+    platform: AdPlatform
+    start_date: string
+    end_date: string | null
+    target_channels: Channel[]
+    status: CampaignStatus
+    total_spend: number
+    orders_count: number
+    revenue: number
+    profit: number
+    roas: number
+    cost_per_order: number
+  }> = []
+
+  for (const campaign of campaigns) {
+    const targetChannels: Channel[] = Array.from(new Set<Channel>(campaign.target_channels))
+    const campaignEnd = campaign.end_date || today
+    const attributedOrders = targetChannels
+      .flatMap((channel) => decoratedOrdersByChannel.get(channel) || [])
+      .filter((order) => order.order_date >= campaign.start_date && order.order_date <= campaignEnd)
+
+    const totalRevenue = attributedOrders.reduce((sum, order) => sum + order.revenue, 0)
+    const totalProfit = attributedOrders.reduce((sum, order) => sum + order.net_profit, 0)
+    const ordersCount = attributedOrders.length
+    const roas = campaign.total_spend > 0 ? totalRevenue / campaign.total_spend : 0
+    const costPerOrder = ordersCount > 0 ? campaign.total_spend / ordersCount : 0
+
+    metricsById.set(campaign.id, {
+      campaign,
+      total_spend: campaign.total_spend,
+      orders_count: ordersCount,
+      revenue: totalRevenue,
+      profit: totalProfit,
+      roas,
+      cost_per_order: costPerOrder,
+      attributed_orders: options?.includeAttributedOrders ? attributedOrders : [],
+    })
+
+    summaries.push({
       id: campaign.id,
       campaign_name: campaign.campaign_name,
       platform: campaign.platform,
@@ -336,27 +558,43 @@ export async function getAllCampaignsMetrics(filters?: { status?: CampaignStatus
       end_date: campaign.end_date,
       target_channels: campaign.target_channels,
       status: campaign.status,
-      total_spend: metrics?.total_spend || 0,
-      orders_count: metrics?.orders_count || 0,
-      revenue: metrics?.revenue || 0,
-      profit: metrics?.profit || 0,
-      roas: metrics?.roas || 0,
-      cost_per_order: metrics?.cost_per_order || 0,
-    }
+      total_spend: campaign.total_spend,
+      orders_count: ordersCount,
+      revenue: totalRevenue,
+      profit: totalProfit,
+      roas,
+      cost_per_order: costPerOrder,
+    })
+  }
+
+  return {
+    campaigns: campaigns as AdCampaign[],
+    summaries,
+    metricsById,
+  }
+}
+
+export async function getCampaignMetrics(campaignId: string) {
+  const { metricsById } = await getCampaignMetricsBatch({
+    campaignIds: [campaignId],
+    includeAttributedOrders: true,
   })
 
-  return Promise.all(metricsPromises)
+  return metricsById.get(campaignId) || null
+}
+
+export async function getAllCampaignsMetrics(filters?: { status?: CampaignStatus }) {
+  const { summaries } = await getCampaignMetricsBatch({
+    status: filters?.status,
+  })
+
+  return summaries
 }
 
 export async function getAdPerformanceSummary() {
-  const supabase = await createClient()
+  const { campaigns, summaries } = await getCampaignMetricsBatch()
 
-  // Get all campaigns
-  const { data: campaigns } = await supabase
-    .from("ad_campaigns")
-    .select("*")
-
-  if (!campaigns || campaigns.length === 0) {
+  if (campaigns.length === 0) {
     return {
       total_ad_spend: 0,
       total_revenue: 0,
@@ -368,24 +606,18 @@ export async function getAdPerformanceSummary() {
     }
   }
 
-  // Get metrics for all campaigns
-  const allMetrics = await getAllCampaignsMetrics()
-
-  const totalAdSpend = allMetrics.reduce((sum, m) => sum + m.total_spend, 0)
-  const totalRevenue = allMetrics.reduce((sum, m) => sum + m.revenue, 0)
-  const totalOrders = allMetrics.reduce((sum, m) => sum + m.orders_count, 0)
-  const activeCampaignsCount = campaigns.filter(c => c.status === 'active').length
-
-  const overallRoas = totalAdSpend > 0 ? totalRevenue / totalAdSpend : 0
-  const avgCostPerOrder = totalOrders > 0 ? totalAdSpend / totalOrders : 0
+  const totalAdSpend = summaries.reduce((sum, campaign) => sum + campaign.total_spend, 0)
+  const totalRevenue = summaries.reduce((sum, campaign) => sum + campaign.revenue, 0)
+  const totalOrders = summaries.reduce((sum, campaign) => sum + campaign.orders_count, 0)
+  const activeCampaignsCount = campaigns.filter((campaign) => campaign.status === "active").length
 
   return {
     total_ad_spend: totalAdSpend,
     total_revenue: totalRevenue,
-    overall_roas: overallRoas,
+    overall_roas: totalAdSpend > 0 ? totalRevenue / totalAdSpend : 0,
     total_orders: totalOrders,
-    avg_cost_per_order: avgCostPerOrder,
+    avg_cost_per_order: totalOrders > 0 ? totalAdSpend / totalOrders : 0,
     active_campaigns_count: activeCampaignsCount,
-    campaigns_metrics: allMetrics,
+    campaigns_metrics: summaries,
   }
 }

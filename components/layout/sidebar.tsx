@@ -11,6 +11,7 @@ import {
   BarChart3,
   TrendingUp,
   Upload,
+  History,
   LogOut,
   Menu,
   X
@@ -50,6 +51,11 @@ const navigation = [
     name: "Ad Campaigns",
     href: "/ad-campaigns",
     icon: TrendingUp,
+  },
+  {
+    name: "Changelog",
+    href: "/changelog",
+    icon: History,
   },
 ]
 

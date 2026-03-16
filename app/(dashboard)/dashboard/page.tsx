@@ -1,5 +1,5 @@
-import { getStockOnHand, getDashboardStats } from "@/lib/actions/inventory"
-import { getOrderStats, getSalesReport, getReturnSummary, getReorderRecommendations, getDailySalesSnippet } from "@/lib/actions/orders"
+import { getStockOnHand } from "@/lib/actions/inventory"
+import { getSalesReport, getReturnSummary, getReorderRecommendations, getDailySalesSnippet } from "@/lib/actions/orders"
 import { getAllBundlesWithAvailability } from "@/lib/actions/bundles"
 import { getProjectedRevenue } from "@/lib/actions/products"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -27,15 +27,29 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
   const datePattern = /^\d{4}-\d{2}-\d{2}$/
   const selectedDate = params.date && datePattern.test(params.date) ? params.date : today
 
-  const stats = await getDashboardStats()
-  const stockData = await getStockOnHand()
-  const orderStats = await getOrderStats()
-  const salesReport = await getSalesReport()
-  const returnSummary = await getReturnSummary()
-  const reorderRecommendations = await getReorderRecommendations()
-  const dailySales = await getDailySalesSnippet(selectedDate)
-  const bundles = await getAllBundlesWithAvailability()
-  const projectedRevenue = await getProjectedRevenue()
+  const [
+    stockData,
+    salesReport,
+    returnSummary,
+    reorderRecommendations,
+    dailySales,
+    bundles,
+    projectedRevenue,
+  ] = await Promise.all([
+    getStockOnHand(),
+    getSalesReport(),
+    getReturnSummary(),
+    getReorderRecommendations(),
+    getDailySalesSnippet(selectedDate),
+    getAllBundlesWithAvailability(),
+    getProjectedRevenue(),
+  ])
+  const stats = {
+    totalProducts: stockData.length,
+    lowStockItems: stockData.filter((item) => item.is_low_stock).length,
+    totalStock: stockData.reduce((sum, item) => sum + item.current_stock, 0),
+  }
+  const paidOrdersCount = salesReport.byChannel.reduce((sum, channel) => sum + channel.orders, 0)
   const totalUnitsSold = salesReport.byProduct.reduce((sum, product) => sum + product.units_sold, 0)
   const returnedUnits = returnSummary.returnedUnits || 0
   const grossUnitsSold = totalUnitsSold + returnedUnits
@@ -139,7 +153,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
               {formatCurrency(salesReport.byChannel.reduce((sum, ch) => sum + ch.revenue, 0))}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              From {orderStats.paidOrders} paid orders
+              From {paidOrdersCount} paid or shipped orders
             </p>
           </CardContent>
         </Card>

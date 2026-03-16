@@ -35,8 +35,10 @@ type Props = {
 
 export default async function CampaignDetailPage({ params }: Props) {
   const { id } = await params
-  const metrics = await getCampaignMetrics(id)
-  const spendEntries = await getSpendEntries(id)
+  const [metrics, spendEntries] = await Promise.all([
+    getCampaignMetrics(id),
+    getSpendEntries(id),
+  ])
 
   if (!metrics) {
     notFound()

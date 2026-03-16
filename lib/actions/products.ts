@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import { cache } from "react"
 import type { Product } from "@/lib/types/database.types"
+import { safeRecordAutomaticChangelogEntry } from "./changelog"
+import { buildChangeItem } from "@/lib/changelog"
 
 export async function getProducts() {
   const supabase = await createClient()
@@ -63,6 +65,24 @@ export async function createProduct(formData: {
   revalidatePath("/products")
   revalidatePath("/dashboard")
 
+  await safeRecordAutomaticChangelogEntry({
+    area: "products",
+    action_summary: "Created product",
+    entity_type: "product",
+    entity_id: data.sku,
+    entity_label: `${data.name} (${data.sku})`,
+    notes: null,
+    items: [
+      buildChangeItem("SKU", null, data.sku),
+      buildChangeItem("Name", null, data.name),
+      buildChangeItem("Variant", null, data.variant),
+      buildChangeItem("Cost per unit", null, data.cost_per_unit),
+      buildChangeItem("Reorder point", null, data.reorder_point),
+      buildChangeItem("Bundle", null, data.is_bundle),
+      buildChangeItem("Status", null, data.status),
+    ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+  })
+
   return { success: true, data }
 }
 
@@ -77,6 +97,11 @@ export async function updateProduct(
   }
 ) {
   const supabase = await createClient()
+
+  const previousProduct = await getProductBySku(sku)
+  if (!previousProduct) {
+    return { success: false, error: "Product not found" }
+  }
 
   // Note: SKU cannot be updated (enforced by DB trigger)
   const { data, error } = await supabase
@@ -93,6 +118,25 @@ export async function updateProduct(
 
   revalidatePath("/products")
   revalidatePath("/dashboard")
+
+  const items = [
+    buildChangeItem("Name", previousProduct.name, data.name),
+    buildChangeItem("Variant", previousProduct.variant, data.variant),
+    buildChangeItem("Cost per unit", previousProduct.cost_per_unit, data.cost_per_unit),
+    buildChangeItem("Reorder point", previousProduct.reorder_point, data.reorder_point),
+    buildChangeItem("Status", previousProduct.status, data.status),
+  ].filter((item): item is NonNullable<typeof item> => Boolean(item))
+
+  if (items.length > 0) {
+    await safeRecordAutomaticChangelogEntry({
+      area: "products",
+      action_summary: "Updated product",
+      entity_type: "product",
+      entity_id: data.sku,
+      entity_label: `${data.name} (${data.sku})`,
+      items,
+    })
+  }
 
   return { success: true, data }
 }
