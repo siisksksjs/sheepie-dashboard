@@ -7,7 +7,9 @@ import { getReportsBundle } from "./orders"
 import { createLedgerEntry } from "./inventory"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
+import { getMarketplaceChannelAccountMappings } from "@/lib/marketplace-settlements"
 import type {
+  Channel,
   FinanceAccount,
   FinanceAccountType,
   FinanceCategory,
@@ -18,6 +20,7 @@ import type {
   FinanceTransfer,
   InventoryPurchaseBatch,
   InventoryPurchaseBatchItem,
+  MarketplaceChannelAccount,
   Product,
 } from "@/lib/types/database.types"
 
@@ -48,6 +51,10 @@ type InventoryPurchaseItemInput = {
 type InventoryPurchaseBatchWithItems = InventoryPurchaseBatch & {
   account_name: string
   items: Array<InventoryPurchaseBatchItem & { product_name: string; variant: string | null }>
+}
+
+type MarketplaceChannelAccountWithMeta = MarketplaceChannelAccount & {
+  account_name: string
 }
 
 function getDateRange(year?: number, month?: number): DateRange {
@@ -93,6 +100,22 @@ function revalidateFinancePaths() {
   revalidatePath("/finance")
   revalidatePath("/dashboard")
 }
+
+export const getMarketplaceAccountMappings = cache(async () => {
+  const [mappings, accounts] = await Promise.all([
+    getMarketplaceChannelAccountMappings(),
+    getFinanceAccounts(),
+  ])
+
+  const accountMap = new Map(accounts.map((account) => [account.id, account.name]))
+
+  return mappings
+    .map((mapping) => ({
+      ...mapping,
+      account_name: accountMap.get(mapping.finance_account_id) || "Unknown account",
+    }))
+    .sort((a, b) => a.channel.localeCompare(b.channel)) as MarketplaceChannelAccountWithMeta[]
+})
 
 export async function getFinanceAccounts() {
   const supabase = await createClient()
@@ -521,6 +544,76 @@ export async function createFinanceAccount(input: {
   })
 
   return { success: true, data: data as FinanceAccount }
+}
+
+export async function saveMarketplaceAccountMappings(
+  mappings: Partial<Record<Channel, string | null>>
+) {
+  const supabase = await createClient()
+  const accounts = await getFinanceAccounts()
+  const existingMappings = await getMarketplaceAccountMappings()
+  const validChannels: Channel[] = ["shopee", "tokopedia", "tiktok"]
+  const accountMap = new Map(accounts.map((account) => [account.id, account.name]))
+  const previousMap = new Map(existingMappings.map((mapping) => [mapping.channel, mapping.finance_account_id]))
+
+  for (const channel of validChannels) {
+    if (!(channel in mappings)) continue
+
+    const accountId = mappings[channel] || null
+
+    if (accountId && !accountMap.has(accountId)) {
+      return { success: false, error: `Invalid account selected for ${channel}` }
+    }
+
+    if (!accountId) {
+      const { error } = await supabase
+        .from("marketplace_channel_accounts")
+        .delete()
+        .eq("channel", channel)
+
+      if (error) {
+        console.error("Error clearing marketplace mapping:", error)
+        return { success: false, error: error.message }
+      }
+
+      continue
+    }
+
+    const { error } = await supabase
+      .from("marketplace_channel_accounts")
+      .upsert([{
+        channel,
+        finance_account_id: accountId,
+      }], { onConflict: "channel" })
+
+    if (error) {
+      console.error("Error saving marketplace mapping:", error)
+      return { success: false, error: error.message }
+    }
+  }
+
+  revalidateFinancePaths()
+
+  await safeRecordAutomaticChangelogEntry({
+    area: "finance",
+    action_summary: "Updated marketplace settlement mappings",
+    entity_type: "marketplace_account_mapping",
+    entity_label: "Marketplace settlement accounts",
+    items: validChannels
+      .map((channel) => {
+        if (!(channel in mappings)) return null
+
+        const previousAccountId = previousMap.get(channel) || null
+        const nextAccountId = mappings[channel] || null
+        const previousName = previousAccountId ? accountMap.get(previousAccountId) || previousAccountId : null
+        const nextName = nextAccountId ? accountMap.get(nextAccountId) || nextAccountId : null
+
+        return buildChangeItem(channel, previousName, nextName)
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item)),
+  })
+
+  return { success: true }
 }
 
 export async function createFinanceEntry(input: {

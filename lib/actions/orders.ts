@@ -8,6 +8,12 @@ import { createLedgerEntry } from "./inventory"
 import { getLineItemCostPerUnit, getLineItemTotalCost } from "@/lib/line-item-costs"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem, summarizeLineItems } from "@/lib/changelog"
+import {
+  calculateOrderSettlementAmount,
+  createMarketplaceSettlementEntry,
+  createMarketplaceSettlementReversalEntry,
+  isSettledOrderStatus,
+} from "@/lib/marketplace-settlements"
 
 export async function getOrders(filters?: {
   status?: OrderStatus
@@ -200,8 +206,8 @@ export async function createOrder(formData: {
     return { success: false, error: lineItemsError.message }
   }
 
-  // If order status is 'paid', generate ledger entries
-  if (formData.status === "paid") {
+  // If order status is settled, generate ledger entries
+  if (isSettledOrderStatus(formData.status)) {
     for (const item of formData.line_items) {
       // Check if this is a bundle
       const { data: product } = await supabase
@@ -241,6 +247,22 @@ export async function createOrder(formData: {
           skipChangelog: true,
         })
       }
+    }
+  }
+
+  if (isSettledOrderStatus(formData.status)) {
+    const settlementAmount = calculateOrderSettlementAmount(lineItemsToInsert, formData.channel_fees)
+    const settlementResult = await createMarketplaceSettlementEntry({
+      orderId: order.id,
+      orderLabel: `Order ${order.order_id}`,
+      channel: order.channel,
+      entryDate: order.order_date,
+      amount: settlementAmount,
+      notes: order.notes,
+    })
+
+    if (!settlementResult.success) {
+      console.error("Failed to create marketplace settlement entry:", settlementResult.error)
     }
   }
 
@@ -298,7 +320,10 @@ export async function updateOrderStatus(
   // Cancelled → Creates RETURN entries to reverse the sale
   // Returned → Creates RETURN entries to add stock back
 
-  if (previousStatus === "paid" && (newStatus === "cancelled" || newStatus === "returned")) {
+  const wasSettled = isSettledOrderStatus(previousStatus)
+  const isSettled = isSettledOrderStatus(newStatus)
+
+  if (wasSettled && (newStatus === "cancelled" || newStatus === "returned")) {
     // Reverse the sale by creating RETURN entries
     for (const item of lineItems) {
       // Check if this is a bundle
@@ -342,7 +367,7 @@ export async function updateOrderStatus(
     }
   }
 
-  if (previousStatus !== "paid" && newStatus === "paid") {
+  if (!wasSettled && isSettled) {
     // Order wasn't paid before, now it is - create OUT_SALE entries
     for (const item of lineItems) {
       // Check if this is a bundle
@@ -386,14 +411,46 @@ export async function updateOrderStatus(
     }
   }
 
+  const settlementAmount = calculateOrderSettlementAmount(lineItems, order.channel_fees)
+
+  if (!wasSettled && isSettled) {
+    const settlementResult = await createMarketplaceSettlementEntry({
+      orderId: order.id,
+      orderLabel: `Order ${order.order_id}`,
+      channel: order.channel,
+      entryDate: order.order_date,
+      amount: settlementAmount,
+      notes: order.notes,
+    })
+
+    if (!settlementResult.success) {
+      console.error("Failed to create marketplace settlement entry:", settlementResult.error)
+    }
+  }
+
+  if (wasSettled && !isSettled) {
+    const reversalResult = await createMarketplaceSettlementReversalEntry({
+      orderId: order.id,
+      orderLabel: `Order ${order.order_id}`,
+      channel: order.channel,
+      entryDate: new Date().toISOString().split("T")[0],
+      amount: settlementAmount,
+      notes: `Status changed from ${previousStatus} to ${newStatus}`,
+    })
+
+    if (!reversalResult.success) {
+      console.error("Failed to reverse marketplace settlement entry:", reversalResult.error)
+    }
+  }
+
   revalidatePath("/orders")
   revalidatePath("/dashboard")
   revalidatePath("/ledger")
 
   let stockEffect: string | null = null
-  if (previousStatus === "paid" && (newStatus === "cancelled" || newStatus === "returned")) {
+  if (wasSettled && (newStatus === "cancelled" || newStatus === "returned")) {
     stockEffect = "Created RETURN ledger entries to restore stock."
-  } else if (previousStatus !== "paid" && newStatus === "paid") {
+  } else if (!wasSettled && isSettled) {
     stockEffect = "Created OUT_SALE ledger entries to reduce stock."
   }
 

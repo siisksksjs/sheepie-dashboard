@@ -117,6 +117,7 @@ export type FinanceCategoryKind =
   | 'operating_expense'
   | 'other_income'
   | 'inventory_purchase'
+  | 'marketplace_settlement'
   | 'transfer'
   | 'adjustment'
 
@@ -132,6 +133,13 @@ export type FinanceAccount = {
   opening_balance: number
   is_active: boolean
   notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type MarketplaceChannelAccount = {
+  channel: Channel
+  finance_account_id: string
   created_at: string
   updated_at: string
 }

@@ -16,6 +16,7 @@ import {
   createFinanceEntry,
   createFinanceTransfer,
   createInventoryPurchase,
+  saveMarketplaceAccountMappings,
 } from "@/lib/actions/finance"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -27,6 +28,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import type {
+  Channel,
   FinanceAccount,
   FinanceCategory,
   FinanceEntryDirection,
@@ -37,6 +39,7 @@ type EntryRow = Awaited<ReturnType<typeof import("@/lib/actions/finance").getFin
 type TransferRow = Awaited<ReturnType<typeof import("@/lib/actions/finance").getFinanceTransfers>>[number]
 type PurchaseRow = Awaited<ReturnType<typeof import("@/lib/actions/finance").getInventoryPurchaseBatches>>[number]
 type Overview = Awaited<ReturnType<typeof import("@/lib/actions/finance").getFinanceOverview>>
+type MarketplaceMappingRow = Awaited<ReturnType<typeof import("@/lib/actions/finance").getMarketplaceAccountMappings>>[number]
 
 type PurchaseItemForm = {
   id: string
@@ -54,7 +57,17 @@ type Props = {
   purchases: PurchaseRow[]
   accounts: FinanceAccount[]
   categories: FinanceCategory[]
+  marketplaceMappings: MarketplaceMappingRow[]
   products: Product[]
+}
+
+const marketplaceChannels: Channel[] = ["shopee", "tokopedia", "tiktok"]
+
+const channelLabels: Record<Channel, string> = {
+  shopee: "Shopee",
+  tokopedia: "Tokopedia",
+  tiktok: "TikTok Shop",
+  offline: "Offline",
 }
 
 function buildFilterUrl(year: number, month?: number) {
@@ -73,6 +86,7 @@ export function FinanceClient({
   purchases,
   accounts,
   categories,
+  marketplaceMappings,
   products,
 }: Props) {
   const router = useRouter()
@@ -80,14 +94,25 @@ export function FinanceClient({
   const [entryError, setEntryError] = useState<string | null>(null)
   const [transferError, setTransferError] = useState<string | null>(null)
   const [purchaseError, setPurchaseError] = useState<string | null>(null)
+  const [mappingError, setMappingError] = useState<string | null>(null)
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItemForm[]>([
     { id: crypto.randomUUID(), sku: "", quantity: 1, unit_cost: 0 },
   ])
   const [entryCategoryId, setEntryCategoryId] = useState("")
   const [entryDirection, setEntryDirection] = useState<FinanceEntryDirection>("out")
+  const [channelAccountMappings, setChannelAccountMappings] = useState<Record<Channel, string>>(() => ({
+    shopee: marketplaceMappings.find((mapping) => mapping.channel === "shopee")?.finance_account_id || "unmapped",
+    tokopedia: marketplaceMappings.find((mapping) => mapping.channel === "tokopedia")?.finance_account_id || "unmapped",
+    tiktok: marketplaceMappings.find((mapping) => mapping.channel === "tiktok")?.finance_account_id || "unmapped",
+    offline: "unmapped",
+  }))
 
   const yearOptions = Array.from({ length: 5 }, (_, index) => selectedYear - 2 + index)
-  const entryCategories = categories.filter((category) => category.kind !== "inventory_purchase" && category.kind !== "transfer")
+  const entryCategories = categories.filter((category) =>
+    category.kind !== "inventory_purchase"
+    && category.kind !== "transfer"
+    && category.kind !== "marketplace_settlement"
+  )
   const selectedEntryCategory = entryCategories.find((category) => category.id === entryCategoryId)
 
   const handleYearChange = (value: string) => {
@@ -205,6 +230,22 @@ export function FinanceClient({
 
     if (!result.success) {
       setPurchaseError(result.error || "Failed to create inventory purchase")
+      return
+    }
+
+    router.refresh()
+  }
+
+  const handleMarketplaceMappingSave = async () => {
+    setMappingError(null)
+    const result = await saveMarketplaceAccountMappings({
+      shopee: channelAccountMappings.shopee === "unmapped" ? null : channelAccountMappings.shopee,
+      tokopedia: channelAccountMappings.tokopedia === "unmapped" ? null : channelAccountMappings.tokopedia,
+      tiktok: channelAccountMappings.tiktok === "unmapped" ? null : channelAccountMappings.tiktok,
+    })
+
+    if (!result.success) {
+      setMappingError(result.error || "Failed to save marketplace mappings")
       return
     }
 
@@ -608,6 +649,47 @@ export function FinanceClient({
         </TabsContent>
 
         <TabsContent value="accounts" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Marketplace Settlement Accounts</CardTitle>
+              <CardDescription>
+                Paid and shipped marketplace orders credit these balances automatically. Tokopedia and TikTok can use the same account.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-3">
+                {marketplaceChannels.map((channel) => (
+                  <div key={channel} className="space-y-2">
+                    <Label>{channelLabels[channel]}</Label>
+                    <Select
+                      value={channelAccountMappings[channel]}
+                      onValueChange={(value) =>
+                        setChannelAccountMappings((current) => ({ ...current, [channel]: value }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unmapped">Unmapped</SelectItem>
+                        {accounts.map((account) => (
+                          <SelectItem key={account.id} value={account.id}>
+                            {account.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ))}
+              </div>
+              {mappingError && <p className="text-sm text-destructive">{mappingError}</p>}
+              <Button type="button" onClick={handleMarketplaceMappingSave}>
+                <Wallet className="mr-2 h-4 w-4" />
+                Save Marketplace Mappings
+              </Button>
+            </CardContent>
+          </Card>
+
           <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
             <Card>
               <CardHeader>

@@ -6,6 +6,7 @@ import {
   getFinanceOverview,
   getFinanceTransfers,
   getInventoryPurchaseBatches,
+  getMarketplaceAccountMappings,
 } from "@/lib/actions/finance"
 import { FinanceClient } from "@/components/finance/finance-client"
 
@@ -24,6 +25,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Sear
     purchases,
     accounts,
     categories,
+    marketplaceMappings,
     products,
   ] = await Promise.all([
     getFinanceOverview(selectedYear, selectedMonth),
@@ -32,6 +34,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Sear
     getInventoryPurchaseBatches({ year: selectedYear, month: selectedMonth, limit: 50 }),
     getFinanceAccounts(),
     getFinanceCategories(),
+    getMarketplaceAccountMappings(),
     getProducts(),
   ])
 
@@ -45,6 +48,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Sear
       purchases={purchases}
       accounts={accounts}
       categories={categories}
+      marketplaceMappings={marketplaceMappings}
       products={products.filter((product) => product.status === "active")}
     />
   )
