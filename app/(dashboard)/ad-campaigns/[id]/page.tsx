@@ -1,4 +1,5 @@
 import { getCampaignMetrics, getSpendEntries } from "@/lib/actions/ad-campaigns"
+import { getFinanceAccounts } from "@/lib/actions/finance"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -35,9 +36,10 @@ type Props = {
 
 export default async function CampaignDetailPage({ params }: Props) {
   const { id } = await params
-  const [metrics, spendEntries] = await Promise.all([
+  const [metrics, spendEntries, financeAccounts] = await Promise.all([
     getCampaignMetrics(id),
     getSpendEntries(id),
+    getFinanceAccounts(),
   ])
 
   if (!metrics) {
@@ -168,7 +170,7 @@ export default async function CampaignDetailPage({ params }: Props) {
                 Record of all ad spend topups for this campaign
               </CardDescription>
             </div>
-            <AddSpendModal campaignId={campaign.id} />
+            <AddSpendModal campaignId={campaign.id} financeAccounts={financeAccounts} />
           </div>
         </CardHeader>
         <CardContent>
@@ -208,6 +210,11 @@ export default async function CampaignDetailPage({ params }: Props) {
                           {entry.payment_method}
                         </p>
                       )}
+                      {entry.finance_account_id && (
+                        <p className="text-sm text-muted-foreground">
+                          Account linked
+                        </p>
+                      )}
                       {entry.notes && (
                         <p className="text-sm text-muted-foreground italic">
                           {entry.notes}
@@ -226,6 +233,7 @@ export default async function CampaignDetailPage({ params }: Props) {
                       <TableHead>Date</TableHead>
                       <TableHead className="text-right">Amount</TableHead>
                       <TableHead>Payment Method</TableHead>
+                      <TableHead>Funding Account</TableHead>
                       <TableHead>Notes</TableHead>
                       <TableHead className="text-right">Running Total</TableHead>
                     </TableRow>
@@ -250,6 +258,11 @@ export default async function CampaignDetailPage({ params }: Props) {
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {entry.payment_method || '-'}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {entry.finance_account_id
+                              ? financeAccounts.find((account) => account.id === entry.finance_account_id)?.name || "Linked account"
+                              : '-'}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {entry.notes || '-'}

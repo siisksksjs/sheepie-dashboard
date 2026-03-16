@@ -10,6 +10,7 @@ import {
   ShoppingCart,
   BarChart3,
   TrendingUp,
+  Landmark,
   Upload,
   History,
   LogOut,
@@ -51,6 +52,11 @@ const navigation = [
     name: "Ad Campaigns",
     href: "/ad-campaigns",
     icon: TrendingUp,
+  },
+  {
+    name: "Finance",
+    href: "/finance",
+    icon: Landmark,
   },
   {
     name: "Changelog",

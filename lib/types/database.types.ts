@@ -104,8 +104,96 @@ export type AdSpendEntry = {
   campaign_id: string
   entry_date: string
   amount: number
+  finance_account_id: string | null
+  finance_entry_id: string | null
   payment_method: string | null
   notes: string | null
+  created_at: string
+}
+
+export type FinanceAccountType = 'bank' | 'cash' | 'ewallet'
+
+export type FinanceCategoryKind =
+  | 'operating_expense'
+  | 'other_income'
+  | 'inventory_purchase'
+  | 'transfer'
+  | 'adjustment'
+
+export type FinanceEntryDirection = 'in' | 'out'
+
+export type FinanceEntrySource = 'manual' | 'automatic'
+
+export type FinanceAccount = {
+  id: string
+  name: string
+  type: FinanceAccountType
+  currency: string
+  opening_balance: number
+  is_active: boolean
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type FinanceCategory = {
+  id: string
+  name: string
+  kind: FinanceCategoryKind
+  group_name: string
+  is_active: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export type FinanceEntry = {
+  id: string
+  entry_date: string
+  account_id: string
+  category_id: string
+  direction: FinanceEntryDirection
+  amount: number
+  source: FinanceEntrySource
+  reference_type: string | null
+  reference_id: string | null
+  vendor: string | null
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type FinanceTransfer = {
+  id: string
+  entry_date: string
+  from_account_id: string
+  to_account_id: string
+  amount: number
+  notes: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export type InventoryPurchaseBatch = {
+  id: string
+  entry_date: string
+  vendor: string | null
+  account_id: string
+  finance_entry_id: string | null
+  total_amount: number
+  notes: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export type InventoryPurchaseBatchItem = {
+  id: string
+  batch_id: string
+  sku: string
+  quantity: number
+  unit_cost: number
+  total_cost: number
   created_at: string
 }
 

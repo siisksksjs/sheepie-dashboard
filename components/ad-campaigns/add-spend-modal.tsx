@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { addSpendEntry } from "@/lib/actions/ad-campaigns"
+import type { FinanceAccount } from "@/lib/types/database.types"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -15,14 +16,16 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Plus } from "lucide-react"
 
 type AddSpendModalProps = {
   campaignId: string
+  financeAccounts: FinanceAccount[]
 }
 
-export function AddSpendModal({ campaignId }: AddSpendModalProps) {
+export function AddSpendModal({ campaignId, financeAccounts }: AddSpendModalProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -30,6 +33,7 @@ export function AddSpendModal({ campaignId }: AddSpendModalProps) {
 
   const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0])
   const [amount, setAmount] = useState("")
+  const [financeAccountId, setFinanceAccountId] = useState("")
   const [paymentMethod, setPaymentMethod] = useState("")
   const [notes, setNotes] = useState("")
 
@@ -48,6 +52,7 @@ export function AddSpendModal({ campaignId }: AddSpendModalProps) {
       campaign_id: campaignId,
       entry_date: entryDate,
       amount: parseFloat(amount),
+      finance_account_id: financeAccountId || null,
       payment_method: paymentMethod || null,
       notes: notes || null,
     })
@@ -58,6 +63,7 @@ export function AddSpendModal({ campaignId }: AddSpendModalProps) {
       // Reset form
       setEntryDate(new Date().toISOString().split('T')[0])
       setAmount("")
+      setFinanceAccountId("")
       setPaymentMethod("")
       setNotes("")
       setOpen(false)
@@ -122,6 +128,25 @@ export function AddSpendModal({ campaignId }: AddSpendModalProps) {
               />
               <p className="text-xs text-muted-foreground">
                 How much did you spend on this topup?
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Funding Account (Optional)</Label>
+              <Select value={financeAccountId} onValueChange={setFinanceAccountId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select account if this should hit bank balance" />
+                </SelectTrigger>
+                <SelectContent>
+                  {financeAccounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                If selected, this spend entry will also create a linked finance cash-out entry.
               </p>
             </div>
 

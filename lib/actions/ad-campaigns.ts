@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
-import type { AdCampaign, AdSpendEntry, Channel, AdPlatform, CampaignStatus } from "@/lib/types/database.types"
+import type { AdCampaign, AdSpendEntry, Channel, AdPlatform, CampaignStatus, FinanceAccount } from "@/lib/types/database.types"
 import { getLineItemTotalCost } from "@/lib/line-item-costs"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
@@ -229,14 +229,50 @@ export async function addSpendEntry(formData: {
   campaign_id: string
   entry_date: string
   amount: number
+  finance_account_id?: string | null
   payment_method: string | null
   notes: string | null
 }) {
   const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  let financeAccount: FinanceAccount | null = null
+  if (formData.finance_account_id) {
+    const { data: account, error: accountError } = await supabase
+      .from("finance_accounts")
+      .select("*")
+      .eq("id", formData.finance_account_id)
+      .single()
+
+    if (accountError || !account) {
+      console.error("Error fetching finance account for ad spend:", accountError)
+      return { success: false, error: "Finance account not found" }
+    }
+
+    financeAccount = account as FinanceAccount
+  }
+
+  const { data: category, error: categoryError } = await supabase
+    .from("finance_categories")
+    .select("id, name")
+    .eq("name", "Advertising")
+    .single()
+
+  if (categoryError || !category) {
+    console.error("Error fetching advertising finance category:", categoryError)
+    return { success: false, error: "Advertising finance category not found" }
+  }
 
   const { data, error } = await supabase
     .from("ad_spend_entries")
-    .insert([formData])
+    .insert([{
+      campaign_id: formData.campaign_id,
+      entry_date: formData.entry_date,
+      amount: formData.amount,
+      finance_account_id: formData.finance_account_id || null,
+      payment_method: formData.payment_method,
+      notes: formData.notes,
+    }])
     .select()
     .single()
 
@@ -245,8 +281,47 @@ export async function addSpendEntry(formData: {
     return { success: false, error: error.message }
   }
 
+  if (financeAccount) {
+    const { data: financeEntry, error: financeError } = await supabase
+      .from("finance_entries")
+      .insert([{
+        entry_date: formData.entry_date,
+        account_id: financeAccount.id,
+        category_id: category.id,
+        direction: "out",
+        amount: formData.amount,
+        source: "automatic",
+        reference_type: "ad_spend_entry",
+        reference_id: data.id,
+        vendor: null,
+        notes: formData.notes,
+        created_by: user?.id || null,
+      }])
+      .select()
+      .single()
+
+    if (financeError) {
+      console.error("Error creating linked finance entry for ad spend:", financeError)
+      await supabase.from("ad_spend_entries").delete().eq("id", data.id)
+      return { success: false, error: financeError.message }
+    }
+
+    const { error: linkError } = await supabase
+      .from("ad_spend_entries")
+      .update({ finance_entry_id: financeEntry.id })
+      .eq("id", data.id)
+
+    if (linkError) {
+      console.error("Error linking finance entry to ad spend entry:", linkError)
+      return { success: false, error: linkError.message }
+    }
+
+    ;(data as any).finance_entry_id = financeEntry.id
+  }
+
   revalidatePath("/ad-campaigns")
   revalidatePath(`/ad-campaigns/${formData.campaign_id}`)
+  revalidatePath("/finance")
 
   const campaign = await getCampaignById(formData.campaign_id)
   await safeRecordAutomaticChangelogEntry({
@@ -259,6 +334,7 @@ export async function addSpendEntry(formData: {
     items: [
       buildChangeItem("Entry date", null, data.entry_date),
       buildChangeItem("Amount", null, data.amount),
+      buildChangeItem("Funding account", null, financeAccount?.name || null),
       buildChangeItem("Payment method", null, data.payment_method),
     ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
   })
@@ -304,9 +380,31 @@ export async function deleteSpendEntry(id: string, campaignId: string) {
 
   revalidatePath("/ad-campaigns")
   revalidatePath(`/ad-campaigns/${campaignId}`)
+  revalidatePath("/finance")
+
+  if (existingSpend?.finance_entry_id) {
+    const { error: financeDeleteError } = await supabase
+      .from("finance_entries")
+      .delete()
+      .eq("id", existingSpend.finance_entry_id)
+
+    if (financeDeleteError) {
+      console.error("Error deleting linked finance entry for ad spend:", financeDeleteError)
+      return { success: false, error: financeDeleteError.message }
+    }
+  }
 
   if (existingSpend) {
     const campaign = await getCampaignById(campaignId)
+    let financeAccountName: string | null = null
+    if (existingSpend.finance_account_id) {
+      const { data: financeAccount } = await supabase
+        .from("finance_accounts")
+        .select("name")
+        .eq("id", existingSpend.finance_account_id)
+        .single()
+      financeAccountName = financeAccount?.name || null
+    }
     await safeRecordAutomaticChangelogEntry({
       area: "ads",
       action_summary: "Deleted ad spend entry",
@@ -317,6 +415,7 @@ export async function deleteSpendEntry(id: string, campaignId: string) {
       items: [
         buildChangeItem("Entry date", existingSpend.entry_date, null),
         buildChangeItem("Amount", existingSpend.amount, null),
+        buildChangeItem("Funding account", financeAccountName, null),
         buildChangeItem("Payment method", existingSpend.payment_method, null),
       ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
     })
