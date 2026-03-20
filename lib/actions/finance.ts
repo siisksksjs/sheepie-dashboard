@@ -852,8 +852,6 @@ export async function createInventoryPurchase(input: {
       quantity: item.quantity,
       reference: `Inventory purchase ${batch.id}`,
       entry_date: input.entry_date,
-    }, {
-      skipChangelog: true,
     })
 
     if (!ledgerResult.success) {

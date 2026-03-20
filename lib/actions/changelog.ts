@@ -46,6 +46,40 @@ function revalidateChangelogPaths() {
   revalidatePath("/changelog")
 }
 
+const AUTOMATIC_CHANGELOG_EVENT_ALLOWLIST = new Set([
+  "Product went out of stock",
+  "Product restocked",
+])
+
+function isAllowedInventoryActionSummary(actionSummary: string) {
+  const normalized = actionSummary.trim()
+
+  return (
+    AUTOMATIC_CHANGELOG_EVENT_ALLOWLIST.has(normalized) ||
+    normalized.endsWith("Purchase IN")
+  )
+}
+
+function isAllowedAutomaticChangelogEvent(input: {
+  area: string
+  action_summary: string
+}) {
+  return (
+    input.area.trim() === "inventory" &&
+    isAllowedInventoryActionSummary(input.action_summary)
+  )
+}
+
+function shouldShowChangelogEntry(
+  entry: Pick<ChangelogEntry, "source" | "area" | "action_summary">
+) {
+  if (entry.source !== "automatic") {
+    return true
+  }
+
+  return isAllowedAutomaticChangelogEvent(entry)
+}
+
 export async function getChangelogEntries(filters?: {
   limit?: number
   area?: string
@@ -80,12 +114,14 @@ export async function getChangelogEntries(filters?: {
     return []
   }
 
-  return ((data || []) as ChangelogEntryWithItems[]).map((entry) => ({
-    ...entry,
-    changelog_items: [...(entry.changelog_items || [])].sort(
-      (a, b) => a.display_order - b.display_order
-    ),
-  }))
+  return ((data || []) as ChangelogEntryWithItems[])
+    .filter((entry) => shouldShowChangelogEntry(entry))
+    .map((entry) => ({
+      ...entry,
+      changelog_items: [...(entry.changelog_items || [])].sort(
+        (a, b) => a.display_order - b.display_order
+      ),
+    }))
 }
 
 export async function getChangelogEntryById(id: string) {
@@ -168,6 +204,12 @@ export async function createManualChangelogEntry(
   })
 }
 
+function shouldRecordAutomaticChangelogEntry(
+  input: Omit<ChangelogEntryInput, "source"> & { source?: ChangelogSource }
+) {
+  return isAllowedAutomaticChangelogEvent(input)
+}
+
 export async function updateChangelogEntry(
   id: string,
   input: Omit<ChangelogEntryInput, "source"> & { source: ChangelogSource }
@@ -229,6 +271,10 @@ export async function safeRecordAutomaticChangelogEntry(
   input: Omit<ChangelogEntryInput, "source"> & { source?: ChangelogSource }
 ) {
   try {
+    if (!shouldRecordAutomaticChangelogEntry(input)) {
+      return { success: true, skipped: true as const }
+    }
+
     return await createChangelogEntry({
       ...input,
       source: input.source || "automatic",

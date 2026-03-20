@@ -93,6 +93,8 @@ export async function importInitialStock(csvText: string) {
           quantity: quantity,
           reference: row.reference || 'Initial stock import from Notion',
           entry_date: row.entry_date || null,
+        }, {
+          skipMilestoneChangelog: true,
         })
 
         if (result.success) {

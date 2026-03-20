@@ -6,6 +6,21 @@ import type { InventoryLedger, StockOnHand, MovementType } from "@/lib/types/dat
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
 
+function formatProductName(name: string, variant?: string | null) {
+  return variant ? `${name} - ${variant}` : name
+}
+
+function getInventoryActionSummary(
+  movementType: MovementType,
+  productName: string
+) {
+  if (movementType === "IN_PURCHASE") {
+    return `${productName} Purchase IN`
+  }
+
+  return "Added inventory ledger entry"
+}
+
 export async function getStockOnHand() {
   const supabase = await createClient()
 
@@ -64,6 +79,7 @@ export async function createLedgerEntry(formData: {
   entry_date?: string | null
 }, options?: {
   skipChangelog?: boolean
+  skipMilestoneChangelog?: boolean
   actionSummary?: string
   notes?: string | null
 }) {
@@ -71,6 +87,11 @@ export async function createLedgerEntry(formData: {
 
   // Get current user
   const { data: { user } } = await supabase.auth.getUser()
+  const { data: stockBefore } = await supabase
+    .from("stock_on_hand")
+    .select("sku, name, variant, current_stock")
+    .eq("sku", formData.sku)
+    .maybeSingle()
 
   // Use provided date or default to now
   const entryData = {
@@ -97,6 +118,57 @@ export async function createLedgerEntry(formData: {
   revalidatePath("/dashboard")
   revalidatePath("/products")
 
+  const { data: stockAfter } = await supabase
+    .from("stock_on_hand")
+    .select("sku, name, variant, current_stock")
+    .eq("sku", data.sku)
+    .maybeSingle()
+
+  if (!options?.skipMilestoneChangelog && stockAfter) {
+    const previousStock = stockBefore?.current_stock ?? 0
+    const currentStock = stockAfter.current_stock
+    const productLabel = `${stockAfter.name}${stockAfter.variant ? ` - ${stockAfter.variant}` : ""} (${stockAfter.sku})`
+    const loggedAt = formData.entry_date
+      ? new Date(`${formData.entry_date}T00:00:00.000Z`).toISOString()
+      : new Date().toISOString()
+
+    if (previousStock > 0 && currentStock <= 0) {
+      await safeRecordAutomaticChangelogEntry({
+        logged_at: loggedAt,
+        area: "inventory",
+        action_summary: "Product went out of stock",
+        entity_type: "product",
+        entity_id: stockAfter.sku,
+        entity_label: productLabel,
+        notes: formData.reference,
+        items: [
+          buildChangeItem("Stock on hand", previousStock, currentStock),
+          buildChangeItem("Movement type", null, data.movement_type),
+          buildChangeItem("Quantity change", null, data.quantity),
+          buildChangeItem("Entry date", null, data.entry_date),
+        ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+      })
+    }
+
+    if (previousStock <= 0 && currentStock > 0) {
+      await safeRecordAutomaticChangelogEntry({
+        logged_at: loggedAt,
+        area: "inventory",
+        action_summary: "Product restocked",
+        entity_type: "product",
+        entity_id: stockAfter.sku,
+        entity_label: productLabel,
+        notes: formData.reference,
+        items: [
+          buildChangeItem("Stock on hand", previousStock, currentStock),
+          buildChangeItem("Movement type", null, data.movement_type),
+          buildChangeItem("Quantity change", null, data.quantity),
+          buildChangeItem("Entry date", null, data.entry_date),
+        ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+      })
+    }
+  }
+
   if (!options?.skipChangelog) {
     const { data: product } = await supabase
       .from("products")
@@ -104,13 +176,16 @@ export async function createLedgerEntry(formData: {
       .eq("sku", data.sku)
       .single()
 
+    const productName = product
+      ? formatProductName(product.name, product.variant)
+      : data.sku
     const productLabel = product
-      ? `${product.name}${product.variant ? ` - ${product.variant}` : ""} (${product.sku})`
+      ? `${productName} (${product.sku})`
       : data.sku
 
     await safeRecordAutomaticChangelogEntry({
       area: "inventory",
-      action_summary: options?.actionSummary || "Added inventory ledger entry",
+      action_summary: options?.actionSummary || getInventoryActionSummary(data.movement_type, productName),
       entity_type: "product",
       entity_id: data.sku,
       entity_label: productLabel,
