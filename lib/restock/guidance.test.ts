@@ -241,7 +241,7 @@ describe("inventory purchase batch typing", () => {
 })
 
 describe("restock action changelog behavior", () => {
-  it("only records an automatic changelog on arrival", async () => {
+  it("delegates arrival changelog creation to the database rpc", async () => {
     const fs = await import("node:fs/promises")
     const source = await fs.readFile("lib/actions/restock.ts", "utf8")
     const createSection = source.slice(
@@ -253,6 +253,20 @@ describe("restock action changelog behavior", () => {
     )
 
     expect(createSection).not.toContain("safeRecordAutomaticChangelogEntry(")
-    expect(arrivalSection).toContain("safeRecordAutomaticChangelogEntry(")
+    expect(arrivalSection).not.toContain("safeRecordAutomaticChangelogEntry(")
+    expect(arrivalSection).toContain("process_inventory_purchase_arrival")
+  })
+
+  it("stores the arrival changelog inside the arrival rpc migration", async () => {
+    const fs = await import("node:fs/promises")
+    const migration = await fs.readFile(
+      "supabase/migrations/20260331_process_restock_arrival_with_changelog.sql",
+      "utf8",
+    )
+
+    expect(migration).toContain("CREATE OR REPLACE FUNCTION process_inventory_purchase_arrival")
+    expect(migration).toContain("Restock arrived from China")
+    expect(migration).toContain("INSERT INTO changelog_entries")
+    expect(migration).toContain("INSERT INTO changelog_items")
   })
 })

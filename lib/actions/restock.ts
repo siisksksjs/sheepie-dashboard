@@ -2,8 +2,6 @@
 
 import { revalidatePath } from "next/cache"
 
-import { buildChangeItem } from "@/lib/changelog"
-import { buildArrivalChangelogItems } from "@/lib/restock/guidance"
 import { createClient } from "@/lib/supabase/server"
 import type {
   FinanceEntry,
@@ -11,17 +9,10 @@ import type {
   ShippingMode,
 } from "@/lib/types/database.types"
 
-import { safeRecordAutomaticChangelogEntry } from "./changelog"
-
 type RestockItemInput = {
   sku: string
   quantity: number
   unit_cost: number
-}
-
-function formatRestockLabel(batchId: string, vendor?: string | null) {
-  const normalizedVendor = vendor?.trim()
-  return normalizedVendor ? normalizedVendor : `Restock ${batchId}`
 }
 
 function normalizeRestockItems(items: RestockItemInput[]) {
@@ -191,36 +182,6 @@ export async function markRestockArrived(input: {
 }) {
   const supabase = await createClient()
 
-  const [{ data: batch, error: batchError }, { data: items, error: itemsError }] =
-    await Promise.all([
-      supabase
-        .from("inventory_purchase_batches")
-        .select("id, order_date, arrival_date, shipping_mode, vendor, notes")
-        .eq("id", input.batch_id)
-        .single(),
-      supabase
-        .from("inventory_purchase_batch_items")
-        .select("sku, quantity")
-        .eq("batch_id", input.batch_id),
-    ])
-
-  if (batchError || !batch) {
-    if (batchError) {
-      console.error("Error loading restock batch for arrival:", batchError)
-    }
-
-    return { success: false, error: "Restock batch not found" }
-  }
-
-  if (itemsError) {
-    console.error("Error loading restock batch items for arrival:", itemsError)
-    return { success: false, error: itemsError.message }
-  }
-
-  if (!batch.shipping_mode) {
-    return { success: false, error: "Restock shipping mode is required before arrival" }
-  }
-
   const { error: rpcError } = await supabase.rpc(
     "process_inventory_purchase_arrival",
     {
@@ -235,28 +196,6 @@ export async function markRestockArrived(input: {
   }
 
   revalidateRestockArrivalPaths()
-
-  await safeRecordAutomaticChangelogEntry({
-    logged_at: `${input.arrival_date}T00:00:00.000Z`,
-    area: "inventory",
-    action_summary: "Restock arrived from China",
-    entity_type: "inventory_purchase_batch",
-    entity_id: input.batch_id,
-    entity_label: formatRestockLabel(input.batch_id, batch.vendor),
-    notes: batch.notes,
-    items: [
-      ...buildArrivalChangelogItems({
-        orderDate: batch.order_date,
-        arrivalDate: input.arrival_date,
-        shippingMode: batch.shipping_mode,
-        items: (items || []).map((item) => ({
-          sku: item.sku,
-          quantity: item.quantity,
-        })),
-      }),
-      buildChangeItem("Vendor", null, batch.vendor),
-    ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
-  })
 
   return { success: true }
 }
