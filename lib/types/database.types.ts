@@ -183,9 +183,17 @@ export type FinanceTransfer = {
   created_at: string
 }
 
+export type ShippingMode = 'air' | 'sea'
+
+export type RestockStatus = 'in_transit' | 'arrived'
+
 export type InventoryPurchaseBatch = {
   id: string
   entry_date: string
+  order_date: string
+  arrival_date: string | null
+  restock_status: RestockStatus
+  shipping_mode: ShippingMode | null
   vendor: string | null
   account_id: string
   finance_entry_id: string | null
@@ -193,6 +201,7 @@ export type InventoryPurchaseBatch = {
   notes: string | null
   created_by: string | null
   created_at: string
+  arrival_processed_at: string | null
 }
 
 export type InventoryPurchaseBatchItem = {

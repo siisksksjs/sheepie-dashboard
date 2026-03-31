@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 
 import {
   averageLatestLeadTimes,
   buildLeadBufferLabel,
   buildReorderWindow,
 } from "./guidance"
+import type {
+  InventoryPurchaseBatch,
+  RestockStatus,
+  ShippingMode,
+} from "@/lib/types/database.types"
 
 describe("averageLatestLeadTimes", () => {
   it("uses the latest 3 completed shipments for the requested sku and mode", () => {
@@ -158,5 +163,19 @@ describe("buildLeadBufferLabel", () => {
         isFallback: true,
       }),
     ).toBe("Fallback 7-10d + Buffer 7d")
+  })
+})
+
+describe("inventory purchase batch typing", () => {
+  it("includes restock tracking fields", () => {
+    const batch = {} as InventoryPurchaseBatch
+
+    expectTypeOf<ShippingMode>().toEqualTypeOf<"air" | "sea">()
+    expectTypeOf<RestockStatus>().toEqualTypeOf<"in_transit" | "arrived">()
+    expectTypeOf(batch.order_date).toEqualTypeOf<string>()
+    expectTypeOf(batch.arrival_date).toEqualTypeOf<string | null>()
+    expectTypeOf(batch.arrival_processed_at).toEqualTypeOf<string | null>()
+    expectTypeOf(batch.restock_status).toEqualTypeOf<RestockStatus>()
+    expectTypeOf(batch.shipping_mode).toEqualTypeOf<ShippingMode | null>()
   })
 })
