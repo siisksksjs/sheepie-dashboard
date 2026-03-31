@@ -57,12 +57,20 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     (returnSummary.bySku || []).map((item: any) => [item.sku, item.units])
   )
 
-  // Build dynamic reorder points from sales velocity (use max for safety)
+  // Collapse mode-specific guidance into one conservative reorder window per SKU.
   const dynamicReorderPoints = new Map<string, { min: number; max: number }>(
-    reorderRecommendations.recommendations.map((rec: any) => [
-      rec.sku,
-      { min: rec.reorderMin, max: rec.reorderMax }
-    ])
+    reorderRecommendations.recommendations.reduce((acc: Array<[string, { min: number; max: number }]>, rec) => {
+      const existing = acc.find(([sku]) => sku === rec.sku)?.[1]
+
+      if (!existing) {
+        acc.push([rec.sku, { min: rec.reorderMin, max: rec.reorderMax }])
+        return acc
+      }
+
+      existing.min = Math.max(existing.min, rec.reorderMin)
+      existing.max = Math.max(existing.max, rec.reorderMax)
+      return acc
+    }, [])
   )
 
   // Get low stock items based on dynamic reorder points from Restock Guidance
@@ -312,10 +320,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
                   <TableCell>{rec.mode}</TableCell>
                   <TableCell className="text-right">{rec.avgDaily.toFixed(2)}</TableCell>
                   <TableCell className="text-right">
-                    {rec.leadMin + rec.buffer}-{rec.leadMax + rec.buffer} days
+                    {rec.leadTimeLabel}
                   </TableCell>
                   <TableCell className="text-right font-semibold">
-                    {rec.reorderMin}-{rec.reorderMax} units
+                    {rec.reorderMin === rec.reorderMax
+                      ? `${rec.reorderMin} units`
+                      : `${rec.reorderMin}-${rec.reorderMax} units`}
                   </TableCell>
                 </TableRow>
               ))}
@@ -336,7 +346,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
                   <CardTitle>Low Stock Alert - Products</CardTitle>
                 </div>
                 <CardDescription>
-                  Based on sales velocity from Restock Guidance
+                  Based on sales velocity and the highest reorder point across available restock modes
                 </CardDescription>
               </CardHeader>
               <CardContent>

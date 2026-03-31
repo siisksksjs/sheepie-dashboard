@@ -8,6 +8,12 @@ import { createLedgerEntry } from "./inventory"
 import { getLineItemCostPerUnit, getLineItemTotalCost } from "@/lib/line-item-costs"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem, summarizeLineItems } from "@/lib/changelog"
+import { RESTOCK_GUIDANCE_CONFIG } from "@/lib/restock/config"
+import {
+  averageLatestLeadTimes,
+  buildLeadBufferLabel,
+  buildReorderWindow,
+} from "@/lib/restock/guidance"
 import {
   calculateOrderSettlementAmount,
   createMarketplaceSettlementEntry,
@@ -1090,14 +1096,22 @@ export async function getReorderRecommendations() {
   const days = Math.max(1, Math.floor((endDate.getTime() - startDate.getTime()) / 86400000) + 1)
 
   // Include Bundle-Cervi to track its impact on component stock
-  const targetSkus = ["Cervi-001", "Lumi-001", "Calmi-001", "Bundle-Cervi"]
+  const configSkus = Array.from(new Set(RESTOCK_GUIDANCE_CONFIG.map((config) => config.sku)))
+  const targetSkus = [...configSkus, "Bundle-Cervi"]
 
-  const { data: orders } = await supabase
-    .from("orders")
-    .select("order_date, order_line_items!inner(quantity, selling_price, sku)")
-    .in("status", ["paid", "shipped"])
-    .gte("order_date", startDate.toISOString())
-    .in("order_line_items.sku", targetSkus)
+  const [{ data: orders }, { data: restockBatches }] = await Promise.all([
+    supabase
+      .from("orders")
+      .select("order_date, order_line_items!inner(quantity, selling_price, sku)")
+      .in("status", ["paid", "shipped"])
+      .gte("order_date", startDate.toISOString())
+      .in("order_line_items.sku", targetSkus),
+    supabase
+      .from("inventory_purchase_batches")
+      .select("id, order_date, arrival_date, shipping_mode, restock_status")
+      .eq("restock_status", "arrived")
+      .not("arrival_date", "is", null),
+  ])
 
   // Track units sold by SKU
   const unitsBySku = new Map<string, number>()
@@ -1125,31 +1139,77 @@ export async function getReorderRecommendations() {
     ["Calmi-001", calmiTotal],
   ])
 
-  const configs = [
-    { sku: "Cervi-001", name: "CerviCloud Pillow", mode: "Sea", leadMin: 28, leadMax: 42, buffer: 14 },
-    { sku: "Lumi-001", name: "LumiCloud Eye Mask", mode: "Air", leadMin: 7, leadMax: 10, buffer: 7 },
-    { sku: "Calmi-001", name: "CalmiCloud Ear Plug", mode: "Air", leadMin: 7, leadMax: 10, buffer: 7 },
-    { sku: "Calmi-001", name: "CalmiCloud Ear Plug", mode: "Sea", leadMin: 28, leadMax: 42, buffer: 14 },
-  ]
+  const typedRestockBatches = (restockBatches || []) as Array<{
+    id: string
+    order_date: string
+    arrival_date: string | null
+    shipping_mode: "air" | "sea" | null
+    restock_status: "in_transit" | "arrived"
+  }>
 
-  const recommendations = configs.map((config) => {
+  const batchIds = typedRestockBatches.map((batch) => batch.id)
+  const { data: restockItems } = batchIds.length === 0
+    ? { data: [] as Array<{ batch_id: string; sku: string }> }
+    : await supabase
+      .from("inventory_purchase_batch_items")
+      .select("batch_id, sku")
+      .in("batch_id", batchIds)
+      .in("sku", configSkus)
+
+  const batchMap = new Map(typedRestockBatches.map((batch) => [batch.id, batch]))
+  const shipmentSamples = (restockItems || []).flatMap((item) => {
+    const batch = batchMap.get(item.batch_id)
+
+    if (!batch) {
+      return []
+    }
+
+    return [{
+      sku: item.sku,
+      shipping_mode: batch.shipping_mode,
+      order_date: batch.order_date,
+      arrival_date: batch.arrival_date,
+    }]
+  })
+
+  const recommendations = RESTOCK_GUIDANCE_CONFIG.map((config) => {
     const unitsSold = effectiveUnits.get(config.sku) || 0
     const avgDaily = unitsSold / days
-    const minPoint = Math.ceil(avgDaily * (config.leadMin + config.buffer))
-    const maxPoint = Math.ceil(avgDaily * (config.leadMax + config.buffer))
+    const learnedLeadDays = averageLatestLeadTimes({
+      sku: config.sku,
+      shippingMode: config.mode,
+      samples: shipmentSamples,
+    })
+    const reorderWindow = buildReorderWindow({
+      avgDaily,
+      learnedLeadDays,
+      fallbackLeadMin: config.fallbackLeadMin,
+      fallbackLeadMax: config.fallbackLeadMax,
+      bufferDays: config.bufferDays,
+    })
+    const leadTimeLabel = buildLeadBufferLabel({
+      leadDays: reorderWindow.leadDays,
+      fallbackLeadMin: config.fallbackLeadMin,
+      fallbackLeadMax: config.fallbackLeadMax,
+      bufferDays: config.bufferDays,
+      isFallback: reorderWindow.isFallback,
+    })
 
     return {
       sku: config.sku,
       name: config.name,
-      mode: config.mode,
+      mode: config.mode === "air" ? "Air" : "Sea",
       unitsSold,
       days,
       avgDaily,
-      leadMin: config.leadMin,
-      leadMax: config.leadMax,
-      buffer: config.buffer,
-      reorderMin: minPoint,
-      reorderMax: maxPoint,
+      leadMin: config.fallbackLeadMin,
+      leadMax: config.fallbackLeadMax,
+      buffer: config.bufferDays,
+      learnedLeadDays,
+      isFallback: reorderWindow.isFallback,
+      leadTimeLabel,
+      reorderMin: reorderWindow.reorderMin,
+      reorderMax: reorderWindow.reorderMax,
       startDate: startDate.toISOString().slice(0, 10),
       endDate: endDate.toISOString().slice(0, 10),
     }

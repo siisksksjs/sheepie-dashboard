@@ -63,7 +63,9 @@ dashboard-sheepie/
 │   │   ├── dashboard/       # Main dashboard
 │   │   ├── products/        # Product management
 │   │   ├── ledger/          # Inventory ledger
-│   │   └── orders/          # Order management
+│   │   ├── orders/          # Order management
+│   │   ├── finance/         # Cash flow and account tracking
+│   │   └── restock/         # Supplier replenishment workflow
 │   ├── login/               # Login page
 │   └── layout.tsx           # Root layout
 ├── components/
@@ -77,6 +79,11 @@ dashboard-sheepie/
 ```
 
 ## Features
+
+- Dedicated `Restock` tab for supplier orders, arrival confirmation, and learned lead-time tracking
+- Ledger-first stock handling: restocks increase stock only when marked `arrived`
+- Finance cash-out tracking on supplier `order_date`
+- Dashboard restock guidance that learns lead time from recent completed shipments
 
 ### Phase 1 (Current)
 - ✅ Product Master (SKU, name, variant, cost, reorder point)

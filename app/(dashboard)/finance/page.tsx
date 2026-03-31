@@ -1,4 +1,3 @@
-import { getProducts } from "@/lib/actions/products"
 import {
   getFinanceAccounts,
   getFinanceCategories,
@@ -26,7 +25,6 @@ export default async function FinancePage({ searchParams }: { searchParams: Sear
     accounts,
     categories,
     marketplaceMappings,
-    products,
   ] = await Promise.all([
     getFinanceOverview(selectedYear, selectedMonth),
     getFinanceEntries({ year: selectedYear, month: selectedMonth, limit: 100 }),
@@ -35,7 +33,6 @@ export default async function FinancePage({ searchParams }: { searchParams: Sear
     getFinanceAccounts(),
     getFinanceCategories(),
     getMarketplaceAccountMappings(),
-    getProducts(),
   ])
 
   return (
@@ -49,7 +46,6 @@ export default async function FinancePage({ searchParams }: { searchParams: Sear
       accounts={accounts}
       categories={categories}
       marketplaceMappings={marketplaceMappings}
-      products={products.filter((product) => product.status === "active")}
     />
   )
 }

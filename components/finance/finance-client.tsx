@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import {
@@ -7,7 +8,6 @@ import {
   ArrowRightLeft,
   ArrowUpRight,
   Landmark,
-  PackagePlus,
   Plus,
   Wallet,
 } from "lucide-react"
@@ -15,7 +15,6 @@ import {
   createFinanceAccount,
   createFinanceEntry,
   createFinanceTransfer,
-  createInventoryPurchase,
   saveMarketplaceAccountMappings,
 } from "@/lib/actions/finance"
 import { formatCurrency, formatDate } from "@/lib/utils"
@@ -32,7 +31,6 @@ import type {
   FinanceAccount,
   FinanceCategory,
   FinanceEntryDirection,
-  Product,
 } from "@/lib/types/database.types"
 
 type EntryRow = Awaited<ReturnType<typeof import("@/lib/actions/finance").getFinanceEntries>>[number]
@@ -40,13 +38,6 @@ type TransferRow = Awaited<ReturnType<typeof import("@/lib/actions/finance").get
 type PurchaseRow = Awaited<ReturnType<typeof import("@/lib/actions/finance").getInventoryPurchaseBatches>>[number]
 type Overview = Awaited<ReturnType<typeof import("@/lib/actions/finance").getFinanceOverview>>
 type MarketplaceMappingRow = Awaited<ReturnType<typeof import("@/lib/actions/finance").getMarketplaceAccountMappings>>[number]
-
-type PurchaseItemForm = {
-  id: string
-  sku: string
-  quantity: number
-  unit_cost: number
-}
 
 type Props = {
   selectedYear: number
@@ -58,7 +49,6 @@ type Props = {
   accounts: FinanceAccount[]
   categories: FinanceCategory[]
   marketplaceMappings: MarketplaceMappingRow[]
-  products: Product[]
 }
 
 const marketplaceChannels: Channel[] = ["shopee", "tokopedia", "tiktok"]
@@ -87,17 +77,12 @@ export function FinanceClient({
   accounts,
   categories,
   marketplaceMappings,
-  products,
 }: Props) {
   const router = useRouter()
   const [accountError, setAccountError] = useState<string | null>(null)
   const [entryError, setEntryError] = useState<string | null>(null)
   const [transferError, setTransferError] = useState<string | null>(null)
-  const [purchaseError, setPurchaseError] = useState<string | null>(null)
   const [mappingError, setMappingError] = useState<string | null>(null)
-  const [purchaseItems, setPurchaseItems] = useState<PurchaseItemForm[]>([
-    { id: crypto.randomUUID(), sku: "", quantity: 1, unit_cost: 0 },
-  ])
   const [entryCategoryId, setEntryCategoryId] = useState("")
   const [entryDirection, setEntryDirection] = useState<FinanceEntryDirection>("out")
   const [channelAccountMappings, setChannelAccountMappings] = useState<Record<Channel, string>>(() => ({
@@ -197,45 +182,6 @@ export function FinanceClient({
     router.refresh()
   }
 
-  const updatePurchaseItem = (id: string, field: keyof PurchaseItemForm, value: string | number) => {
-    setPurchaseItems((current) =>
-      current.map((item) => item.id === id ? { ...item, [field]: value } : item)
-    )
-  }
-
-  const addPurchaseItem = () => {
-    setPurchaseItems((current) => [
-      ...current,
-      { id: crypto.randomUUID(), sku: "", quantity: 1, unit_cost: 0 },
-    ])
-  }
-
-  const removePurchaseItem = (id: string) => {
-    setPurchaseItems((current) => current.filter((item) => item.id !== id))
-  }
-
-  const handlePurchaseSubmit = async (formData: FormData) => {
-    setPurchaseError(null)
-    const result = await createInventoryPurchase({
-      entry_date: formData.get("entry_date") as string,
-      account_id: formData.get("account_id") as string,
-      vendor: (formData.get("vendor") as string) || null,
-      notes: (formData.get("notes") as string) || null,
-      items: purchaseItems.map((item) => ({
-        sku: item.sku,
-        quantity: item.quantity,
-        unit_cost: item.unit_cost,
-      })),
-    })
-
-    if (!result.success) {
-      setPurchaseError(result.error || "Failed to create inventory purchase")
-      return
-    }
-
-    router.refresh()
-  }
-
   const handleMarketplaceMappingSave = async () => {
     setMappingError(null)
     const result = await saveMarketplaceAccountMappings({
@@ -304,7 +250,7 @@ export function FinanceClient({
           <TabsTrigger value="cash-flow">Cash Flow</TabsTrigger>
           <TabsTrigger value="expenses">Expenses</TabsTrigger>
           <TabsTrigger value="accounts">Accounts</TabsTrigger>
-          <TabsTrigger value="inventory-purchases">Inventory Purchases</TabsTrigger>
+          <TabsTrigger value="inventory-purchases">Restock Cash-Out</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -759,132 +705,61 @@ export function FinanceClient({
         </TabsContent>
 
         <TabsContent value="inventory-purchases" className="space-y-6">
-          <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-            <Card>
-              <CardHeader>
-                <CardTitle>Record Inventory Purchase</CardTitle>
-                <CardDescription>Create stock purchase and cash-out together</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form action={handlePurchaseSubmit} className="space-y-4">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>Date</Label>
-                      <Input name="entry_date" type="date" defaultValue={new Date().toISOString().split("T")[0]} required />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Account</Label>
-                      <Select name="account_id" required>
-                        <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
-                        <SelectContent>
-                          {accounts.map((account) => (
-                            <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Vendor</Label>
-                    <Input name="vendor" placeholder="Supplier name" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Notes</Label>
-                    <Textarea name="notes" placeholder="Optional notes" />
-                  </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Restock Workflow Moved</CardTitle>
+              <CardDescription>
+                Create new supplier replenishment orders in the dedicated Restock tab.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <p className="text-sm text-muted-foreground">
+                Finance still shows supplier cash impact and completed batches, but in-transit tracking and warehouse arrival now live in Restock.
+              </p>
+              <Link href="/restock">
+                <Button>Open Restock</Button>
+              </Link>
+            </CardContent>
+          </Card>
 
-                  <div className="space-y-3 border-t pt-4">
-                    <div className="flex items-center justify-between">
-                      <Label>Purchased Items</Label>
-                      <Button type="button" variant="outline" size="sm" onClick={addPurchaseItem}>
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add Item
-                      </Button>
-                    </div>
-                    {purchaseItems.map((item) => (
-                      <div key={item.id} className="grid gap-3 md:grid-cols-[1.6fr_0.7fr_0.9fr_auto] items-end">
-                        <div className="space-y-2">
-                          <Label>Product</Label>
-                          <Select value={item.sku} onValueChange={(value) => updatePurchaseItem(item.id, "sku", value)}>
-                            <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
-                            <SelectContent>
-                              {products.map((product) => (
-                                <SelectItem key={product.id} value={product.sku}>
-                                  {product.sku} - {product.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Qty</Label>
-                          <Input
-                            type="number"
-                            min="1"
-                            value={item.quantity}
-                            onChange={(e) => updatePurchaseItem(item.id, "quantity", parseInt(e.target.value, 10) || 0)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Unit Cost</Label>
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={item.unit_cost}
-                            onChange={(e) => updatePurchaseItem(item.id, "unit_cost", parseFloat(e.target.value) || 0)}
-                          />
-                        </div>
-                        <Button type="button" variant="ghost" onClick={() => removePurchaseItem(item.id)}>
-                          Remove
-                        </Button>
+          <Card>
+            <CardHeader>
+              <CardTitle>Recent Restock Cash-Outs</CardTitle>
+              <CardDescription>Latest supplier batches and their finance impact</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {purchases.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No supplier batches recorded yet.</p>
+              ) : (
+                purchases.map((purchase) => (
+                  <div key={purchase.id} className="rounded-lg border p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="font-semibold">{purchase.vendor || "Restock Batch"}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {formatDate(purchase.order_date)} • {purchase.account_name}
+                        </p>
                       </div>
-                    ))}
-                  </div>
-
-                  {purchaseError && <p className="text-sm text-destructive">{purchaseError}</p>}
-                  <Button type="submit"><PackagePlus className="mr-2 h-4 w-4" />Record Purchase</Button>
-                </form>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent Inventory Purchases</CardTitle>
-                <CardDescription>Latest procurement batches</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {purchases.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No inventory purchases yet.</p>
-                ) : (
-                  purchases.map((purchase) => (
-                    <div key={purchase.id} className="rounded-lg border p-4 space-y-3">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="font-semibold">{purchase.vendor || "Inventory Purchase"}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {formatDate(purchase.entry_date)} • {purchase.account_name}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-semibold">{formatCurrency(purchase.total_amount)}</p>
-                          <p className="text-xs text-muted-foreground">{purchase.items.length} items</p>
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        {purchase.items.map((item) => (
-                          <div key={item.id} className="flex items-center justify-between text-sm text-muted-foreground">
-                            <span>{item.product_name} ({item.sku}) x{item.quantity}</span>
-                            <span>{formatCurrency(item.total_cost)}</span>
-                          </div>
-                        ))}
+                      <div className="text-right">
+                        <p className="font-semibold">{formatCurrency(purchase.total_amount)}</p>
+                        <p className="text-xs text-muted-foreground capitalize">
+                          {purchase.restock_status.replace("_", " ")} • {purchase.items.length} items
+                        </p>
                       </div>
                     </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </div>
+                    <div className="space-y-1">
+                      {purchase.items.map((item) => (
+                        <div key={item.id} className="flex items-center justify-between text-sm text-muted-foreground">
+                          <span>{item.product_name} ({item.sku}) x{item.quantity}</span>
+                          <span>{formatCurrency(item.total_cost)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

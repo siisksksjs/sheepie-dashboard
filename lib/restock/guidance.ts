@@ -4,7 +4,7 @@ const MS_PER_DAY = 86_400_000
 
 export type ShipmentSample = {
   sku: string
-  shipping_mode: ShippingMode
+  shipping_mode: ShippingMode | null
   order_date: string
   arrival_date: string | null
 }
@@ -40,6 +40,11 @@ export type LeadBufferLabelInput = {
   fallbackLeadMax: number
   bufferDays: number
   isFallback: boolean
+}
+
+type CompletedLeadTimeSample = CompletedShipmentSample & {
+  shipping_mode: ShippingMode
+  leadDays: number
 }
 
 function daysBetween(orderDate: string, arrivalDate: string): number | null {
@@ -80,14 +85,19 @@ export function averageLatestLeadTimes(
       )
     })
     .sort((a, b) => b.arrival_date.localeCompare(a.arrival_date))
-    .map((sample) => ({
-      ...sample,
-      leadDays: daysBetween(sample.order_date, sample.arrival_date),
-    }))
-    .filter((sample): sample is CompletedShipmentSample & {
-      arrival_date: string
-      leadDays: number
-    } => sample.leadDays !== null)
+    .map((sample) => {
+      const leadDays = daysBetween(sample.order_date, sample.arrival_date)
+
+      if (leadDays === null) {
+        return null
+      }
+
+      return {
+        ...sample,
+        leadDays,
+      }
+    })
+    .filter((sample): sample is CompletedLeadTimeSample => sample !== null)
     .slice(0, 3)
 
   if (completed.length === 0) {

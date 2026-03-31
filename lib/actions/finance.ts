@@ -5,7 +5,6 @@ import { cache } from "react"
 import { createClient } from "@/lib/supabase/server"
 import { getReportsBundle } from "./orders"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
-import { createRestock } from "./restock"
 import { buildChangeItem } from "@/lib/changelog"
 import { getMarketplaceChannelAccountMappings } from "@/lib/marketplace-settlements"
 import type {
@@ -751,12 +750,10 @@ export async function createInventoryPurchase(input: {
   notes?: string | null
   items: InventoryPurchaseItemInput[]
 }) {
-  return createRestock({
-    order_date: input.entry_date,
-    shipping_mode: "air",
-    account_id: input.account_id,
-    vendor: input.vendor,
-    notes: input.notes,
-    items: input.items,
-  })
+  void input
+
+  return {
+    success: false,
+    error: "Inventory purchases moved to the Restock tab. Use the Restock tab to create supplier orders.",
+  }
 }

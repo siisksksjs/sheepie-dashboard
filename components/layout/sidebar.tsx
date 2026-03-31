@@ -8,6 +8,7 @@ import {
   Package,
   FileText,
   ShoppingCart,
+  Ship,
   BarChart3,
   TrendingUp,
   Landmark,
@@ -42,6 +43,11 @@ const navigation = [
     name: "Orders",
     href: "/orders",
     icon: ShoppingCart,
+  },
+  {
+    name: "Restock",
+    href: "/restock",
+    icon: Ship,
   },
   {
     name: "Reports",

@@ -76,16 +76,16 @@ Transfer rules:
 - does not count as expense
 - does not count as income
 
-### Inventory Purchases
+### Restock Workflow
 
-Use `Inventory Purchases` when restocking products.
+Use the `Restock` tab when ordering from suppliers.
 
-This flow does 2 things together:
+This flow splits cash timing from stock timing:
 
-- creates stock-in ledger entries
-- creates a finance cash-out
-
-This keeps stock and cash synchronized.
+- `order_date` records when cash leaves for the supplier
+- `arrival_date` records when stock reaches the Indonesia warehouse
+- stock enters the ledger automatically only when the batch is marked `arrived`
+- the supplier cash-out still lands in Finance on the original `order_date`
 
 ### Ad Spend
 
@@ -154,15 +154,16 @@ Transfers:
 - affect account balances
 - should not be read as profit or loss
 
-## Inventory Purchase Rule
+## Restock Rule
 
 This is the most important finance rule in the dashboard.
 
 When buying stock:
 
-- use `Inventory Purchases`
+- use `Restock`
 - select the account used to pay
 - add the products and quantities purchased
+- mark the batch `arrived` only when the shipment reaches the warehouse
 
 Do **not**:
 
@@ -371,7 +372,7 @@ Note:
 
 ## Daily Operating Routine
 
-1. Use `Inventory Purchases` for all restocks.
+1. Use `Restock` for all supplier replenishment orders.
 2. Use `Ad Spend` with funding account for ad top-ups.
 3. Use `Finance Entries` for salary, rent, software, tax, packaging, and misc expenses.
 4. Use `Transfers` for account-to-account movement.
@@ -382,7 +383,7 @@ Note:
 1. Review account balances.
 2. Check for missing operating expenses.
 3. Check whether ad spend entries have funding accounts selected.
-4. Review inventory purchases against supplier payments.
+4. Review restock cash-outs against supplier payments.
 
 ## Monthly Review Routine
 
@@ -412,4 +413,4 @@ Then use:
 
 - `P&L rule` for profitability
 - `Finance Entry / Transfer / Account` for cash movement
-- `Inventory Purchase` for restocking
+- `Restock` for supplier replenishment
