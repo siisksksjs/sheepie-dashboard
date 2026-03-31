@@ -8,16 +8,14 @@ ALTER TABLE inventory_purchase_batches
 UPDATE inventory_purchase_batches
 SET
   order_date = COALESCE(order_date, entry_date),
-  arrival_date = COALESCE(arrival_date, entry_date),
-  restock_status = COALESCE(restock_status, 'arrived'),
-  arrival_processed_at = COALESCE(
-    arrival_processed_at,
-    CASE
-      WHEN COALESCE(restock_status, 'arrived') = 'arrived' THEN created_at
-      ELSE NULL
-    END
-  )
-WHERE order_date IS NULL OR restock_status IS NULL;
+  arrival_date = CASE
+    WHEN arrival_date IS NULL AND finance_entry_id IS NOT NULL THEN entry_date
+    ELSE arrival_date
+  END,
+  restock_status = COALESCE(restock_status, 'arrived')
+WHERE order_date IS NULL
+   OR restock_status IS NULL
+   OR (arrival_date IS NULL AND finance_entry_id IS NOT NULL);
 
 ALTER TABLE inventory_purchase_batches
   ALTER COLUMN order_date SET NOT NULL,
