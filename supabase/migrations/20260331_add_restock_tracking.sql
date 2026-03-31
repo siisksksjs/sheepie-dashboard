@@ -53,7 +53,12 @@ AS $$
 DECLARE
   batch_record inventory_purchase_batches%ROWTYPE;
   batch_item RECORD;
+  existing_purchase_posted BOOLEAN;
 BEGIN
+  IF target_arrival_date IS NULL THEN
+    RAISE EXCEPTION 'Arrival date is required';
+  END IF;
+
   SELECT *
   INTO batch_record
   FROM inventory_purchase_batches
@@ -66,6 +71,18 @@ BEGIN
 
   IF batch_record.restock_status = 'arrived' OR batch_record.arrival_processed_at IS NOT NULL THEN
     RAISE EXCEPTION 'Arrival already processed';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM inventory_ledger
+    WHERE movement_type = 'IN_PURCHASE'
+      AND reference = 'Inventory purchase ' || target_batch_id
+  )
+  INTO existing_purchase_posted;
+
+  IF existing_purchase_posted THEN
+    RAISE EXCEPTION 'Purchase inventory already posted for this batch';
   END IF;
 
   IF target_arrival_date < batch_record.order_date THEN

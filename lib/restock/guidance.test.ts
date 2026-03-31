@@ -5,6 +5,7 @@ import {
   buildLeadBufferLabel,
   buildReorderWindow,
 } from "./guidance"
+import type { ShippingMode as ConfigShippingMode } from "./config"
 import type {
   InventoryPurchaseBatch,
   RestockStatus,
@@ -171,6 +172,7 @@ describe("inventory purchase batch typing", () => {
     const batch = {} as InventoryPurchaseBatch
 
     expectTypeOf<ShippingMode>().toEqualTypeOf<"air" | "sea">()
+    expectTypeOf<ConfigShippingMode>().toEqualTypeOf<ShippingMode>()
     expectTypeOf<RestockStatus>().toEqualTypeOf<"in_transit" | "arrived">()
     expectTypeOf(batch.order_date).toEqualTypeOf<string>()
     expectTypeOf(batch.arrival_date).toEqualTypeOf<string | null>()
