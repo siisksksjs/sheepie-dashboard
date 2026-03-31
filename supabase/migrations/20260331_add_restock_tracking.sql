@@ -54,6 +54,7 @@ DECLARE
   batch_record inventory_purchase_batches%ROWTYPE;
   batch_item RECORD;
   existing_purchase_posted BOOLEAN;
+  has_batch_items BOOLEAN;
 BEGIN
   IF target_arrival_date IS NULL THEN
     RAISE EXCEPTION 'Arrival date is required';
@@ -83,6 +84,17 @@ BEGIN
 
   IF existing_purchase_posted THEN
     RAISE EXCEPTION 'Purchase inventory already posted for this batch';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM inventory_purchase_batch_items
+    WHERE batch_id = target_batch_id
+  )
+  INTO has_batch_items;
+
+  IF NOT has_batch_items THEN
+    RAISE EXCEPTION 'At least one restock item is required';
   END IF;
 
   IF target_arrival_date < batch_record.order_date THEN
