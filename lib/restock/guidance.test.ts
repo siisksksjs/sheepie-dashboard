@@ -239,3 +239,20 @@ describe("inventory purchase batch typing", () => {
     expectTypeOf(batch.shipping_mode).toEqualTypeOf<ShippingMode | null>()
   })
 })
+
+describe("restock action changelog behavior", () => {
+  it("only records an automatic changelog on arrival", async () => {
+    const fs = await import("node:fs/promises")
+    const source = await fs.readFile("lib/actions/restock.ts", "utf8")
+    const createSection = source.slice(
+      source.indexOf("export async function createRestock"),
+      source.indexOf("export async function markRestockArrived"),
+    )
+    const arrivalSection = source.slice(
+      source.indexOf("export async function markRestockArrived"),
+    )
+
+    expect(createSection).not.toContain("safeRecordAutomaticChangelogEntry(")
+    expect(arrivalSection).toContain("safeRecordAutomaticChangelogEntry(")
+  })
+})

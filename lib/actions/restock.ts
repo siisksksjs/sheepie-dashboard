@@ -75,7 +75,7 @@ export async function createRestock(input: {
     await Promise.all([
       supabase
         .from("finance_accounts")
-        .select("id, name")
+        .select("id")
         .eq("id", input.account_id)
         .single(),
       supabase
@@ -175,27 +175,6 @@ export async function createRestock(input: {
   }
 
   revalidateRestockCreatePaths()
-
-  await safeRecordAutomaticChangelogEntry({
-    area: "finance",
-    action_summary: "Created inventory purchase",
-    entity_type: "inventory_purchase_batch",
-    entity_id: batch.id,
-    entity_label: formatRestockLabel(batch.id, trimmedVendor),
-    notes: trimmedNotes,
-    items: [
-      buildChangeItem("Entry date", null, input.order_date),
-      buildChangeItem("Account", null, account.name),
-      buildChangeItem("Shipping mode", null, input.shipping_mode),
-      buildChangeItem("Vendor", null, trimmedVendor),
-      buildChangeItem("Total amount", null, totalAmount),
-      buildChangeItem(
-        "Items",
-        null,
-        validItems.map((item) => `${item.sku} x${item.quantity} @ ${item.unit_cost}`),
-      ),
-    ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
-  })
 
   return {
     success: true,
