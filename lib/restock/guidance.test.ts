@@ -7,46 +7,95 @@ import {
 } from "./guidance"
 
 describe("averageLatestLeadTimes", () => {
-  it("uses the latest 3 completed shipments for one sku and mode", () => {
-    const result = averageLatestLeadTimes([
-      {
-        sku: "Calmi-001",
-        shipping_mode: "air",
-        order_date: "2026-01-01",
-        arrival_date: "2026-01-10",
-      },
-      {
-        sku: "Calmi-001",
-        shipping_mode: "air",
-        order_date: "2026-02-01",
-        arrival_date: "2026-02-13",
-      },
-      {
-        sku: "Calmi-001",
-        shipping_mode: "air",
-        order_date: "2026-03-01",
-        arrival_date: "2026-03-14",
-      },
-      {
-        sku: "Calmi-001",
-        shipping_mode: "air",
-        order_date: "2026-04-01",
-        arrival_date: "2026-04-16",
-      },
-    ])
+  it("uses the latest 3 completed shipments for the requested sku and mode", () => {
+    const result = averageLatestLeadTimes({
+      sku: "Calmi-001",
+      shippingMode: "air",
+      samples: [
+        {
+          sku: "Calmi-001",
+          shipping_mode: "air",
+          order_date: "2026-01-01",
+          arrival_date: "2026-01-10",
+        },
+        {
+          sku: "Calmi-001",
+          shipping_mode: "air",
+          order_date: "2026-02-01",
+          arrival_date: "2026-02-13",
+        },
+        {
+          sku: "Calmi-001",
+          shipping_mode: "air",
+          order_date: "2026-03-01",
+          arrival_date: "2026-03-14",
+        },
+        {
+          sku: "Calmi-001",
+          shipping_mode: "air",
+          order_date: "2026-04-01",
+          arrival_date: "2026-04-16",
+        },
+        {
+          sku: "Calmi-001",
+          shipping_mode: "sea",
+          order_date: "2026-04-01",
+          arrival_date: "2026-05-20",
+        },
+        {
+          sku: "Lumi-001",
+          shipping_mode: "air",
+          order_date: "2026-04-01",
+          arrival_date: "2026-04-04",
+        },
+      ],
+    })
 
     expect(result).toBe(13)
   })
 
+  it("skips invalid completed samples whose arrival date is before the order date", () => {
+    const result = averageLatestLeadTimes({
+      sku: "Calmi-001",
+      shippingMode: "air",
+      samples: [
+        {
+          sku: "Calmi-001",
+          shipping_mode: "air",
+          order_date: "2026-01-01",
+          arrival_date: "2026-01-10",
+        },
+        {
+          sku: "Calmi-001",
+          shipping_mode: "air",
+          order_date: "2026-02-01",
+          arrival_date: "2026-01-29",
+        },
+        {
+          sku: "Calmi-001",
+          shipping_mode: "air",
+          order_date: "2026-03-01",
+          arrival_date: "2026-03-14",
+        },
+      ],
+    })
+
+    expect(result).toBe(11)
+  })
+
   it("returns null when no completed shipments exist", () => {
-    const result = averageLatestLeadTimes([
-      {
-        sku: "Calmi-001",
-        shipping_mode: "air",
-        order_date: "2026-04-01",
-        arrival_date: null,
-      },
-    ])
+    const result = averageLatestLeadTimes({
+      sku: "Calmi-001",
+      shippingMode: "air",
+      samples: [
+        {
+          sku: "Calmi-001",
+          shipping_mode: "air",
+          order_date: "2026-04-01",
+          arrival_date: null,
+        },
+      ],
+    })
 
     expect(result).toBeNull()
   })

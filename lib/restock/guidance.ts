@@ -9,6 +9,12 @@ export type ShipmentSample = {
   arrival_date: string | null
 }
 
+export type AverageLatestLeadTimesInput = {
+  sku: string
+  shippingMode: ShippingMode
+  samples: ShipmentSample[]
+}
+
 export type ReorderWindowInput = {
   avgDaily: number
   learnedLeadDays: number | null
@@ -32,19 +38,38 @@ export type LeadBufferLabelInput = {
   isFallback: boolean
 }
 
-function daysBetween(orderDate: string, arrivalDate: string): number {
+function daysBetween(orderDate: string, arrivalDate: string): number | null {
   const start = new Date(`${orderDate}T00:00:00.000Z`)
   const end = new Date(`${arrivalDate}T00:00:00.000Z`)
+  const diffMs = end.getTime() - start.getTime()
 
-  return Math.max(0, Math.round((end.getTime() - start.getTime()) / MS_PER_DAY))
+  if (!Number.isFinite(diffMs) || diffMs < 0) {
+    return null
+  }
+
+  return Math.round(diffMs / MS_PER_DAY)
 }
 
-export function averageLatestLeadTimes(samples: ShipmentSample[]): number | null {
-  const completed = samples
+export function averageLatestLeadTimes(
+  input: AverageLatestLeadTimesInput,
+): number | null {
+  const completed = input.samples
     .filter((sample): sample is ShipmentSample & { arrival_date: string } => {
-      return sample.arrival_date !== null
+      return (
+        sample.sku === input.sku &&
+        sample.shipping_mode === input.shippingMode &&
+        sample.arrival_date !== null
+      )
     })
     .sort((a, b) => b.arrival_date.localeCompare(a.arrival_date))
+    .map((sample) => ({
+      ...sample,
+      leadDays: daysBetween(sample.order_date, sample.arrival_date),
+    }))
+    .filter((sample): sample is ShipmentSample & {
+      arrival_date: string
+      leadDays: number
+    } => sample.leadDays !== null)
     .slice(0, 3)
 
   if (completed.length === 0) {
@@ -52,7 +77,7 @@ export function averageLatestLeadTimes(samples: ShipmentSample[]): number | null
   }
 
   const totalLeadDays = completed.reduce((sum, sample) => {
-    return sum + daysBetween(sample.order_date, sample.arrival_date)
+    return sum + sample.leadDays
   }, 0)
 
   return Math.round(totalLeadDays / completed.length)
