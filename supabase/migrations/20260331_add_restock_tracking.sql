@@ -21,7 +21,8 @@ WHERE order_date IS NULL OR restock_status IS NULL;
 
 ALTER TABLE inventory_purchase_batches
   ALTER COLUMN order_date SET NOT NULL,
-  ALTER COLUMN restock_status SET NOT NULL;
+  ALTER COLUMN restock_status SET NOT NULL,
+  ALTER COLUMN restock_status SET DEFAULT 'arrived';
 
 CREATE INDEX IF NOT EXISTS idx_inventory_purchase_batches_status_date
   ON inventory_purchase_batches(restock_status, order_date DESC);
@@ -34,18 +35,6 @@ BEGIN
     NEW.order_date = NEW.entry_date;
   END IF;
 
-  IF NEW.restock_status IS NULL THEN
-    NEW.restock_status = 'arrived';
-  END IF;
-
-  IF NEW.restock_status = 'arrived' AND NEW.arrival_date IS NULL THEN
-    NEW.arrival_date = NEW.entry_date;
-  END IF;
-
-  IF NEW.restock_status = 'arrived' AND NEW.arrival_processed_at IS NULL THEN
-    NEW.arrival_processed_at = now();
-  END IF;
-
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -54,7 +43,7 @@ DROP TRIGGER IF EXISTS sync_inventory_purchase_batch_restock_fields_trigger
 ON inventory_purchase_batches;
 
 CREATE TRIGGER sync_inventory_purchase_batch_restock_fields_trigger
-BEFORE INSERT OR UPDATE ON inventory_purchase_batches
+BEFORE INSERT ON inventory_purchase_batches
 FOR EACH ROW
 EXECUTE FUNCTION sync_inventory_purchase_batch_restock_fields();
 
