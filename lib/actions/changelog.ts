@@ -49,6 +49,7 @@ function revalidateChangelogPaths() {
 const AUTOMATIC_CHANGELOG_EVENT_ALLOWLIST = new Set([
   "Product went out of stock",
   "Product restocked",
+  "Restock arrived from China",
 ])
 
 function isAllowedInventoryActionSummary(actionSummary: string) {

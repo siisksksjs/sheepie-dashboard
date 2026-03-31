@@ -2,8 +2,10 @@ import { describe, expect, expectTypeOf, it } from "vitest"
 
 import {
   averageLatestLeadTimes,
+  buildArrivalChangelogItems,
   buildLeadBufferLabel,
   buildReorderWindow,
+  filterCompletedShipmentSamples,
 } from "./guidance"
 import type { ShippingMode as ConfigShippingMode } from "./config"
 import type {
@@ -164,6 +166,62 @@ describe("buildLeadBufferLabel", () => {
         isFallback: true,
       }),
     ).toBe("Fallback 7-10d + Buffer 7d")
+  })
+})
+
+describe("filterCompletedShipmentSamples", () => {
+  it("ignores batches missing arrival date or shipping mode", () => {
+    const result = filterCompletedShipmentSamples([
+      {
+        sku: "Calmi-001",
+        shipping_mode: "air",
+        order_date: "2026-04-01",
+        arrival_date: "2026-04-12",
+      },
+      {
+        sku: "Calmi-001",
+        shipping_mode: null,
+        order_date: "2026-04-02",
+        arrival_date: "2026-04-14",
+      },
+      {
+        sku: "Calmi-001",
+        shipping_mode: "air",
+        order_date: "2026-04-03",
+        arrival_date: null,
+      },
+    ])
+
+    expect(result).toEqual([
+      {
+        sku: "Calmi-001",
+        shipping_mode: "air",
+        order_date: "2026-04-01",
+        arrival_date: "2026-04-12",
+      },
+    ])
+  })
+})
+
+describe("buildArrivalChangelogItems", () => {
+  it("includes order date, arrival date, lead days, mode, and quantities", () => {
+    const result = buildArrivalChangelogItems({
+      orderDate: "2026-04-01",
+      arrivalDate: "2026-04-12",
+      shippingMode: "air",
+      items: [
+        { sku: "Calmi-001", quantity: 300 },
+        { sku: "Lumi-001", quantity: 100 },
+      ],
+    })
+
+    expect(result.map((item) => item.field_name)).toEqual([
+      "Shipping mode",
+      "China order date",
+      "Warehouse arrival date",
+      "Actual lead days",
+      "Received items",
+    ])
   })
 })
 

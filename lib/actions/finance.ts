@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache"
 import { cache } from "react"
 import { createClient } from "@/lib/supabase/server"
 import { getReportsBundle } from "./orders"
-import { createLedgerEntry } from "./inventory"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
+import { createRestock } from "./restock"
 import { buildChangeItem } from "@/lib/changelog"
 import { getMarketplaceChannelAccountMappings } from "@/lib/marketplace-settlements"
 import type {
@@ -751,137 +751,12 @@ export async function createInventoryPurchase(input: {
   notes?: string | null
   items: InventoryPurchaseItemInput[]
 }) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-
-  if (!input.items.length) {
-    return { success: false, error: "At least one purchase item is required" }
-  }
-
-  const validItems = input.items
-    .filter((item) => item.sku && item.quantity > 0 && item.unit_cost >= 0)
-    .map((item) => ({
-      ...item,
-      total_cost: item.quantity * item.unit_cost,
-    }))
-
-  if (validItems.length === 0) {
-    return { success: false, error: "Purchase items are invalid" }
-  }
-
-  const totalAmount = validItems.reduce((sum, item) => sum + item.total_cost, 0)
-  const accounts = await getFinanceAccounts()
-  const categories = await getFinanceCategories()
-  const account = accounts.find((item) => item.id === input.account_id)
-  const purchaseCategory = categories.find((item) => item.kind === "inventory_purchase")
-
-  if (!account || !purchaseCategory) {
-    return { success: false, error: "Inventory purchase setup is incomplete" }
-  }
-
-  const { data: batch, error: batchError } = await supabase
-    .from("inventory_purchase_batches")
-    .insert([{
-      entry_date: input.entry_date,
-      vendor: input.vendor?.trim() || null,
-      account_id: input.account_id,
-      total_amount: totalAmount,
-      notes: input.notes?.trim() || null,
-      created_by: user?.id || null,
-    }])
-    .select()
-    .single()
-
-  if (batchError) {
-    console.error("Error creating inventory purchase batch:", batchError)
-    return { success: false, error: batchError.message }
-  }
-
-  const { error: itemsError } = await supabase
-    .from("inventory_purchase_batch_items")
-    .insert(validItems.map((item) => ({
-      batch_id: batch.id,
-      sku: item.sku,
-      quantity: item.quantity,
-      unit_cost: item.unit_cost,
-      total_cost: item.total_cost,
-    })))
-
-  if (itemsError) {
-    console.error("Error creating inventory purchase batch items:", itemsError)
-    return { success: false, error: itemsError.message }
-  }
-
-  const { data: financeEntry, error: financeEntryError } = await supabase
-    .from("finance_entries")
-    .insert([{
-      entry_date: input.entry_date,
-      account_id: input.account_id,
-      category_id: purchaseCategory.id,
-      direction: "out",
-      amount: totalAmount,
-      source: "automatic",
-      reference_type: "inventory_purchase_batch",
-      reference_id: batch.id,
-      vendor: input.vendor?.trim() || null,
-      notes: input.notes?.trim() || null,
-      created_by: user?.id || null,
-    }])
-    .select()
-    .single()
-
-  if (financeEntryError) {
-    console.error("Error creating finance entry for inventory purchase:", financeEntryError)
-    return { success: false, error: financeEntryError.message }
-  }
-
-  const { error: updateBatchError } = await supabase
-    .from("inventory_purchase_batches")
-    .update({ finance_entry_id: financeEntry.id })
-    .eq("id", batch.id)
-
-  if (updateBatchError) {
-    console.error("Error linking finance entry to purchase batch:", updateBatchError)
-    return { success: false, error: updateBatchError.message }
-  }
-
-  for (const item of validItems) {
-    const ledgerResult = await createLedgerEntry({
-      sku: item.sku,
-      movement_type: "IN_PURCHASE",
-      quantity: item.quantity,
-      reference: `Inventory purchase ${batch.id}`,
-      entry_date: input.entry_date,
-    })
-
-    if (!ledgerResult.success) {
-      return { success: false, error: ledgerResult.error || "Failed to create stock entry" }
-    }
-  }
-
-  revalidateFinancePaths()
-  revalidatePath("/ledger")
-  revalidatePath("/products")
-
-  await safeRecordAutomaticChangelogEntry({
-    area: "finance",
-    action_summary: "Created inventory purchase",
-    entity_type: "inventory_purchase_batch",
-    entity_id: batch.id,
-    entity_label: input.vendor?.trim() || `Inventory purchase ${batch.id}`,
-    notes: input.notes?.trim() || null,
-    items: [
-      buildChangeItem("Entry date", null, input.entry_date),
-      buildChangeItem("Account", null, account.name),
-      buildChangeItem("Vendor", null, input.vendor),
-      buildChangeItem("Total amount", null, totalAmount),
-      buildChangeItem(
-        "Items",
-        null,
-        validItems.map((item) => `${item.sku} x${item.quantity} @ ${item.unit_cost}`)
-      ),
-    ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+  return createRestock({
+    order_date: input.entry_date,
+    shipping_mode: "air",
+    account_id: input.account_id,
+    vendor: input.vendor,
+    notes: input.notes,
+    items: input.items,
   })
-
-  return { success: true, data: batch as InventoryPurchaseBatch }
 }

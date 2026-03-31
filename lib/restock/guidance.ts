@@ -9,6 +9,10 @@ export type ShipmentSample = {
   arrival_date: string | null
 }
 
+export type CompletedShipmentSample = Omit<ShipmentSample, "arrival_date"> & {
+  arrival_date: string
+}
+
 export type AverageLatestLeadTimesInput = {
   sku: string
   shippingMode: ShippingMode
@@ -50,15 +54,29 @@ function daysBetween(orderDate: string, arrivalDate: string): number | null {
   return Math.round(diffMs / MS_PER_DAY)
 }
 
+export function filterCompletedShipmentSamples<
+  T extends {
+    sku: string
+    shipping_mode: ShippingMode | null
+    order_date: string
+    arrival_date: string | null
+  },
+>(samples: T[]): Array<T & { shipping_mode: ShippingMode; arrival_date: string }> {
+  return samples.filter(
+    (
+      sample,
+    ): sample is T & { shipping_mode: ShippingMode; arrival_date: string } =>
+      Boolean(sample.shipping_mode && sample.arrival_date),
+  )
+}
+
 export function averageLatestLeadTimes(
   input: AverageLatestLeadTimesInput,
 ): number | null {
-  const completed = input.samples
-    .filter((sample): sample is ShipmentSample & { arrival_date: string } => {
+  const completed = filterCompletedShipmentSamples(input.samples)
+    .filter((sample) => {
       return (
-        sample.sku === input.sku &&
-        sample.shipping_mode === input.shippingMode &&
-        sample.arrival_date !== null
+        sample.sku === input.sku && sample.shipping_mode === input.shippingMode
       )
     })
     .sort((a, b) => b.arrival_date.localeCompare(a.arrival_date))
@@ -66,7 +84,7 @@ export function averageLatestLeadTimes(
       ...sample,
       leadDays: daysBetween(sample.order_date, sample.arrival_date),
     }))
-    .filter((sample): sample is ShipmentSample & {
+    .filter((sample): sample is CompletedShipmentSample & {
       arrival_date: string
       leadDays: number
     } => sample.leadDays !== null)
@@ -81,6 +99,40 @@ export function averageLatestLeadTimes(
   }, 0)
 
   return Math.round(totalLeadDays / completed.length)
+}
+
+export function buildArrivalChangelogItems(input: {
+  orderDate: string
+  arrivalDate: string
+  shippingMode: ShippingMode
+  items: Array<{ sku: string; quantity: number }>
+}) {
+  const leadDays = daysBetween(input.orderDate, input.arrivalDate)
+
+  return [
+    {
+      field_name: "Shipping mode",
+      new_value: input.shippingMode,
+    },
+    {
+      field_name: "China order date",
+      new_value: input.orderDate,
+    },
+    {
+      field_name: "Warehouse arrival date",
+      new_value: input.arrivalDate,
+    },
+    {
+      field_name: "Actual lead days",
+      new_value: leadDays === null ? null : String(leadDays),
+    },
+    {
+      field_name: "Received items",
+      new_value: input.items
+        .map((item) => `${item.sku} x${item.quantity}`)
+        .join(", "),
+    },
+  ]
 }
 
 export function buildReorderWindow(
