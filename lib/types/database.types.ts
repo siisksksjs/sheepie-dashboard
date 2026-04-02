@@ -85,6 +85,8 @@ export type AdPlatform = 'tiktok_ads' | 'shopee_ads' | 'facebook_ads' | 'google_
 
 export type CampaignStatus = 'active' | 'completed' | 'paused'
 
+export type SkuAdSetupStatus = 'active' | 'paused' | 'ended'
+
 export type AdCampaign = {
   id: string
   campaign_name: string
@@ -109,6 +111,47 @@ export type AdSpendEntry = {
   payment_method: string | null
   notes: string | null
   created_at: string
+}
+
+export type SkuAdSetup = {
+  id: string
+  sku: string
+  channels?: Channel[]
+  channel?: Channel
+  channel_scope_key?: string
+  objective: string
+  daily_budget_cap: number
+  start_date: string
+  end_date: string | null
+  status: SkuAdSetupStatus
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type MonthlyAdSpend = {
+  id: string
+  month: string
+  sku: string
+  channels?: Channel[]
+  channel?: Channel
+  channel_scope_key?: string
+  actual_spend: number
+  notes: string | null
+  finance_entry_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type SkuSalesTarget = {
+  id: string
+  sku: string
+  daily_target_units: number
+  effective_from: string
+  effective_to: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
 }
 
 export type FinanceAccountType = 'bank' | 'cash' | 'ewallet'

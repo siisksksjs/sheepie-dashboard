@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
-import { updateOrderStatus } from "@/lib/actions/orders"
+import { duplicateOrder, updateOrderStatus } from "@/lib/actions/orders"
 import { getLineItemTotalCost } from "@/lib/line-item-costs"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -39,6 +39,9 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
   const [order, setOrder] = useState(initialOrder)
   const [updating, setUpdating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [duplicating, setDuplicating] = useState(false)
+  const [duplicateError, setDuplicateError] = useState<string | null>(null)
+  const [duplicateSuccess, setDuplicateSuccess] = useState<string | null>(null)
 
   const handleStatusChange = async (newStatus: OrderStatus) => {
     setUpdating(true)
@@ -56,6 +59,32 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
     setUpdating(false)
   }
 
+  const handleDuplicateOrder = async () => {
+    if (duplicating) {
+      return
+    }
+
+    setDuplicating(true)
+    setDuplicateError(null)
+    setDuplicateSuccess(null)
+
+    try {
+      const result = await duplicateOrder(order.id)
+
+      if (!result.success) {
+        setDuplicateError(result.error || "Failed to duplicate order")
+        return
+      }
+
+      setDuplicateSuccess(`Duplicated as ${result.data.order_id || result.data.id}`)
+      router.refresh()
+    } catch (error) {
+      setDuplicateError(error instanceof Error ? error.message : "Failed to duplicate order")
+    } finally {
+      setDuplicating(false)
+    }
+  }
+
   const productMap = new Map(products.map((product) => [product.sku, product]))
   const totalAmount = lineItems.reduce((sum, item) => sum + item.quantity * item.selling_price, 0)
   const totalCost = lineItems.reduce((sum, item) => {
@@ -67,12 +96,12 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
 
   return (
     <div className="space-y-4 pb-6">
-      <Link href="/orders">
-        <Button variant="ghost" className="mb-4">
+      <Button asChild variant="ghost" className="mb-4">
+        <Link href="/orders">
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Orders
-        </Button>
-      </Link>
+        </Link>
+      </Button>
 
       <div className="grid gap-4 md:gap-6 max-w-5xl">
         <Card>
@@ -85,6 +114,9 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
                 </CardDescription>
               </div>
               <div className="flex items-center gap-3 self-start">
+                <Button variant="outline" onClick={handleDuplicateOrder} disabled={duplicating}>
+                  {duplicating ? "Duplicating..." : "Duplicate Order"}
+                </Button>
                 <Badge variant={statusBadges[order.status]} className="text-sm">
                   {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
                 </Badge>
@@ -110,6 +142,16 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
               <p className="text-sm text-muted-foreground mb-1">Notes</p>
               <p className="font-medium break-words">{order.notes || "-"}</p>
             </div>
+            {duplicateSuccess && (
+              <div className="sm:col-span-2 p-3 text-sm text-success bg-success/10 border border-success/20 rounded-lg">
+                {duplicateSuccess}
+              </div>
+            )}
+            {duplicateError && (
+              <div className="sm:col-span-2 p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg">
+                {duplicateError}
+              </div>
+            )}
           </CardContent>
         </Card>
 

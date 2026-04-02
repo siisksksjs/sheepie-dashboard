@@ -2,7 +2,33 @@
 
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
-import type { AdCampaign, AdSpendEntry, Channel, AdPlatform, CampaignStatus, FinanceAccount } from "@/lib/types/database.types"
+import {
+  buildMonthlyAdsReportBundle,
+  createMonthlyAdsReportLoadErrorBundle,
+  endOfMonthIso,
+  normalizeMonthStart,
+  type MonthlyAdsReportBundle,
+  type MonthlyAdsReportOrder,
+  type MonthlyAdsReportProduct,
+} from "../ads/reporting"
+import {
+  buildChannelScopeKey,
+  isChannel,
+  normalizeChannels,
+} from "../ads/channel-scopes"
+import type {
+  AdCampaign,
+  AdPlatform,
+  AdSpendEntry,
+  CampaignStatus,
+  Channel,
+  FinanceAccount,
+  MonthlyAdSpend,
+  Order,
+  OrderLineItem,
+  SkuAdSetup,
+  SkuSalesTarget,
+} from "@/lib/types/database.types"
 import { getLineItemTotalCost } from "@/lib/line-item-costs"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
@@ -281,6 +307,8 @@ export async function addSpendEntry(formData: {
     return { success: false, error: error.message }
   }
 
+  const spendEntry = data as AdSpendEntry
+
   if (financeAccount) {
     const { data: financeEntry, error: financeError } = await supabase
       .from("finance_entries")
@@ -316,7 +344,7 @@ export async function addSpendEntry(formData: {
       return { success: false, error: linkError.message }
     }
 
-    ;(data as any).finance_entry_id = financeEntry.id
+    spendEntry.finance_entry_id = financeEntry.id
   }
 
   revalidatePath("/ad-campaigns")
@@ -330,16 +358,16 @@ export async function addSpendEntry(formData: {
     entity_type: "campaign",
     entity_id: formData.campaign_id,
     entity_label: campaign?.campaign_name || `Campaign ${formData.campaign_id}`,
-    notes: data.notes,
+    notes: spendEntry.notes,
     items: [
-      buildChangeItem("Entry date", null, data.entry_date),
-      buildChangeItem("Amount", null, data.amount),
+      buildChangeItem("Entry date", null, spendEntry.entry_date),
+      buildChangeItem("Amount", null, spendEntry.amount),
       buildChangeItem("Funding account", null, financeAccount?.name || null),
-      buildChangeItem("Payment method", null, data.payment_method),
+      buildChangeItem("Payment method", null, spendEntry.payment_method),
     ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
   })
 
-  return { success: true, data }
+  return { success: true, data: spendEntry }
 }
 
 export async function getSpendEntries(campaignId: string) {
@@ -425,6 +453,1155 @@ export async function deleteSpendEntry(id: string, campaignId: string) {
 }
 
 // ============================================================================
+// SKU ADS WORKSPACE
+// ============================================================================
+
+export async function createSkuAdSetup(input: {
+  sku: string
+  channels?: Channel[]
+  channel?: Channel | null
+  objective: string
+  daily_budget_cap: number
+  start_date: string
+  end_date: string | null
+  notes: string | null
+}) {
+  const normalizedChannels = resolveScopeChannels(input)
+  const validationError = validateSkuAdSetupWrite({
+    ...input,
+    channels: getRawScopeChannels(input),
+  })
+  if (validationError) {
+    return { success: false, error: validationError }
+  }
+
+  const supabase = await createClient()
+  const normalizedInput = {
+    ...input,
+    sku: normalizeTextValue(input.sku),
+    objective: normalizeTextValue(input.objective),
+    notes: normalizeNullableTextValue(input.notes),
+    channels: normalizedChannels,
+  }
+
+  const { data, error } = await supabase
+    .from("sku_ad_setups")
+    .insert([
+        {
+          ...normalizedInput,
+          channel_scope_key: buildChannelScopeKey(normalizedInput.channels),
+          status: "active",
+        },
+    ])
+    .select()
+    .single()
+
+  if (error) {
+    console.error("Error creating SKU ad setup:", error)
+    return { success: false, error: error.message }
+  }
+
+  revalidateAdsReportingPaths()
+
+  return { success: true, data: data as SkuAdSetup }
+}
+
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+const VALID_SKU_AD_SETUP_STATUSES = new Set(["active", "paused", "ended"])
+
+function isFiniteNumber(value: number) {
+  return Number.isFinite(value)
+}
+
+function hasOwnProperties(value: object) {
+  return Object.keys(value).length > 0
+}
+
+function normalizeTextValue(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return value
+  }
+
+  return value.trim()
+}
+
+function normalizeNullableTextValue(value: string | null | undefined) {
+  const normalizedValue = normalizeTextValue(value)
+
+  if (normalizedValue == null || normalizedValue === "") {
+    return null
+  }
+
+  return normalizedValue
+}
+
+function removeUndefinedValues<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
+  ) as Partial<T>
+}
+
+function isValidIsoDateString(value: string) {
+  if (!ISO_DATE_PATTERN.test(value)) {
+    return false
+  }
+
+  const [year, month, day] = value.split("-").map(Number)
+  const parsedDate = new Date(Date.UTC(year, month - 1, day))
+
+  return (
+    parsedDate.getUTCFullYear() === year &&
+    parsedDate.getUTCMonth() === month - 1 &&
+    parsedDate.getUTCDate() === day
+  )
+}
+
+function validateOptionalIsoDateString(
+  value: string | null | undefined,
+  label: string,
+) {
+  if (value == null) {
+    return null
+  }
+
+  if (!isValidIsoDateString(value)) {
+    return `${label} must be a valid date in YYYY-MM-DD format`
+  }
+
+  return null
+}
+
+function validateRequiredIsoDateString(
+  value: string | null | undefined,
+  label: string,
+) {
+  if (!value) {
+    return `${label} is required`
+  }
+
+  return validateOptionalIsoDateString(value, label)
+}
+
+function validateRequiredTextField(
+  value: string | null | undefined,
+  label: string,
+) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return `${label} is required`
+  }
+
+  return null
+}
+
+function validateOptionalTextField(
+  value: string | null | undefined,
+  label: string,
+) {
+  if (value == null) {
+    return null
+  }
+
+  if (typeof value !== "string" || value.trim() === "") {
+    return `${label} cannot be empty`
+  }
+
+  return null
+}
+
+function validateRequiredChannels(
+  value: Channel[] | string[] | null | undefined,
+  label: string,
+) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return `${label} is required`
+  }
+
+  if (!value.every((channel) => typeof channel === "string" && isChannel(channel))) {
+    return `${label} is invalid`
+  }
+
+  return null
+}
+
+function resolveScopeChannels(input: {
+  channels?: Channel[] | string[] | null
+  channel?: Channel | string | null
+}) {
+  if (Array.isArray(input.channels) && input.channels.length > 0) {
+    const validChannels: Channel[] = []
+
+    for (const channel of input.channels) {
+      if (isChannel(channel)) {
+        validChannels.push(channel)
+      }
+    }
+
+    return normalizeChannels(validChannels)
+  }
+
+  if (typeof input.channel === "string" && isChannel(input.channel)) {
+    return normalizeChannels([input.channel])
+  }
+
+  return [] as Channel[]
+}
+
+function getRawScopeChannels(input: {
+  channels?: Channel[] | string[] | null
+  channel?: Channel | string | null
+}) {
+  if (Array.isArray(input.channels)) {
+    return input.channels
+  }
+
+  if (typeof input.channel === "string") {
+    return [input.channel]
+  }
+
+  return undefined
+}
+
+function validateOptionalChannels(
+  value: Channel[] | string[] | null | undefined,
+  label: string,
+) {
+  if (value == null) {
+    return null
+  }
+
+  return validateRequiredChannels(value, label)
+}
+
+function validateOptionalSkuAdSetupStatus(
+  value: UpdateSkuAdSetupInput["status"],
+  label: string,
+) {
+  if (value == null) {
+    return null
+  }
+
+  if (!VALID_SKU_AD_SETUP_STATUSES.has(value)) {
+    return `${label} is invalid`
+  }
+
+  return null
+}
+
+function validateNonNegativeFiniteNumber(
+  value: number | null | undefined,
+  label: string,
+) {
+  if (value == null || !isFiniteNumber(value)) {
+    return `${label} must be a finite number`
+  }
+
+  if (value < 0) {
+    return `${label} cannot be negative`
+  }
+
+  return null
+}
+
+function validateOptionalNonNegativeFiniteNumber(
+  value: number | null | undefined,
+  label: string,
+) {
+  if (value == null) {
+    return null
+  }
+
+  return validateNonNegativeFiniteNumber(value, label)
+}
+
+function getJakartaBusinessDate(date: Date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date)
+
+  const year = parts.find((part) => part.type === "year")?.value
+  const month = parts.find((part) => part.type === "month")?.value
+  const day = parts.find((part) => part.type === "day")?.value
+
+  return `${year}-${month}-${day}`
+}
+
+type UpdateSkuAdSetupInput = Partial<{
+  sku: string
+  channels: Channel[]
+  channel: Channel | null
+  objective: string
+  daily_budget_cap: number
+  start_date: string
+  end_date: string | null
+  status: "active" | "paused" | "ended"
+  notes: string | null
+}>
+
+function validateDateRange(
+  startDate: string | null | undefined,
+  endDate: string | null | undefined,
+  errorMessage: string,
+) {
+  if (typeof startDate === "string" && typeof endDate === "string" && endDate < startDate) {
+    return errorMessage
+  }
+
+  return null
+}
+
+function validateSkuAdSetupWrite(
+  input: Pick<
+    UpdateSkuAdSetupInput,
+    "sku" | "objective" | "daily_budget_cap" | "start_date" | "end_date"
+  > & {
+    channels?: Channel[] | string[]
+  },
+) {
+  const skuError = validateRequiredTextField(input.sku, "SKU")
+  if (skuError) {
+    return skuError
+  }
+
+  const channelsError = validateRequiredChannels(input.channels, "Channels")
+  if (channelsError) {
+    return channelsError
+  }
+
+  const objectiveError = validateRequiredTextField(input.objective, "Objective")
+  if (objectiveError) {
+    return objectiveError
+  }
+
+  const dailyBudgetError = validateNonNegativeFiniteNumber(
+    input.daily_budget_cap,
+    "Daily budget cap",
+  )
+  if (dailyBudgetError) {
+    return dailyBudgetError
+  }
+
+  const startDateError = validateRequiredIsoDateString(
+    input.start_date,
+    "Start date",
+  )
+  if (startDateError) {
+    return startDateError
+  }
+
+  const endDateError = validateOptionalIsoDateString(input.end_date, "End date")
+  if (endDateError) {
+    return endDateError
+  }
+
+  return validateDateRange(
+    input.start_date,
+    input.end_date,
+    "End date cannot be earlier than start date",
+  )
+}
+
+function validateSkuAdSetupUpdate(input: UpdateSkuAdSetupInput) {
+  if (!hasOwnProperties(input)) {
+    return "At least one setup field must be updated"
+  }
+
+  const skuError = validateOptionalTextField(input.sku, "SKU")
+  if (skuError) {
+    return skuError
+  }
+
+  const channelsError = validateOptionalChannels(
+    getRawScopeChannels(input),
+    "Channels",
+  )
+  if (channelsError) {
+    return channelsError
+  }
+
+  const objectiveError = validateOptionalTextField(input.objective, "Objective")
+  if (objectiveError) {
+    return objectiveError
+  }
+
+  const statusError = validateOptionalSkuAdSetupStatus(input.status, "Status")
+  if (statusError) {
+    return statusError
+  }
+
+  const dailyBudgetError = validateOptionalNonNegativeFiniteNumber(
+    input.daily_budget_cap,
+    "Daily budget cap",
+  )
+  if (dailyBudgetError) {
+    return dailyBudgetError
+  }
+
+  const startDateError = validateOptionalIsoDateString(
+    input.start_date,
+    "Start date",
+  )
+  if (startDateError) {
+    return startDateError
+  }
+
+  const endDateError = validateOptionalIsoDateString(input.end_date, "End date")
+  if (endDateError) {
+    return endDateError
+  }
+
+  return validateDateRange(
+    input.start_date,
+    input.end_date,
+    "End date cannot be earlier than start date",
+  )
+}
+
+export async function updateSkuAdSetup(
+  id: string,
+  input: UpdateSkuAdSetupInput,
+) {
+  const resolvedChannels =
+    input.channels !== undefined || input.channel !== undefined
+      ? resolveScopeChannels({
+          channels: input.channels,
+          channel: input.channel,
+        })
+      : undefined
+  const normalizedInput = removeUndefinedValues({
+    ...input,
+    ...(input.sku !== undefined ? { sku: input.sku.trim() } : {}),
+    channel: undefined,
+    ...(resolvedChannels !== undefined ? { channels: resolvedChannels } : {}),
+    ...(input.objective !== undefined ? { objective: input.objective.trim() } : {}),
+    ...(input.notes !== undefined
+      ? { notes: normalizeNullableTextValue(input.notes) }
+      : {}),
+  })
+
+  const validationError = validateSkuAdSetupUpdate(normalizedInput)
+  if (validationError) {
+    return { success: false, error: validationError }
+  }
+
+  const supabase = await createClient()
+
+  if (
+    normalizedInput.start_date !== undefined ||
+    normalizedInput.end_date !== undefined ||
+    normalizedInput.status !== undefined
+  ) {
+    const { data: existingRow, error: existingRowError } = await supabase
+      .from("sku_ad_setups")
+      .select("start_date, end_date, status")
+      .eq("id", id)
+      .single()
+
+    if (existingRowError) {
+      console.error("Error loading SKU ad setup for validation:", existingRowError)
+      return { success: false, error: existingRowError.message }
+    }
+
+    const mergedStatus = normalizedInput.status ?? existingRow.status
+    const mergedEndDate =
+      normalizedInput.end_date !== undefined
+        ? normalizedInput.end_date
+        : existingRow.end_date
+
+    if (mergedStatus === "ended" && mergedEndDate == null) {
+      normalizedInput.end_date = getJakartaBusinessDate()
+    }
+
+    const mergedRangeError = validateDateRange(
+      normalizedInput.start_date ?? existingRow.start_date,
+      normalizedInput.end_date !== undefined
+        ? normalizedInput.end_date
+        : existingRow.end_date,
+      "End date cannot be earlier than start date",
+    )
+
+    if (mergedRangeError) {
+      return { success: false, error: mergedRangeError }
+    }
+  }
+
+  const updates = {
+    ...normalizedInput,
+    ...(normalizedInput.channels
+      ? { channel_scope_key: buildChannelScopeKey(normalizedInput.channels) }
+      : {}),
+  }
+
+  const { data, error } = await supabase
+    .from("sku_ad_setups")
+    .update(updates)
+    .eq("id", id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error("Error updating SKU ad setup:", error)
+    return { success: false, error: error.message }
+  }
+
+  revalidateAdsReportingPaths()
+
+  return { success: true, data: data as SkuAdSetup }
+}
+
+export async function deleteSkuAdSetup(id: string) {
+  return deleteAdsWorkspaceRow("sku_ad_setups", id, "Error deleting SKU ad setup:")
+}
+
+export async function pauseSkuAdSetup(id: string) {
+  return updateSkuAdSetup(id, { status: "paused" })
+}
+
+export async function endSkuAdSetup(id: string) {
+  const today = getJakartaBusinessDate()
+
+  return updateSkuAdSetup(id, {
+    status: "ended",
+    end_date: today,
+  })
+}
+
+type ReadLoaderResult<T> = {
+  data: T[]
+  load_error: string | null
+}
+
+export async function getSkuAdSetups() {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from("sku_ad_setups")
+    .select("*")
+    .order("start_date", { ascending: false })
+
+  if (error) {
+    console.error("Error fetching SKU ad setups:", error)
+    return {
+      data: [],
+      load_error: error.message,
+    } satisfies ReadLoaderResult<SkuAdSetup>
+  }
+
+  return {
+    data: data as SkuAdSetup[],
+    load_error: null,
+  } satisfies ReadLoaderResult<SkuAdSetup>
+}
+
+export async function getSkuAdSetupById(id: string) {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from("sku_ad_setups")
+    .select("*")
+    .eq("id", id)
+    .single()
+
+  if (error) {
+    console.error("Error fetching SKU ad setup:", error)
+    return null
+  }
+
+  return data as SkuAdSetup
+}
+
+export async function upsertMonthlyAdSpend(input: {
+  month: string
+  sku: string
+  channels?: Channel[]
+  channel?: Channel | null
+  actual_spend: number
+  notes: string | null
+}) {
+  const normalizedChannels = resolveScopeChannels(input)
+  const validationError = validateMonthlyAdSpendWrite({
+    ...input,
+    channels: getRawScopeChannels(input),
+  })
+  if (validationError) {
+    return { success: false, error: validationError }
+  }
+
+  const supabase = await createClient()
+  const normalizedInput = {
+    ...input,
+    sku: normalizeTextValue(input.sku),
+    notes: normalizeNullableTextValue(input.notes),
+    month: normalizeMonthStart(input.month),
+    channels: normalizedChannels,
+  }
+
+  const { data, error } = await supabase
+    .from("monthly_ad_spend")
+    .upsert(
+      [
+        {
+          ...normalizedInput,
+          channel_scope_key: buildChannelScopeKey(normalizedInput.channels),
+        },
+      ],
+      { onConflict: "month,sku,channel_scope_key" },
+    )
+    .select()
+    .single()
+
+  if (error) {
+    console.error("Error upserting monthly ad spend:", error)
+    return { success: false, error: error.message }
+  }
+
+  revalidateAdsReportingPaths()
+
+  return { success: true, data: data as MonthlyAdSpend }
+}
+
+type UpdateMonthlyAdSpendInput = Partial<{
+  month: string
+  sku: string
+  channels: Channel[]
+  channel: Channel | null
+  actual_spend: number
+  notes: string | null
+}>
+
+function validateMonthlyAdSpendWrite(
+  input: Pick<
+    UpdateMonthlyAdSpendInput,
+    "sku" | "month" | "actual_spend"
+  > & {
+    channels?: Channel[] | string[]
+  },
+) {
+  const skuError = validateRequiredTextField(input.sku, "SKU")
+  if (skuError) {
+    return skuError
+  }
+
+  const channelsError = validateRequiredChannels(input.channels, "Channels")
+  if (channelsError) {
+    return channelsError
+  }
+
+  const actualSpendError = validateNonNegativeFiniteNumber(
+    input.actual_spend,
+    "Actual spend",
+  )
+  if (actualSpendError) {
+    return actualSpendError
+  }
+
+  const monthError = validateRequiredIsoDateString(input.month, "Month")
+  if (monthError) {
+    return monthError
+  }
+
+  return null
+}
+
+function validateMonthlyAdSpendUpdate(input: UpdateMonthlyAdSpendInput) {
+  if (!hasOwnProperties(input)) {
+    return "At least one spend field must be updated"
+  }
+
+  const skuError = validateOptionalTextField(input.sku, "SKU")
+  if (skuError) {
+    return skuError
+  }
+
+  const channelsError = validateOptionalChannels(
+    getRawScopeChannels(input),
+    "Channels",
+  )
+  if (channelsError) {
+    return channelsError
+  }
+
+  const actualSpendError = validateOptionalNonNegativeFiniteNumber(
+    input.actual_spend,
+    "Actual spend",
+  )
+  if (actualSpendError) {
+    return actualSpendError
+  }
+
+  const monthError = validateOptionalIsoDateString(input.month, "Month")
+  if (monthError) {
+    return monthError
+  }
+
+  return null
+}
+
+export async function updateMonthlyAdSpend(
+  id: string,
+  input: UpdateMonthlyAdSpendInput,
+) {
+  const resolvedChannels =
+    input.channels !== undefined || input.channel !== undefined
+      ? resolveScopeChannels({
+          channels: input.channels,
+          channel: input.channel,
+        })
+      : undefined
+  const normalizedInput = removeUndefinedValues({
+    ...input,
+    ...(input.sku !== undefined ? { sku: input.sku.trim() } : {}),
+    channel: undefined,
+    ...(resolvedChannels !== undefined ? { channels: resolvedChannels } : {}),
+    ...(input.notes !== undefined
+      ? { notes: normalizeNullableTextValue(input.notes) }
+      : {}),
+  })
+
+  const validationError = validateMonthlyAdSpendUpdate(normalizedInput)
+  if (validationError) {
+    return { success: false, error: validationError }
+  }
+
+  const supabase = await createClient()
+  const updates = {
+    ...normalizedInput,
+    ...(normalizedInput.month
+      ? { month: normalizeMonthStart(normalizedInput.month) }
+      : {}),
+    ...(normalizedInput.channels
+      ? { channel_scope_key: buildChannelScopeKey(normalizedInput.channels) }
+      : {}),
+  }
+
+  const { data, error } = await supabase
+    .from("monthly_ad_spend")
+    .update(updates)
+    .eq("id", id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error("Error updating monthly ad spend:", error)
+    return { success: false, error: error.message }
+  }
+
+  revalidateAdsReportingPaths()
+
+  return { success: true, data: data as MonthlyAdSpend }
+}
+
+export async function deleteMonthlyAdSpend(id: string) {
+  return deleteAdsWorkspaceRow(
+    "monthly_ad_spend",
+    id,
+    "Error deleting monthly ad spend:",
+  )
+}
+
+export async function getMonthlyAdSpendRows(month: string) {
+  const supabase = await createClient()
+  const normalizedMonth = normalizeMonthStart(month)
+
+  const { data, error } = await supabase
+    .from("monthly_ad_spend")
+    .select("*")
+    .eq("month", normalizedMonth)
+
+  if (error) {
+    console.error("Error fetching monthly ad spend rows:", error)
+    return {
+      data: [],
+      load_error: error.message,
+    } satisfies ReadLoaderResult<MonthlyAdSpend>
+  }
+
+  return {
+    data: (data as MonthlyAdSpend[]).sort((left, right) => {
+      const leftScopeKey =
+        left.channel_scope_key ??
+        buildChannelScopeKey(resolveScopeChannels(left))
+      const rightScopeKey =
+        right.channel_scope_key ??
+        buildChannelScopeKey(resolveScopeChannels(right))
+
+      return (
+        left.sku.localeCompare(right.sku) ||
+        leftScopeKey.localeCompare(rightScopeKey)
+      )
+    }),
+    load_error: null,
+  } satisfies ReadLoaderResult<MonthlyAdSpend>
+}
+
+export async function getMonthlyAdSpendById(id: string) {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from("monthly_ad_spend")
+    .select("*")
+    .eq("id", id)
+    .single()
+
+  if (error) {
+    console.error("Error fetching monthly ad spend row:", error)
+    return null
+  }
+
+  return data as MonthlyAdSpend
+}
+
+export async function createSkuSalesTarget(input: {
+  sku: string
+  daily_target_units: number
+  effective_from: string
+  effective_to: string | null
+  notes: string | null
+}) {
+  const validationError = validateSkuSalesTargetWrite(input)
+  if (validationError) {
+    return { success: false, error: validationError }
+  }
+
+  const supabase = await createClient()
+  const normalizedInput = {
+    ...input,
+    sku: normalizeTextValue(input.sku),
+    notes: normalizeNullableTextValue(input.notes),
+  }
+
+  const { data, error } = await supabase
+    .from("sku_sales_targets")
+    .insert([normalizedInput])
+    .select()
+    .single()
+
+  if (error) {
+    console.error("Error creating SKU sales target:", error)
+    return { success: false, error: error.message }
+  }
+
+  revalidateAdsReportingPaths()
+
+  return { success: true, data: data as SkuSalesTarget }
+}
+
+type UpdateSkuSalesTargetInput = Partial<{
+  sku: string
+  daily_target_units: number
+  effective_from: string
+  effective_to: string | null
+  notes: string | null
+}>
+
+function validateSkuSalesTargetWrite(
+  input: Pick<
+    UpdateSkuSalesTargetInput,
+    "sku" | "daily_target_units" | "effective_from" | "effective_to"
+  >,
+) {
+  const skuError = validateRequiredTextField(input.sku, "SKU")
+  if (skuError) {
+    return skuError
+  }
+
+  const dailyTargetError = validateNonNegativeFiniteNumber(
+    input.daily_target_units,
+    "Daily target units",
+  )
+  if (dailyTargetError) {
+    return dailyTargetError
+  }
+
+  const effectiveFromError = validateRequiredIsoDateString(
+    input.effective_from,
+    "Effective from",
+  )
+  if (effectiveFromError) {
+    return effectiveFromError
+  }
+
+  const effectiveToError = validateOptionalIsoDateString(
+    input.effective_to,
+    "Effective to",
+  )
+  if (effectiveToError) {
+    return effectiveToError
+  }
+
+  return validateDateRange(
+    input.effective_from,
+    input.effective_to,
+    "Effective to cannot be earlier than effective from",
+  )
+}
+
+function validateSkuSalesTargetUpdate(input: UpdateSkuSalesTargetInput) {
+  if (!hasOwnProperties(input)) {
+    return "At least one target field must be updated"
+  }
+
+  const skuError = validateOptionalTextField(input.sku, "SKU")
+  if (skuError) {
+    return skuError
+  }
+
+  const dailyTargetError = validateOptionalNonNegativeFiniteNumber(
+    input.daily_target_units,
+    "Daily target units",
+  )
+  if (dailyTargetError) {
+    return dailyTargetError
+  }
+
+  const effectiveFromError = validateOptionalIsoDateString(
+    input.effective_from,
+    "Effective from",
+  )
+  if (effectiveFromError) {
+    return effectiveFromError
+  }
+
+  const effectiveToError = validateOptionalIsoDateString(
+    input.effective_to,
+    "Effective to",
+  )
+  if (effectiveToError) {
+    return effectiveToError
+  }
+
+  return validateDateRange(
+    input.effective_from,
+    input.effective_to,
+    "Effective to cannot be earlier than effective from",
+  )
+}
+
+export async function updateSkuSalesTarget(
+  id: string,
+  input: UpdateSkuSalesTargetInput,
+) {
+  const normalizedInput = removeUndefinedValues({
+    ...input,
+    ...(input.sku !== undefined ? { sku: input.sku.trim() } : {}),
+    ...(input.notes !== undefined
+      ? { notes: normalizeNullableTextValue(input.notes) }
+      : {}),
+  })
+
+  const validationError = validateSkuSalesTargetUpdate(normalizedInput)
+  if (validationError) {
+    return { success: false, error: validationError }
+  }
+
+  const supabase = await createClient()
+
+  if (
+    normalizedInput.effective_from !== undefined ||
+    normalizedInput.effective_to !== undefined
+  ) {
+    const { data: existingRow, error: existingRowError } = await supabase
+      .from("sku_sales_targets")
+      .select("effective_from, effective_to")
+      .eq("id", id)
+      .single()
+
+    if (existingRowError) {
+      console.error("Error loading SKU sales target for validation:", existingRowError)
+      return { success: false, error: existingRowError.message }
+    }
+
+    const mergedRangeError = validateDateRange(
+      normalizedInput.effective_from ?? existingRow.effective_from,
+      normalizedInput.effective_to !== undefined
+        ? normalizedInput.effective_to
+        : existingRow.effective_to,
+      "Effective to cannot be earlier than effective from",
+    )
+
+    if (mergedRangeError) {
+      return { success: false, error: mergedRangeError }
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("sku_sales_targets")
+    .update(normalizedInput)
+    .eq("id", id)
+    .select()
+    .single()
+
+  if (error) {
+    console.error("Error updating SKU sales target:", error)
+    return { success: false, error: error.message }
+  }
+
+  revalidateAdsReportingPaths()
+
+  return { success: true, data: data as SkuSalesTarget }
+}
+
+export async function deleteSkuSalesTarget(id: string) {
+  return deleteAdsWorkspaceRow(
+    "sku_sales_targets",
+    id,
+    "Error deleting SKU sales target:",
+  )
+}
+
+export async function getSkuSalesTargets() {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from("sku_sales_targets")
+    .select("*")
+
+  if (error) {
+    console.error("Error fetching SKU sales targets:", error)
+    return {
+      data: [],
+      load_error: error.message,
+    } satisfies ReadLoaderResult<SkuSalesTarget>
+  }
+
+  return {
+    data: (data as SkuSalesTarget[]).sort((left, right) => {
+      return (
+        right.effective_from.localeCompare(left.effective_from) ||
+        left.sku.localeCompare(right.sku)
+      )
+    }),
+    load_error: null,
+  } satisfies ReadLoaderResult<SkuSalesTarget>
+}
+
+export async function getSkuSalesTargetById(id: string) {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from("sku_sales_targets")
+    .select("*")
+    .eq("id", id)
+    .single()
+
+  if (error) {
+    console.error("Error fetching SKU sales target:", error)
+    return null
+  }
+
+  return data as SkuSalesTarget
+}
+
+export async function getMonthlyAdsReportBundle(
+  month: string,
+): Promise<MonthlyAdsReportBundle> {
+  const supabase = await createClient()
+  const monthStart = normalizeMonthStart(month)
+  const monthEnd = endOfMonthIso(monthStart)
+
+  const [ordersResult, productsResult, setupsResult, spendResult, targetsResult] =
+    await Promise.all([
+      supabase
+        .from("orders")
+        .select(`
+          id,
+          channel,
+          order_date,
+          status,
+          channel_fees,
+          order_line_items (
+            sku,
+            quantity,
+            selling_price,
+            cost_per_unit_snapshot
+          )
+        `)
+        .gte("order_date", monthStart)
+        .lte("order_date", monthEnd)
+        .in("status", ["paid", "shipped"]),
+      supabase.from("products").select("sku, name, variant, cost_per_unit"),
+      supabase.from("sku_ad_setups").select("*"),
+      supabase.from("monthly_ad_spend").select("*").eq("month", monthStart),
+      supabase.from("sku_sales_targets").select("*"),
+    ])
+
+  if (ordersResult.error) {
+    console.error("Error fetching monthly ads report orders:", ordersResult.error)
+    return createMonthlyAdsReportLoadErrorBundle({
+      month: monthStart,
+      load_error: ordersResult.error.message,
+    })
+  }
+
+  if (productsResult.error) {
+    console.error("Error fetching monthly ads report products:", productsResult.error)
+    return createMonthlyAdsReportLoadErrorBundle({
+      month: monthStart,
+      load_error: productsResult.error.message,
+    })
+  }
+
+  if (setupsResult.error) {
+    console.error("Error fetching monthly ads report setups:", setupsResult.error)
+    return createMonthlyAdsReportLoadErrorBundle({
+      month: monthStart,
+      load_error: setupsResult.error.message,
+    })
+  }
+
+  if (spendResult.error) {
+    console.error("Error fetching monthly ads report spend:", spendResult.error)
+    return createMonthlyAdsReportLoadErrorBundle({
+      month: monthStart,
+      load_error: spendResult.error.message,
+    })
+  }
+
+  if (targetsResult.error) {
+    console.error("Error fetching monthly ads report targets:", targetsResult.error)
+    return createMonthlyAdsReportLoadErrorBundle({
+      month: monthStart,
+      load_error: targetsResult.error.message,
+    })
+  }
+
+  return buildMonthlyAdsReportBundle({
+    month: monthStart,
+    orders: (ordersResult.data || []) as MonthlyAdsReportOrder[],
+    products: (productsResult.data || []) as MonthlyAdsReportProduct[],
+    setups: (setupsResult.data || []) as SkuAdSetup[],
+    spendRows: (spendResult.data || []) as MonthlyAdSpend[],
+    targets: (targetsResult.data || []) as SkuSalesTarget[],
+  })
+}
+
+function revalidateAdsReportingPaths() {
+  revalidatePath("/ad-campaigns")
+  revalidatePath("/reports")
+}
+
+async function deleteAdsWorkspaceRow(
+  table: "sku_ad_setups" | "monthly_ad_spend" | "sku_sales_targets",
+  id: string,
+  errorLabel: string,
+) {
+  const supabase = await createClient()
+
+  const { error } = await supabase.from(table).delete().eq("id", id)
+
+  if (error) {
+    console.error(errorLabel, error)
+    return { success: false, error: error.message }
+  }
+
+  revalidateAdsReportingPaths()
+
+  return { success: true }
+}
+
+// ============================================================================
 // ANALYTICS & METRICS
 // ============================================================================
 
@@ -444,6 +1621,18 @@ type AttributedOrderMetric = {
     cost_per_unit_snapshot: number | null
     product_name: string
   }>
+}
+
+type CampaignMetricOrder = Pick<
+  Order,
+  "id" | "order_id" | "channel" | "order_date" | "status" | "channel_fees"
+> & {
+  order_line_items: Array<
+    Pick<
+      OrderLineItem,
+      "id" | "sku" | "quantity" | "selling_price" | "cost_per_unit_snapshot"
+    >
+  >
 }
 
 type CampaignMetric = {
@@ -573,14 +1762,14 @@ async function getCampaignMetricsBatch(options?: {
   const productMap = new Map((productsResult.data || []).map((product) => [product.sku, product]))
   const decoratedOrdersByChannel = new Map<Channel, AttributedOrderMetric[]>()
 
-  for (const order of (ordersResult.data || []) as any[]) {
+  for (const order of (ordersResult.data || []) as CampaignMetricOrder[]) {
     const lineItems = order.order_line_items || []
     const totalSellingPrice = lineItems.reduce(
-      (sum: number, item: any) => sum + (item.selling_price * item.quantity),
+      (sum: number, item) => sum + (item.selling_price * item.quantity),
       0
     )
     const revenue = totalSellingPrice - (order.channel_fees || 0)
-    const totalCogs = lineItems.reduce((sum: number, item: any) => {
+    const totalCogs = lineItems.reduce((sum: number, item) => {
       const product = productMap.get(item.sku)
       return sum + getLineItemTotalCost(item, product)
     }, 0)
@@ -593,7 +1782,7 @@ async function getCampaignMetricsBatch(options?: {
       status: order.status,
       revenue,
       net_profit: revenue - totalCogs,
-      line_items_with_names: lineItems.map((item: any) => ({
+      line_items_with_names: lineItems.map((item) => ({
         ...item,
         product_name: productMap.get(item.sku)?.name || "Unknown",
       })),

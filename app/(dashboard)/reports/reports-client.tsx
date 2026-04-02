@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react"
 import { useRouter } from "next/navigation"
+import type { MonthlyAdsReportBundle } from "@/lib/ads/reporting"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -14,6 +15,7 @@ import { formatCurrency } from "@/lib/utils"
 import { TrendingUp, DollarSign, Package, ShoppingBag, Target } from "lucide-react"
 import Link from "next/link"
 import { InfoTooltip } from "@/components/ui/info-tooltip"
+import type { Channel } from "@/lib/types/database.types"
 import {
   LineChart,
   Line,
@@ -76,9 +78,10 @@ type Props = {
   initialMonthly: any
   initialChannelProduct: any
   initialAdPerformance: any
+  initialMonthlyAds: MonthlyAdsReportBundle
   initialReturnSummary: any
   initialCalendarDetails: any
-  selectedYear: number
+  selectedYear: number | undefined
   selectedMonth: number | undefined
 }
 
@@ -87,6 +90,7 @@ export function ReportsClient({
   initialMonthly,
   initialChannelProduct,
   initialAdPerformance,
+  initialMonthlyAds,
   initialReturnSummary,
   initialCalendarDetails,
   selectedYear,
@@ -101,8 +105,10 @@ export function ReportsClient({
   // Update URL when filters change (navigates to new page with server-side data fetch)
   const updateFilters = (year: number | undefined, month: number | undefined) => {
     const params = new URLSearchParams()
+    const nextMonth = year ? month : undefined
+
     if (year) params.set("year", year.toString())
-    if (month) params.set("month", month.toString())
+    if (nextMonth) params.set("month", nextMonth.toString())
     router.push(`/reports?${params.toString()}`)
   }
 
@@ -110,6 +116,7 @@ export function ReportsClient({
   const monthlyReport = initialMonthly
   const channelProductReport = initialChannelProduct
   const adPerformance = initialAdPerformance
+  const monthlyAds = initialMonthlyAds
   const returnSummary = initialReturnSummary
 
   const totalRevenue = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.revenue, 0) || 0
@@ -128,7 +135,8 @@ export function ReportsClient({
     ? monthlyReport.byDay
     : (monthlyReport?.byMonth || [])
   const isDailyTrend = selectedMonth && monthlyReport?.byDay?.length > 0
-  const selectedMonthKey = selectedMonth
+  const canFilterMonth = typeof selectedYear === "number"
+  const selectedMonthKey = selectedYear && selectedMonth
     ? `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`
     : null
   const byDay = monthlyReport?.byDay || []
@@ -164,7 +172,7 @@ export function ReportsClient({
       : maxDayRevenue
   const calendarCells: Array<{ date: string; day: number } | null> = []
 
-  if (selectedMonth) {
+  if (selectedYear && selectedMonth) {
     const firstDayWeekIndex = new Date(selectedYear, selectedMonth - 1, 1).getDay()
     const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate()
 
@@ -178,7 +186,7 @@ export function ReportsClient({
     }
   }
 
-  const yearCalendarMonths = !selectedMonth
+  const yearCalendarMonths = selectedYear && !selectedMonth
     ? Array.from({ length: 12 }, (_, monthIndex) => {
         const monthNumber = monthIndex + 1
         const monthKey = `${selectedYear}-${String(monthNumber).padStart(2, "0")}`
@@ -268,6 +276,13 @@ export function ReportsClient({
     })
     return groups
   }, [])
+  const monthlyAdsLabel = formatMonthLabel(monthlyAds.month)
+  const monthlyAdsMissingSpendRows: NonNullable<
+    MonthlyAdsReportBundle["missingSpendScopes"]
+  > = monthlyAds.missingSpendScopes ?? []
+  const monthlyAdsProductLabels = new Map<string, string>(
+    monthlyAds.channelBreakdown.map((row) => [row.sku, formatMonthlyAdsProductLabel(row)]),
+  )
 
   return (
     <div className="space-y-8">
@@ -290,9 +305,14 @@ export function ReportsClient({
               <Label htmlFor="year">Year</Label>
               <Select
                 value={selectedYear?.toString() || "all"}
-                onValueChange={(value) => updateFilters(value === "all" ? undefined : parseInt(value), selectedMonth)}
+                onValueChange={(value) =>
+                  updateFilters(
+                    value === "all" ? undefined : parseInt(value, 10),
+                    value === "all" ? undefined : selectedMonth,
+                  )
+                }
               >
-                <SelectTrigger>
+                <SelectTrigger id="year">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -308,10 +328,13 @@ export function ReportsClient({
               <Label htmlFor="month">Month</Label>
               <Select
                 value={selectedMonth?.toString() || "all"}
-                onValueChange={(value) => updateFilters(selectedYear, value === "all" ? undefined : parseInt(value))}
+                onValueChange={(value) =>
+                  updateFilters(selectedYear, value === "all" ? undefined : parseInt(value, 10))
+                }
+                disabled={!canFilterMonth}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="All Months" />
+                <SelectTrigger id="month">
+                  <SelectValue placeholder={canFilterMonth ? "All Months" : "Select a year first"} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Months</SelectItem>
@@ -410,6 +433,234 @@ export function ReportsClient({
         </Card>
       </div>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Monthly Ads Profitability</CardTitle>
+          <CardDescription>
+            SKU-level ads profitability and channel attribution for {monthlyAdsLabel}.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {monthlyAds.load_error ? (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
+              Unable to load the monthly ads report: {monthlyAds.load_error}
+            </div>
+          ) : monthlyAds.skuSummaries.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              No reportable SKU activity was found for this month.
+            </div>
+          ) : (
+            <>
+              {monthlyAdsMissingSpendRows.length > 0 ? (
+                <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-4">
+                  <div className="mb-2 text-sm font-semibold text-destructive">
+                    Spend rows still missing for ads-active channel scopes
+                  </div>
+                  <div className="space-y-1 text-sm text-destructive">
+                    {monthlyAdsMissingSpendRows.map((row) => (
+                      <div key={`${row.sku}-${row.channels.join("|")}`}>
+                        {row.sku} · {formatChannelScope(row.channels)} · budget cap{" "}
+                        {formatCurrency(row.budget_cap)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Target Units
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      {formatCount(monthlyAds.totals.total_target_units)}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Actual Units
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      {formatCount(monthlyAds.totals.total_actual_units)}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Ads Spend
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      {formatCurrency(monthlyAds.totals.total_ads_spent)}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Profit Before Ads
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div
+                      className={`text-2xl font-bold ${
+                        monthlyAds.totals.profit_before_ads >= 0 ? "text-success" : "text-destructive"
+                      }`}
+                    >
+                      {formatCurrency(monthlyAds.totals.profit_before_ads)}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Profit After Ads
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div
+                      className={`text-2xl font-bold ${
+                        monthlyAds.totals.profit_after_ads >= 0 ? "text-success" : "text-destructive"
+                      }`}
+                    >
+                      {formatCurrency(monthlyAds.totals.profit_after_ads)}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                      Target Achievement
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      {monthlyAds.totals.target_achievement_percent.toFixed(1)}%
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="overflow-x-auto rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>SKU</TableHead>
+                      <TableHead className="text-right">Target</TableHead>
+                      <TableHead className="text-right">Actual</TableHead>
+                      <TableHead className="text-right">Ads Units</TableHead>
+                      <TableHead className="text-right">Organic Units</TableHead>
+                      <TableHead className="text-right">Ads Spend</TableHead>
+                      <TableHead className="text-right">Budget Cap</TableHead>
+                      <TableHead className="text-right">Profit After Ads</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {monthlyAds.skuSummaries.map((summary) => (
+                      <TableRow key={summary.sku}>
+                        <TableCell>
+                          <div className="font-medium">
+                            {monthlyAdsProductLabels.get(summary.sku) || summary.sku}
+                          </div>
+                          <div className="text-xs text-muted-foreground">{summary.sku}</div>
+                        </TableCell>
+                        <TableCell className="text-right">{formatCount(summary.target_units)}</TableCell>
+                        <TableCell className="text-right">{formatCount(summary.actual_units)}</TableCell>
+                        <TableCell className="text-right">
+                          {formatCount(summary.ads_active_channel_units)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatCount(summary.organic_channel_units)}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {formatCurrency(summary.total_ads_spent)}
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {formatCurrency(summary.total_budget_cap)}
+                        </TableCell>
+                        <TableCell
+                          className={`text-right font-semibold ${
+                            summary.profit_after_ads >= 0 ? "text-success" : "text-destructive"
+                          }`}
+                        >
+                          {formatCurrency(summary.profit_after_ads)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="overflow-x-auto rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>SKU</TableHead>
+                      <TableHead>Channel</TableHead>
+                      <TableHead>Classification</TableHead>
+                      <TableHead className="text-right">Units</TableHead>
+                      <TableHead className="text-right">Ads Spend</TableHead>
+                      <TableHead className="text-right">Revenue</TableHead>
+                      <TableHead className="text-right">Profit After Ads</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {monthlyAds.channelBreakdown.map((row) => (
+                      <TableRow key={`${row.sku}-${row.channel}`}>
+                        <TableCell>
+                          <div className="font-medium">{formatMonthlyAdsProductLabel(row)}</div>
+                          <div className="text-xs text-muted-foreground">{row.sku}</div>
+                        </TableCell>
+                        <TableCell>{channelLabels[row.channel]}</TableCell>
+                        <TableCell>
+                          <Badge variant={row.classification === "ads-active" ? "success" : "secondary"}>
+                            {formatAdsClassificationLabel(row.classification)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">{formatCount(row.units)}</TableCell>
+                        <TableCell className="text-right">
+                          {row.actual_spend_missing
+                            ? "Missing"
+                            : row.uses_shared_budget
+                              ? "Shared at SKU level"
+                              : formatCurrency(row.ads_spent)}
+                        </TableCell>
+                        <TableCell className="text-right">{formatCurrency(row.revenue)}</TableCell>
+                        <TableCell
+                          className={`text-right font-semibold ${
+                            row.profit_after_ads >= 0 ? "text-success" : "text-destructive"
+                          }`}
+                        >
+                          {row.actual_spend_missing
+                            ? "Missing"
+                            : row.uses_shared_budget
+                              ? "Shared at SKU level"
+                              : formatCurrency(row.profit_after_ads)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Tabbed Content */}
       <Tabs defaultValue="trends" className="space-y-4">
         <div className="w-full overflow-x-auto">
@@ -485,9 +736,11 @@ export function ReportsClient({
                       : undefined
 
                     return (
-                      <div
+                      <button
                         key={cell.date}
-                        className="min-h-[84px] cursor-pointer rounded-md border p-2 transition hover:border-primary/60 hover:shadow-sm"
+                        type="button"
+                        aria-label={formatHeatmapDayAriaLabel(cell.date, orders, units, revenue)}
+                        className="min-h-[84px] rounded-md border p-2 text-left transition hover:border-primary/60 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         style={backgroundColor ? { backgroundColor } : undefined}
                         title={`${cell.date}: ${orders} orders, ${units} units, ${formatCurrency(revenue)}`}
                         onClick={() => setSelectedCalendarDate(cell.date)}
@@ -498,7 +751,7 @@ export function ReportsClient({
                           <div>{units} units</div>
                           <div>{formatCurrency(revenue)}</div>
                         </div>
-                      </div>
+                      </button>
                     )
                   })}
                 </div>
@@ -561,6 +814,13 @@ export function ReportsClient({
                         <button
                           key={monthBlock.monthNumber}
                           type="button"
+                          aria-label={formatHeatmapMonthAriaLabel({
+                            label: monthBlock.monthLabel,
+                            year: selectedYear,
+                            orders: monthBlock.summary.orders,
+                            units: monthBlock.summary.units_sold,
+                            revenue: monthBlock.summary.revenue,
+                          })}
                           className="rounded-lg border bg-card p-3 text-left transition hover:border-primary/60 hover:shadow-sm"
                           style={backgroundColor ? { backgroundColor } : undefined}
                           onClick={() => {
@@ -1569,23 +1829,25 @@ export function ReportsClient({
                     ? `rgba(16,185,129,${(0.12 + heatmapIntensity * 0.42).toFixed(3)})`
                     : undefined
 
-                  return (
-                    <div
-                      key={cell.date}
-                      className="min-h-[84px] cursor-pointer rounded-md border p-2 transition hover:border-primary/60 hover:shadow-sm"
-                      style={backgroundColor ? { backgroundColor } : undefined}
-                      title={`${cell.date}: ${orders} orders, ${units} units, ${formatCurrency(revenue)}`}
-                      onClick={() => setSelectedYearlyCalendarDate(cell.date)}
-                    >
+                    return (
+                      <button
+                        key={cell.date}
+                        type="button"
+                        aria-label={formatHeatmapDayAriaLabel(cell.date, orders, units, revenue)}
+                        className="min-h-[84px] rounded-md border p-2 text-left transition hover:border-primary/60 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        style={backgroundColor ? { backgroundColor } : undefined}
+                        title={`${cell.date}: ${orders} orders, ${units} units, ${formatCurrency(revenue)}`}
+                        onClick={() => setSelectedYearlyCalendarDate(cell.date)}
+                      >
                       <div className="text-xs font-semibold">{cell.day}</div>
                       <div className="mt-2 space-y-1 text-[11px] leading-tight text-muted-foreground">
                         <div>{orders} orders</div>
-                        <div>{units} units</div>
-                        <div>{formatCurrency(revenue)}</div>
-                      </div>
-                    </div>
-                  )
-                })}
+                         <div>{units} units</div>
+                         <div>{formatCurrency(revenue)}</div>
+                       </div>
+                      </button>
+                    )
+                  })}
               </div>
 
               {selectedYearlyDayDetails ? (
@@ -1627,4 +1889,60 @@ export function ReportsClient({
       </Dialog>
     </div>
   )
+}
+
+function formatCount(value: number) {
+  return new Intl.NumberFormat("en-US").format(value)
+}
+
+function formatMonthLabel(value: string) {
+  const parsed = new Date(`${value}T00:00:00`)
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+
+  return parsed.toLocaleDateString("default", { month: "long", year: "numeric" })
+}
+
+function formatMonthlyAdsProductLabel(row: MonthlyAdsReportBundle["channelBreakdown"][number]) {
+  if (!row.product_name) {
+    return row.sku
+  }
+
+  return row.product_variant ? `${row.product_name} (${row.product_variant})` : row.product_name
+}
+
+function formatAdsClassificationLabel(
+  classification: MonthlyAdsReportBundle["channelBreakdown"][number]["classification"],
+) {
+  return classification === "ads-active" ? "Ads-Active" : "Organic"
+}
+
+function formatChannelScope(channels: readonly Channel[] | undefined) {
+  if (!channels || channels.length === 0) {
+    return "No channels"
+  }
+
+  return channels.map((channel) => channelLabels[channel]).join(" + ")
+}
+
+function formatHeatmapDayAriaLabel(
+  date: string,
+  orders: number,
+  units: number,
+  revenue: number,
+) {
+  return `Open details for ${date}: ${orders} orders, ${units} units, ${formatCurrency(revenue)} revenue`
+}
+
+function formatHeatmapMonthAriaLabel(input: {
+  label: string
+  year: number | undefined
+  orders: number
+  units: number
+  revenue: number
+}) {
+  return `Open ${input.label} ${input.year ?? ""} details: ${input.orders} orders, ${input.units} units, ${formatCurrency(input.revenue)} revenue`
+    .trim()
 }

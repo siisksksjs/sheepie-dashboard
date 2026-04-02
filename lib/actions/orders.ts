@@ -120,8 +120,18 @@ export async function getOrderById(id: string) {
     .single()
 
   if (orderError) {
+    const isNotFound =
+      orderError.code === "PGRST116"
+      || orderError.details?.includes("0 rows")
+      || orderError.message?.includes("0 rows")
+      || orderError.message?.includes("no rows")
+
+    if (isNotFound) {
+      return null
+    }
+
     console.error("Error fetching order:", orderError)
-    return null
+    throw new Error(orderError.message || "Failed to fetch order")
   }
 
   const { data: lineItems, error: lineItemsError } = await supabase
@@ -131,7 +141,7 @@ export async function getOrderById(id: string) {
 
   if (lineItemsError) {
     console.error("Error fetching line items:", lineItemsError)
-    return null
+    throw new Error(lineItemsError.message || "Failed to fetch order line items")
   }
 
   return {
@@ -140,7 +150,7 @@ export async function getOrderById(id: string) {
   }
 }
 
-export async function createOrder(formData: {
+type CreateOrderInput = {
   order_id: string
   channel: Channel
   order_date: string
@@ -152,7 +162,107 @@ export async function createOrder(formData: {
     quantity: number
     selling_price: number
   }[]
+}
+
+type CreateOrderResult =
+  | { success: true; data: Order }
+  | { success: false; error: string }
+
+type DuplicateOrderResult =
+  | {
+      success: true
+      data: Pick<Order, "id" | "order_id">
+    }
+  | {
+      success: false
+      error: string
+    }
+
+type BuildDuplicateOrderInputArgs = {
+  sourceOrder: Order
+  sourceLineItems: OrderLineItem[]
+  nextOrderId: string
+  today: string
+}
+
+type LedgerRollbackEntry = {
+  sku: string
+  quantity: number
+}
+
+export async function buildDuplicateOrderInput({
+  sourceOrder,
+  sourceLineItems,
+  nextOrderId,
+  today,
+}: BuildDuplicateOrderInputArgs): Promise<CreateOrderInput> {
+  return {
+    order_id: nextOrderId,
+    channel: sourceOrder.channel,
+    order_date: today,
+    status: "paid",
+    channel_fees: sourceOrder.channel_fees,
+    notes: sourceOrder.notes,
+    line_items: sourceLineItems.map((item) => ({
+      sku: item.sku,
+      quantity: item.quantity,
+      selling_price: item.selling_price,
+    })),
+  }
+}
+
+function getJakartaBusinessDate(date: Date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date)
+
+  const year = parts.find((part) => part.type === "year")?.value
+  const month = parts.find((part) => part.type === "month")?.value
+  const day = parts.find((part) => part.type === "day")?.value
+
+  return `${year}-${month}-${day}`
+}
+
+async function cleanupFailedSettledOrderCreation(params: {
+  supabase: Awaited<ReturnType<typeof createClient>>
+  orderId: string
+  orderLabel: string
+  successfulLedgerEntries: LedgerRollbackEntry[]
 }) {
+  const { supabase, orderId, orderLabel, successfulLedgerEntries } = params
+  let cleanupError: string | null = null
+
+  for (const entry of [...successfulLedgerEntries].reverse()) {
+    const reversalResult = await createLedgerEntry({
+      sku: entry.sku,
+      movement_type: "RETURN",
+      quantity: entry.quantity,
+      reference: `${orderLabel} - Rollback`,
+    }, {
+      skipChangelog: true,
+    })
+
+    if (!reversalResult.success && !cleanupError) {
+      cleanupError = reversalResult.error || "Failed to restore stock after ledger failure"
+    }
+  }
+
+  const { error: deleteError } = await supabase
+    .from("orders")
+    .delete()
+    .eq("id", orderId)
+
+  if (deleteError && !cleanupError) {
+    cleanupError = deleteError.message || "Failed to delete order after ledger failure"
+  }
+
+  return cleanupError
+}
+
+async function createOrderWithWorkflow(formData: CreateOrderInput): Promise<CreateOrderResult> {
   const supabase = await createClient()
 
   const uniqueSkus = [...new Set(formData.line_items.map(item => item.sku))]
@@ -212,51 +322,107 @@ export async function createOrder(formData: {
     return { success: false, error: lineItemsError.message }
   }
 
+  const isSettledOrder = isSettledOrderStatus(formData.status)
+  const successfulLedgerEntries: LedgerRollbackEntry[] = []
+
   // If order status is settled, generate ledger entries
-  if (isSettledOrderStatus(formData.status)) {
-    for (const item of formData.line_items) {
-      // Check if this is a bundle
-      const { data: product } = await supabase
-        .from("products")
-        .select("is_bundle")
-        .eq("sku", item.sku)
-        .single()
+  if (isSettledOrder) {
 
-      if (product?.is_bundle) {
-        // Get bundle components
-        const { data: compositions } = await supabase
-          .from("bundle_compositions")
-          .select("*")
-          .eq("bundle_sku", item.sku)
+    try {
+      for (const item of formData.line_items) {
+        // Check if this is a bundle
+        const { data: product } = await supabase
+          .from("products")
+          .select("is_bundle")
+          .eq("sku", item.sku)
+          .single()
 
-        if (compositions && compositions.length > 0) {
-          // Create ledger entries for each component
-          for (const comp of compositions) {
-            await createLedgerEntry({
-              sku: comp.component_sku,
-              movement_type: "OUT_SALE",
-              quantity: -(comp.quantity * item.quantity), // Component qty × bundle qty
-              reference: `Order ${formData.order_id} (Bundle: ${item.sku})`,
-            }, {
-              skipChangelog: true,
-            })
+        if (product?.is_bundle) {
+          // Get bundle components
+          const { data: compositions } = await supabase
+            .from("bundle_compositions")
+            .select("*")
+            .eq("bundle_sku", item.sku)
+
+          if (compositions && compositions.length > 0) {
+            // Create ledger entries for each component
+            for (const comp of compositions) {
+              const ledgerResult = await createLedgerEntry({
+                sku: comp.component_sku,
+                movement_type: "OUT_SALE",
+                quantity: -(comp.quantity * item.quantity), // Component qty × bundle qty
+                reference: `Order ${formData.order_id} (Bundle: ${item.sku})`,
+              }, {
+                skipChangelog: true,
+              })
+
+              if (!ledgerResult.success) {
+                const cleanupError = await cleanupFailedSettledOrderCreation({
+                  supabase,
+                  orderId: order.id,
+                  orderLabel: `Order ${formData.order_id}`,
+                  successfulLedgerEntries,
+                })
+
+                return {
+                  success: false,
+                  error: cleanupError || ledgerResult.error || "Failed to create ledger entry",
+                }
+              }
+
+              successfulLedgerEntries.push({
+                sku: comp.component_sku,
+                quantity: comp.quantity * item.quantity,
+              })
+            }
           }
+        } else {
+          // Regular product - create ledger entry as normal
+          const ledgerResult = await createLedgerEntry({
+            sku: item.sku,
+            movement_type: "OUT_SALE",
+            quantity: -item.quantity,
+            reference: `Order ${formData.order_id}`,
+          }, {
+            skipChangelog: true,
+          })
+
+          if (!ledgerResult.success) {
+            const cleanupError = await cleanupFailedSettledOrderCreation({
+              supabase,
+              orderId: order.id,
+              orderLabel: `Order ${formData.order_id}`,
+              successfulLedgerEntries,
+            })
+
+            return {
+              success: false,
+              error: cleanupError || ledgerResult.error || "Failed to create ledger entry",
+            }
+          }
+
+          successfulLedgerEntries.push({
+            sku: item.sku,
+            quantity: item.quantity,
+          })
         }
-      } else {
-        // Regular product - create ledger entry as normal
-        await createLedgerEntry({
-          sku: item.sku,
-          movement_type: "OUT_SALE",
-          quantity: -item.quantity,
-          reference: `Order ${formData.order_id}`,
-        }, {
-          skipChangelog: true,
-        })
+      }
+    } catch (error) {
+      const cleanupError = await cleanupFailedSettledOrderCreation({
+        supabase,
+        orderId: order.id,
+        orderLabel: `Order ${formData.order_id}`,
+        successfulLedgerEntries,
+      })
+
+      return {
+        success: false,
+        error: cleanupError || (error instanceof Error ? error.message : "Failed to create ledger entry"),
       }
     }
   }
 
-  if (isSettledOrderStatus(formData.status)) {
+  if (isSettledOrder) {
     const settlementAmount = calculateOrderSettlementAmount(lineItemsToInsert, formData.channel_fees)
     const settlementResult = await createMarketplaceSettlementEntry({
       orderId: order.id,
@@ -268,7 +434,17 @@ export async function createOrder(formData: {
     })
 
     if (!settlementResult.success) {
-      console.error("Failed to create marketplace settlement entry:", settlementResult.error)
+      const cleanupError = await cleanupFailedSettledOrderCreation({
+        supabase,
+        orderId: order.id,
+        orderLabel: `Order ${order.order_id}`,
+        successfulLedgerEntries,
+      })
+
+      return {
+        success: false,
+        error: cleanupError || settlementResult.error || "Failed to create marketplace settlement entry",
+      }
     }
   }
 
@@ -295,6 +471,73 @@ export async function createOrder(formData: {
   return { success: true, data: order }
 }
 
+export async function createOrder(formData: CreateOrderInput) {
+  return createOrderWithWorkflow(formData)
+}
+
+export async function duplicateOrder(orderId: string): Promise<DuplicateOrderResult> {
+  let orderData: Awaited<ReturnType<typeof getOrderById>>
+
+  try {
+    orderData = await getOrderById(orderId)
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to load source order",
+    }
+  }
+
+  if (!orderData) {
+    return { success: false, error: "Order not found" }
+  }
+
+  if (orderData.lineItems.length === 0) {
+    return { success: false, error: "Source order has no line items" }
+  }
+
+  const today = getJakartaBusinessDate()
+  let nextOrderId: string
+
+  try {
+    nextOrderId = await generateNextOrderId(orderData.order.channel, today)
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to generate next order ID",
+    }
+  }
+
+  const duplicateInput = await buildDuplicateOrderInput({
+    sourceOrder: orderData.order,
+    sourceLineItems: orderData.lineItems,
+    nextOrderId,
+    today,
+  })
+
+  let result: CreateOrderResult
+
+  try {
+    result = await createOrderWithWorkflow(duplicateInput)
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to create duplicate order",
+    }
+  }
+
+  if (!result.success) {
+    return result
+  }
+
+  return {
+    success: true,
+    data: {
+      id: result.data.id,
+      order_id: result.data.order_id,
+    },
+  }
+}
+
 export async function updateOrderStatus(
   orderId: string,
   newStatus: OrderStatus,
@@ -303,7 +546,17 @@ export async function updateOrderStatus(
   const supabase = await createClient()
 
   // Get order details
-  const orderData = await getOrderById(orderId)
+  let orderData: Awaited<ReturnType<typeof getOrderById>>
+
+  try {
+    orderData = await getOrderById(orderId)
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to load order",
+    }
+  }
+
   if (!orderData) {
     return { success: false, error: "Order not found" }
   }
@@ -1697,6 +1950,11 @@ export async function generateNextOrderId(channel: Channel, orderDate: string) {
     .like("order_id", pattern)
     .order("order_id", { ascending: false })
     .limit(1)
+
+  if (error) {
+    console.error("Error generating next order ID:", error)
+    throw new Error(error.message || "Failed to generate next order ID")
+  }
 
   let nextSequence = 1
 
