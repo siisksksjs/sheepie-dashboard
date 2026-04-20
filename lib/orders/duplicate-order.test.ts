@@ -90,6 +90,7 @@ describe("buildDuplicateOrderInput", () => {
           id: "line_1",
           order_id: "ord_1",
           sku: "Calmi-001",
+          pack_size: "single",
           quantity: 2,
           selling_price: 75000,
           cost_per_unit_snapshot: 12000,
@@ -110,6 +111,7 @@ describe("buildDuplicateOrderInput", () => {
       line_items: [
         {
           sku: "Calmi-001",
+          pack_size: "single" as const,
           quantity: 2,
           selling_price: 75000,
         },
@@ -1102,6 +1104,7 @@ describe("createOrder", () => {
       line_items: [
         {
           sku: "Calmi-001",
+          pack_size: "single" as const,
           quantity: 2,
           selling_price: 75000,
         },
@@ -1222,6 +1225,7 @@ describe("createOrder", () => {
       {
         order_id: "ord_new",
         sku: "Calmi-001",
+        pack_size: "single",
         quantity: 2,
         selling_price: 75000,
         cost_per_unit_snapshot: 12000,

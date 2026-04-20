@@ -15,7 +15,8 @@ import { formatCurrency } from "@/lib/utils"
 import { TrendingUp, DollarSign, Package, ShoppingBag, Target } from "lucide-react"
 import Link from "next/link"
 import { InfoTooltip } from "@/components/ui/info-tooltip"
-import type { Channel } from "@/lib/types/database.types"
+import type { Channel, PackSize } from "@/lib/types/database.types"
+import { getPackSizeLabel } from "@/lib/products/pack-sizes"
 import {
   LineChart,
   Line,
@@ -67,6 +68,7 @@ type ChannelProductRow = {
   channel: string
   sku: string
   name: string
+  pack_size: PackSize
   units_sold: number
   revenue: number
   cost: number
@@ -1253,6 +1255,7 @@ export function ReportsClient({
                       <TableRow>
                         <TableHead>Channel</TableHead>
                         <TableHead>Product</TableHead>
+                        <TableHead>Pack</TableHead>
                         <TableHead className="text-right">Units</TableHead>
                         <TableHead className="text-right">
                           <span className="inline-flex items-center">
@@ -1287,7 +1290,7 @@ export function ReportsClient({
                       {groupedChannelProductData.map((group) => (
                         <Fragment key={`${group.sku}-group`}>
                           <TableRow key={`${group.sku}-group`} className="bg-muted/40 hover:bg-muted/40">
-                            <TableCell colSpan={6} className="py-3">
+                            <TableCell colSpan={7} className="py-3">
                               <div className="flex items-center justify-between gap-4">
                                 <div className="font-semibold">{group.name}</div>
                                 <div className="text-xs text-muted-foreground">
@@ -1307,6 +1310,9 @@ export function ReportsClient({
                                   {channelLabels[item.channel]}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">{item.name}</TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {getPackSizeLabel(item.pack_size)}
+                                </TableCell>
                                 <TableCell className="text-right">{item.units_sold}</TableCell>
                                 <TableCell className="text-right">
                                   {formatCurrency(item.revenue)}

@@ -51,6 +51,8 @@ export type Channel = 'shopee' | 'tokopedia' | 'tiktok' | 'offline'
 
 export type OrderStatus = 'paid' | 'shipped' | 'cancelled' | 'returned'
 
+export type PackSize = 'single' | 'bundle_2' | 'bundle_3' | 'bundle_4'
+
 export type Order = {
   id: string
   order_id: string
@@ -68,9 +70,29 @@ export type OrderLineItem = {
   order_id: string
   sku: string
   quantity: number
+  pack_size: PackSize
   selling_price: number
   cost_per_unit_snapshot: number | null
   created_at: string
+}
+
+export type ProductPackSize = {
+  id: string
+  sku: string
+  pack_size: PackSize
+  is_enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type ProductChannelPackPrice = {
+  id: string
+  sku: string
+  pack_size: PackSize
+  channel: Channel
+  default_selling_price: number
+  created_at: string
+  updated_at: string
 }
 
 export type BundleComposition = {

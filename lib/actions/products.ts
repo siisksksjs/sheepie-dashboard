@@ -3,9 +3,49 @@
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import { cache } from "react"
-import type { Product } from "@/lib/types/database.types"
+import type {
+  ChangelogEntryWithItems,
+  Channel,
+  PackSize,
+  Product,
+  ProductChannelPackPrice,
+  ProductPackSize,
+  InventoryPurchaseBatch,
+  InventoryPurchaseBatchItem,
+} from "@/lib/types/database.types"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
+import type { ProductCogsHistoryEntry } from "@/lib/products/cogs-history"
+import { buildProductCogsHistory } from "@/lib/products/cogs-history"
+import { PACK_SIZE_OPTIONS } from "@/lib/products/pack-sizes"
+
+type ProductEditWorkspace = {
+  product: Product
+  packSizes: ProductPackSize[]
+  channelPrices: ProductChannelPackPrice[]
+  cogsHistory: ProductCogsHistoryEntry[]
+}
+
+type ProductRestockCostRow = Pick<
+  InventoryPurchaseBatchItem,
+  "id" | "batch_id" | "sku" | "quantity" | "unit_cost" | "total_cost" | "created_at"
+> & {
+  batch: Pick<
+    InventoryPurchaseBatch,
+    "id" | "entry_date" | "order_date" | "arrival_date" | "shipping_mode" | "vendor" | "notes"
+  >
+}
+
+function revalidateProductPaths(sku?: string) {
+  revalidatePath("/products")
+  revalidatePath("/dashboard")
+  revalidatePath("/orders")
+  revalidatePath("/orders/new")
+
+  if (sku) {
+    revalidatePath(`/products/${sku}/edit`)
+  }
+}
 
 export async function getProducts() {
   const supabase = await createClient()
@@ -40,6 +80,182 @@ export async function getProductBySku(sku: string) {
   return data as Product
 }
 
+async function getProductCostChangelogEntries(sku: string) {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from("changelog_entries")
+    .select(`
+      *,
+      changelog_items (*)
+    `)
+    .eq("entity_type", "product")
+    .eq("entity_id", sku)
+    .order("logged_at", { ascending: false })
+
+  if (error) {
+    console.error("Error fetching product changelog entries:", error)
+    return [] as ChangelogEntryWithItems[]
+  }
+
+  return ((data || []) as ChangelogEntryWithItems[]).map((entry) => ({
+    ...entry,
+    changelog_items: [...(entry.changelog_items || [])].sort(
+      (a, b) => a.display_order - b.display_order,
+    ),
+  }))
+}
+
+async function getProductRestockCostRows(sku: string) {
+  const supabase = await createClient()
+
+  const { data: items, error: itemsError } = await supabase
+    .from("inventory_purchase_batch_items")
+    .select("*")
+    .eq("sku", sku)
+
+  if (itemsError) {
+    console.error("Error fetching product restock items:", itemsError)
+    return [] as ProductRestockCostRow[]
+  }
+
+  const typedItems = (items || []) as InventoryPurchaseBatchItem[]
+  if (typedItems.length === 0) {
+    return [] as ProductRestockCostRow[]
+  }
+
+  const batchIds = [...new Set(typedItems.map((item) => item.batch_id))]
+  const { data: batches, error: batchesError } = await supabase
+    .from("inventory_purchase_batches")
+    .select("id, entry_date, order_date, arrival_date, shipping_mode, vendor, notes")
+    .in("id", batchIds)
+
+  if (batchesError) {
+    console.error("Error fetching product restock batches:", batchesError)
+    return [] as ProductRestockCostRow[]
+  }
+
+  const batchMap = new Map(
+    ((batches || []) as Array<
+      Pick<
+        InventoryPurchaseBatch,
+        "id" | "entry_date" | "order_date" | "arrival_date" | "shipping_mode" | "vendor" | "notes"
+      >
+    >).map((batch) => [batch.id, batch]),
+  )
+
+  return typedItems.flatMap((item) => {
+    const batch = batchMap.get(item.batch_id)
+
+    if (!batch) {
+      return []
+    }
+
+    return [{
+      ...item,
+      batch,
+    }]
+  })
+}
+
+export async function getProductEditWorkspace(sku: string): Promise<ProductEditWorkspace | null> {
+  const supabase = await createClient()
+
+  const [
+    { data: product, error: productError },
+    { data: packSizes, error: packSizesError },
+    { data: channelPrices, error: channelPricesError },
+    productCostChanges,
+    restockItems,
+  ] = await Promise.all([
+    supabase
+      .from("products")
+      .select("*")
+      .eq("sku", sku)
+      .single(),
+    supabase
+      .from("product_pack_sizes")
+      .select("*")
+      .eq("sku", sku),
+    supabase
+      .from("product_channel_pack_prices")
+      .select("*")
+      .eq("sku", sku),
+    getProductCostChangelogEntries(sku),
+    getProductRestockCostRows(sku),
+  ])
+
+  if (productError || !product) {
+    console.error("Error fetching product edit workspace:", productError)
+    return null
+  }
+
+  if (packSizesError) {
+    console.error("Error fetching product pack sizes:", packSizesError)
+  }
+
+  if (channelPricesError) {
+    console.error("Error fetching product channel prices:", channelPricesError)
+  }
+
+  return {
+    product: product as Product,
+    packSizes: (packSizes || []) as ProductPackSize[],
+    channelPrices: (channelPrices || []) as ProductChannelPackPrice[],
+    cogsHistory: buildProductCogsHistory({
+      product: product as Product,
+      productCostChanges,
+      restockItems,
+    }),
+  }
+}
+
+export async function getOrderEntryWorkspace() {
+  const supabase = await createClient()
+
+  const [
+    { data: products, error: productsError },
+    { data: packSizes, error: packSizesError },
+    { data: channelPrices, error: channelPricesError },
+  ] = await Promise.all([
+    supabase
+      .from("products")
+      .select("*")
+      .eq("status", "active")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("product_pack_sizes")
+      .select("*")
+      .eq("is_enabled", true),
+    supabase
+      .from("product_channel_pack_prices")
+      .select("*"),
+  ])
+
+  if (productsError) {
+    console.error("Error fetching order-entry products:", productsError)
+    return {
+      products: [],
+      packSizes: [],
+      channelPrices: [],
+    }
+  }
+
+  if (packSizesError) {
+    console.error("Error fetching order-entry pack sizes:", packSizesError)
+  }
+
+  if (channelPricesError) {
+    console.error("Error fetching order-entry channel prices:", channelPricesError)
+  }
+
+  return {
+    products: (products || []) as Product[],
+    packSizes: (packSizes || []) as ProductPackSize[],
+    channelPrices: (channelPrices || []) as ProductChannelPackPrice[],
+  }
+}
+
 export async function createProduct(formData: {
   sku: string
   name: string
@@ -62,8 +278,23 @@ export async function createProduct(formData: {
     return { success: false, error: error.message }
   }
 
-  revalidatePath("/products")
-  revalidatePath("/dashboard")
+  if (!data.is_bundle) {
+    const defaultPackRows = PACK_SIZE_OPTIONS.map((pack) => ({
+      sku: data.sku,
+      pack_size: pack.value,
+      is_enabled: pack.value === "single",
+    }))
+
+    const { error: packSizeError } = await supabase
+      .from("product_pack_sizes")
+      .upsert(defaultPackRows, { onConflict: "sku,pack_size" })
+
+    if (packSizeError) {
+      console.error("Error creating default product pack sizes:", packSizeError)
+    }
+  }
+
+  revalidateProductPaths(data.sku)
 
   await safeRecordAutomaticChangelogEntry({
     area: "products",
@@ -116,8 +347,7 @@ export async function updateProduct(
     return { success: false, error: error.message }
   }
 
-  revalidatePath("/products")
-  revalidatePath("/dashboard")
+  revalidateProductPaths(data.sku)
 
   const items = [
     buildChangeItem("Name", previousProduct.name, data.name),
@@ -139,6 +369,63 @@ export async function updateProduct(
   }
 
   return { success: true, data }
+}
+
+export async function updateProductPackSettings(
+  sku: string,
+  enabledPackSizes: PackSize[],
+) {
+  const supabase = await createClient()
+
+  const rows = PACK_SIZE_OPTIONS.map((pack) => ({
+    sku,
+    pack_size: pack.value,
+    is_enabled: enabledPackSizes.includes(pack.value),
+  }))
+
+  const { error } = await supabase
+    .from("product_pack_sizes")
+    .upsert(rows, { onConflict: "sku,pack_size" })
+
+  if (error) {
+    console.error("Error updating product pack settings:", error)
+    return { success: false, error: error.message }
+  }
+
+  revalidateProductPaths(sku)
+  return { success: true }
+}
+
+export async function updateProductChannelPrices(
+  sku: string,
+  prices: Array<{
+    pack_size: PackSize
+    channel: Channel
+    default_selling_price: number
+  }>,
+) {
+  const supabase = await createClient()
+
+  const rows = prices
+    .filter((row) => Number.isFinite(row.default_selling_price) && row.default_selling_price >= 0)
+    .map((row) => ({
+      sku,
+      pack_size: row.pack_size,
+      channel: row.channel,
+      default_selling_price: row.default_selling_price,
+    }))
+
+  const { error } = await supabase
+    .from("product_channel_pack_prices")
+    .upsert(rows, { onConflict: "sku,pack_size,channel" })
+
+  if (error) {
+    console.error("Error updating product channel prices:", error)
+    return { success: false, error: error.message }
+  }
+
+  revalidateProductPaths(sku)
+  return { success: true }
 }
 
 // Internal function that does the actual work (optimized - single query instead of N+1)

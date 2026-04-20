@@ -297,7 +297,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         <CardHeader>
           <CardTitle>Restock Guidance</CardTitle>
           <CardDescription>
-            Based on average daily sales since {reorderRecommendations.startDate.toISOString().slice(0, 10)}
+            Based on average daily sales during in-stock days since {reorderRecommendations.startDate.toISOString().slice(0, 10)}
           </CardDescription>
         </CardHeader>
         <CardContent>

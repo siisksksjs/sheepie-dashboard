@@ -1,51 +1,30 @@
-import {
-  getFinanceAccounts,
-  getFinanceCategories,
-  getFinanceEntries,
-  getFinanceOverview,
-  getFinanceTransfers,
-  getInventoryPurchaseBatches,
-  getMarketplaceAccountMappings,
-} from "@/lib/actions/finance"
-import { FinanceClient } from "@/components/finance/finance-client"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
-type SearchParams = Promise<{ year?: string; month?: string }>
-
-export default async function FinancePage({ searchParams }: { searchParams: SearchParams }) {
-  const params = await searchParams
-  const currentYear = new Date().getFullYear()
-  const selectedYear = params.year ? parseInt(params.year, 10) : currentYear
-  const selectedMonth = params.month ? parseInt(params.month, 10) : undefined
-
-  const [
-    overview,
-    entries,
-    transfers,
-    purchases,
-    accounts,
-    categories,
-    marketplaceMappings,
-  ] = await Promise.all([
-    getFinanceOverview(selectedYear, selectedMonth),
-    getFinanceEntries({ year: selectedYear, month: selectedMonth, limit: 100 }),
-    getFinanceTransfers({ year: selectedYear, month: selectedMonth, limit: 100 }),
-    getInventoryPurchaseBatches({ year: selectedYear, month: selectedMonth, limit: 50 }),
-    getFinanceAccounts(),
-    getFinanceCategories(),
-    getMarketplaceAccountMappings(),
-  ])
-
+export default function FinancePage() {
   return (
-    <FinanceClient
-      selectedYear={selectedYear}
-      selectedMonth={selectedMonth}
-      overview={overview}
-      entries={entries}
-      transfers={transfers}
-      purchases={purchases}
-      accounts={accounts}
-      categories={categories}
-      marketplaceMappings={marketplaceMappings}
-    />
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-display font-bold mb-2">Finance</h1>
+        <p className="text-muted-foreground">
+          Finance has been archived from the active dashboard workflow.
+        </p>
+      </div>
+
+      <Card className="max-w-2xl">
+        <CardHeader>
+          <CardTitle>Phase 1 Archive</CardTitle>
+          <CardDescription>
+            The finance UI is intentionally hidden while the underlying tables and historical data stay intact.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <p>Ad spend, restock, and settlement data remain in the database.</p>
+          <p>
+            After the remaining product and reporting flows are stable without finance-screen dependencies,
+            the dead code can be removed in a second cleanup pass.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
   )
 }

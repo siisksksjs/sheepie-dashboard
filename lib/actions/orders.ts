@@ -8,12 +8,14 @@ import { createLedgerEntry } from "./inventory"
 import { getLineItemCostPerUnit, getLineItemTotalCost } from "@/lib/line-item-costs"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem, summarizeLineItems } from "@/lib/changelog"
+import { DEFAULT_PACK_SIZE, getPackMultiplier } from "@/lib/products/pack-sizes"
 import { RESTOCK_GUIDANCE_CONFIG } from "@/lib/restock/config"
 import {
   averageLatestLeadTimes,
   buildLeadBufferLabel,
   buildReorderWindow,
 } from "@/lib/restock/guidance"
+import { calculateInStockDays } from "@/lib/restock/in-stock-days"
 import {
   calculateOrderSettlementAmount,
   createMarketplaceSettlementEntry,
@@ -36,6 +38,7 @@ export async function getOrders(filters?: {
         id,
         sku,
         quantity,
+        pack_size,
         selling_price,
         cost_per_unit_snapshot
       )
@@ -92,7 +95,7 @@ export async function getOrders(filters?: {
 
     // Total COGS
     const totalCogs = lineItemsWithDetails.reduce((sum: number, item: any) =>
-      sum + (item.cost_per_unit * item.quantity), 0
+      sum + getLineItemTotalCost(item), 0
     )
 
     // Net Profit = Revenue - COGS = (Total Selling Price - Channel Fees) - COGS
@@ -159,6 +162,7 @@ type CreateOrderInput = {
   notes: string | null
   line_items: {
     sku: string
+    pack_size: OrderLineItem["pack_size"]
     quantity: number
     selling_price: number
   }[]
@@ -190,6 +194,20 @@ type LedgerRollbackEntry = {
   quantity: number
 }
 
+function getOrderLineUnits(item: {
+  quantity: number
+  pack_size?: OrderLineItem["pack_size"] | null
+}) {
+  return item.quantity * getPackMultiplier(item.pack_size ?? DEFAULT_PACK_SIZE)
+}
+
+function buildPackAwareOrderReference(orderLabel: string, packSize?: OrderLineItem["pack_size"] | null) {
+  const effectivePackSize = packSize ?? DEFAULT_PACK_SIZE
+  return effectivePackSize === DEFAULT_PACK_SIZE
+    ? orderLabel
+    : `${orderLabel} (${effectivePackSize})`
+}
+
 export async function buildDuplicateOrderInput({
   sourceOrder,
   sourceLineItems,
@@ -205,6 +223,7 @@ export async function buildDuplicateOrderInput({
     notes: sourceOrder.notes,
     line_items: sourceLineItems.map((item) => ({
       sku: item.sku,
+      pack_size: item.pack_size ?? DEFAULT_PACK_SIZE,
       quantity: item.quantity,
       selling_price: item.selling_price,
     })),
@@ -306,6 +325,7 @@ async function createOrderWithWorkflow(formData: CreateOrderInput): Promise<Crea
   const lineItemsToInsert = formData.line_items.map(item => ({
     order_id: order.id,
     sku: item.sku,
+    pack_size: item.pack_size ?? DEFAULT_PACK_SIZE,
     quantity: item.quantity,
     selling_price: item.selling_price,
     cost_per_unit_snapshot: productCosts.get(item.sku) ?? 0,
@@ -378,11 +398,13 @@ async function createOrderWithWorkflow(formData: CreateOrderInput): Promise<Crea
           }
         } else {
           // Regular product - create ledger entry as normal
+          const packSize = item.pack_size ?? DEFAULT_PACK_SIZE
+          const consumedUnits = item.quantity * getPackMultiplier(packSize)
           const ledgerResult = await createLedgerEntry({
             sku: item.sku,
             movement_type: "OUT_SALE",
-            quantity: -item.quantity,
-            reference: `Order ${formData.order_id}`,
+            quantity: -consumedUnits,
+            reference: buildPackAwareOrderReference(`Order ${formData.order_id}`, packSize),
           }, {
             skipChangelog: true,
           })
@@ -403,7 +425,7 @@ async function createOrderWithWorkflow(formData: CreateOrderInput): Promise<Crea
 
           successfulLedgerEntries.push({
             sku: item.sku,
-            quantity: item.quantity,
+            quantity: consumedUnits,
           })
         }
       }
@@ -614,11 +636,16 @@ export async function updateOrderStatus(
         }
       } else {
         // Regular product
+        const packSize = item.pack_size ?? DEFAULT_PACK_SIZE
+        const restoredUnits = item.quantity * getPackMultiplier(packSize)
         await createLedgerEntry({
           sku: item.sku,
           movement_type: "RETURN",
-          quantity: item.quantity,
-          reference: `Order ${order.order_id} - ${newStatus === "cancelled" ? "Cancelled" : "Returned"}`,
+          quantity: restoredUnits,
+          reference: buildPackAwareOrderReference(
+            `Order ${order.order_id} - ${newStatus === "cancelled" ? "Cancelled" : "Returned"}`,
+            packSize,
+          ),
         }, {
           skipChangelog: true,
         })
@@ -658,11 +685,13 @@ export async function updateOrderStatus(
         }
       } else {
         // Regular product
+        const packSize = item.pack_size ?? DEFAULT_PACK_SIZE
+        const consumedUnits = item.quantity * getPackMultiplier(packSize)
         await createLedgerEntry({
           sku: item.sku,
           movement_type: "OUT_SALE",
-          quantity: -item.quantity,
-          reference: `Order ${order.order_id}`,
+          quantity: -consumedUnits,
+          reference: buildPackAwareOrderReference(`Order ${order.order_id}`, packSize),
         }, {
           skipChangelog: true,
         })
@@ -752,7 +781,7 @@ export async function getDailySalesSnippet(date?: string) {
 
   const { data: orders } = await supabase
     .from("orders")
-    .select("channel, channel_fees, order_line_items!inner(sku, quantity, selling_price)")
+    .select("channel, channel_fees, order_line_items!inner(sku, quantity, pack_size, selling_price)")
     .in("status", ["paid", "shipped"])
     .eq("order_date", targetDate)
 
@@ -802,7 +831,7 @@ export async function getDailySalesSnippet(date?: string) {
     )
 
     for (const item of lineItems) {
-      totalUnits += item.quantity
+      totalUnits += getOrderLineUnits(item)
       const itemGross = (item.selling_price || 0) * (item.quantity || 0)
       const allocatedFee = totalOrderValue > 0
         ? ((order.channel_fees || 0) * itemGross) / totalOrderValue
@@ -813,14 +842,14 @@ export async function getDailySalesSnippet(date?: string) {
       const existing = byProductAndChannel.get(key)
 
       if (existing) {
-        existing.quantity += item.quantity
+        existing.quantity += getOrderLineUnits(item)
         existing.revenue += itemRevenue
       } else {
         byProductAndChannel.set(key, {
           sku: item.sku,
           productName: productMap.get(item.sku) || item.sku,
           platform: order.channel as Channel,
-          quantity: item.quantity,
+          quantity: getOrderLineUnits(item),
           revenue: itemRevenue,
         })
       }
@@ -850,7 +879,7 @@ export async function getMonthlySalesByDay(month: string) {
 
   const { data: orders } = await supabase
     .from("orders")
-    .select("order_date, order_line_items!inner(quantity)")
+    .select("order_date, order_line_items!inner(quantity, pack_size)")
     .in("status", ["paid", "shipped"])
     .gte("order_date", startDate)
     .lte("order_date", endDate)
@@ -868,7 +897,7 @@ export async function getMonthlySalesByDay(month: string) {
     const existing = byDate.get(date) || { date, orders: 0, units: 0 }
     existing.orders += 1
     existing.units += (order.order_line_items || []).reduce(
-      (sum: number, item: any) => sum + (item.quantity || 0),
+      (sum: number, item: any) => sum + getOrderLineUnits(item),
       0
     )
     byDate.set(date, existing)
@@ -878,7 +907,7 @@ export async function getMonthlySalesByDay(month: string) {
 }
 
 type ReportOrder = Pick<Order, "id" | "channel" | "order_date" | "status" | "channel_fees"> & {
-  order_line_items: Array<Pick<OrderLineItem, "sku" | "quantity" | "selling_price" | "cost_per_unit_snapshot">>
+  order_line_items: Array<Pick<OrderLineItem, "sku" | "quantity" | "pack_size" | "selling_price" | "cost_per_unit_snapshot">>
 }
 
 type ReportProduct = Pick<Product, "sku" | "name" | "variant" | "cost_per_unit">
@@ -929,6 +958,7 @@ type ChannelProductRow = {
   channel: Channel
   sku: string
   name: string
+  pack_size: OrderLineItem["pack_size"]
   units_sold: number
   revenue: number
   cost: number
@@ -1018,6 +1048,7 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
         order_line_items (
           sku,
           quantity,
+          pack_size,
           selling_price,
           cost_per_unit_snapshot
         )
@@ -1086,9 +1117,10 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
       returnedOrders += 1
 
       for (const item of lineItems) {
-        returnedUnits += item.quantity
+        const unitCount = getOrderLineUnits(item)
+        returnedUnits += unitCount
         returnedRevenue += (item.selling_price || 0) * item.quantity
-        returnedBySku.set(item.sku, (returnedBySku.get(item.sku) || 0) + item.quantity)
+        returnedBySku.set(item.sku, (returnedBySku.get(item.sku) || 0) + unitCount)
 
         const product = productMap.get(item.sku)
         if (product) {
@@ -1151,14 +1183,15 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
 
     for (const item of lineItems) {
       const product = productMap.get(item.sku)
+      const unitCount = getOrderLineUnits(item)
       const itemTotalPrice = (item.selling_price || 0) * item.quantity
       const allocatedChannelFee = totalOrderValue > 0 && order.channel_fees
         ? (order.channel_fees * itemTotalPrice) / totalOrderValue
         : 0
       const itemRevenue = itemTotalPrice - allocatedChannelFee
 
-      orderUnits += item.quantity
-      calendarExisting.units += item.quantity
+      orderUnits += unitCount
+      calendarExisting.units += unitCount
       calendarExisting.revenue += itemRevenue
 
       const calendarItemExisting = calendarExisting.itemsBySku.get(item.sku) || {
@@ -1170,7 +1203,7 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
 
       calendarExisting.itemsBySku.set(item.sku, {
         ...calendarItemExisting,
-        quantity: calendarItemExisting.quantity + item.quantity,
+        quantity: calendarItemExisting.quantity + unitCount,
         revenue: calendarItemExisting.revenue + itemRevenue,
       })
 
@@ -1193,25 +1226,29 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
         sku: item.sku,
         name: product.name,
         variant: product.variant,
-        units_sold: productExisting.units_sold + item.quantity,
+        units_sold: productExisting.units_sold + unitCount,
         revenue: productExisting.revenue + itemRevenue,
         cost: productExisting.cost + itemCost,
         profit: productExisting.profit + (itemRevenue - itemCost),
       })
 
-      const channelProductExisting = channelProductMap.get(item.sku) || {
+      const packSize = item.pack_size ?? DEFAULT_PACK_SIZE
+      const channelProductKey = `${item.sku}:${packSize}`
+      const channelProductExisting = channelProductMap.get(channelProductKey) || {
         sku: item.sku,
         name: product.name,
+        pack_size: packSize,
         units_sold: 0,
         revenue: 0,
         cost: 0,
         profit: 0,
       }
 
-      channelProductMap.set(item.sku, {
+      channelProductMap.set(channelProductKey, {
         sku: item.sku,
         name: product.name,
-        units_sold: channelProductExisting.units_sold + item.quantity,
+        pack_size: packSize,
+        units_sold: channelProductExisting.units_sold + unitCount,
         revenue: channelProductExisting.revenue + itemRevenue,
         cost: channelProductExisting.cost + itemCost,
         profit: channelProductExisting.profit + (itemRevenue - itemCost),
@@ -1307,6 +1344,11 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
         const skuCompare = a.sku.localeCompare(b.sku)
         if (skuCompare !== 0) return skuCompare
 
+        const packCompare = (a.pack_size ?? DEFAULT_PACK_SIZE).localeCompare(
+          b.pack_size ?? DEFAULT_PACK_SIZE,
+        )
+        if (packCompare !== 0) return packCompare
+
         return a.channel.localeCompare(b.channel)
       }),
     },
@@ -1352,10 +1394,10 @@ export async function getReorderRecommendations() {
   const configSkus = Array.from(new Set(RESTOCK_GUIDANCE_CONFIG.map((config) => config.sku)))
   const targetSkus = [...configSkus, "Bundle-Cervi"]
 
-  const [{ data: orders }, { data: restockBatches }] = await Promise.all([
+  const [{ data: orders }, { data: restockBatches }, { data: stockRows }, { data: ledgerRows }] = await Promise.all([
     supabase
       .from("orders")
-      .select("order_date, order_line_items!inner(quantity, selling_price, sku)")
+      .select("order_date, order_line_items!inner(quantity, pack_size, selling_price, sku)")
       .in("status", ["paid", "shipped"])
       .gte("order_date", startDate.toISOString())
       .in("order_line_items.sku", targetSkus),
@@ -1364,6 +1406,16 @@ export async function getReorderRecommendations() {
       .select("id, order_date, arrival_date, shipping_mode, restock_status")
       .eq("restock_status", "arrived")
       .not("arrival_date", "is", null),
+    supabase
+      .from("stock_on_hand")
+      .select("sku, current_stock")
+      .in("sku", configSkus),
+    supabase
+      .from("inventory_ledger")
+      .select("entry_date, sku, quantity")
+      .in("sku", configSkus)
+      .gte("entry_date", startDate.toISOString().slice(0, 10))
+      .lte("entry_date", endDate.toISOString().slice(0, 10)),
   ])
 
   // Track units sold by SKU
@@ -1374,7 +1426,7 @@ export async function getReorderRecommendations() {
     const lineItems = (order as any).order_line_items || []
     for (const item of lineItems) {
       if (item.selling_price > 0) {
-        unitsBySku.set(item.sku, (unitsBySku.get(item.sku) || 0) + item.quantity)
+        unitsBySku.set(item.sku, (unitsBySku.get(item.sku) || 0) + getOrderLineUnits(item))
       }
     }
   }
@@ -1391,6 +1443,22 @@ export async function getReorderRecommendations() {
     ["Lumi-001", unitsBySku.get("Lumi-001") || 0],
     ["Calmi-001", calmiTotal],
   ])
+  const stockBySku = new Map(
+    ((stockRows || []) as Array<{ sku: string; current_stock: number }>).map((row) => [
+      row.sku,
+      row.current_stock,
+    ]),
+  )
+  const deltasBySku = new Map<string, Array<{ entry_date: string; quantity: number }>>()
+
+  for (const row of (ledgerRows || []) as Array<{ entry_date: string; sku: string; quantity: number }>) {
+    const existing = deltasBySku.get(row.sku) || []
+    existing.push({
+      entry_date: row.entry_date,
+      quantity: row.quantity,
+    })
+    deltasBySku.set(row.sku, existing)
+  }
 
   const typedRestockBatches = (restockBatches || []) as Array<{
     id: string
@@ -1427,7 +1495,13 @@ export async function getReorderRecommendations() {
 
   const recommendations = RESTOCK_GUIDANCE_CONFIG.map((config) => {
     const unitsSold = effectiveUnits.get(config.sku) || 0
-    const avgDaily = unitsSold / days
+    const inStockDays = calculateInStockDays({
+      currentStock: stockBySku.get(config.sku) || 0,
+      startDate: startDate.toISOString().slice(0, 10),
+      endDate: endDate.toISOString().slice(0, 10),
+      deltas: deltasBySku.get(config.sku) || [],
+    })
+    const avgDaily = unitsSold / Math.max(1, inStockDays)
     const learnedLeadDays = averageLatestLeadTimes({
       sku: config.sku,
       shippingMode: config.mode,
@@ -1454,6 +1528,7 @@ export async function getReorderRecommendations() {
       mode: config.mode === "air" ? "Air" : "Sea",
       unitsSold,
       days,
+      inStockDays,
       avgDaily,
       leadMin: config.fallbackLeadMin,
       leadMax: config.fallbackLeadMax,
@@ -1568,6 +1643,7 @@ async function _getMonthlySalesReportInternal(year?: number, month?: number) {
     for (const item of lineItems) {
       const product = productMap.get(item.sku)
       if (!product) continue
+      const unitCount = getOrderLineUnits(item)
 
       const itemTotalPrice = item.selling_price * item.quantity
 
@@ -1583,7 +1659,7 @@ async function _getMonthlySalesReportInternal(year?: number, month?: number) {
 
       orderRevenue += itemRevenue
       orderCost += itemCost
-      orderUnits += item.quantity
+      orderUnits += unitCount
 
       // By product totals
       const productExisting = productSales.get(item.sku) || {
@@ -1600,7 +1676,7 @@ async function _getMonthlySalesReportInternal(year?: number, month?: number) {
         sku: item.sku,
         name: product.name,
         variant: product.variant,
-        units_sold: productExisting.units_sold + item.quantity,
+        units_sold: productExisting.units_sold + unitCount,
         revenue: productExisting.revenue + itemRevenue,
         cost: productExisting.cost + itemCost,
         profit: productExisting.profit + (itemRevenue - itemCost),
@@ -1695,7 +1771,7 @@ async function _getMonthlyCalendarDetailsInternal(year?: number, month?: number)
 
   const { data: orders } = await supabase
     .from("orders")
-    .select("order_date, channel_fees, order_line_items!inner(sku, quantity, selling_price)")
+    .select("order_date, channel_fees, order_line_items!inner(sku, quantity, pack_size, selling_price)")
     .in("status", ["paid", "shipped"])
     .gte("order_date", startDate)
     .lte("order_date", endDate)
@@ -1753,6 +1829,7 @@ async function _getMonthlyCalendarDetailsInternal(year?: number, month?: number)
     summary.orders += 1
 
     for (const item of lineItems) {
+      const unitCount = getOrderLineUnits(item)
       const itemGross = (item.selling_price || 0) * (item.quantity || 0)
       const allocatedFee = totalOrderValue > 0
         ? ((order.channel_fees || 0) * itemGross) / totalOrderValue
@@ -1765,10 +1842,10 @@ async function _getMonthlyCalendarDetailsInternal(year?: number, month?: number)
         revenue: 0,
       }
 
-      existing.quantity += item.quantity
+      existing.quantity += unitCount
       existing.revenue += itemRevenue
       itemsBySku.set(item.sku, existing)
-      summary.units += item.quantity
+      summary.units += unitCount
       summary.revenue += itemRevenue
     }
   }
@@ -1876,11 +1953,12 @@ async function _getChannelProductReportInternal(year?: number, month?: number) {
 
       const itemRevenue = itemTotalPrice - allocatedChannelFee
       const itemCost = getLineItemTotalCost(item, product)
+      const unitCount = getOrderLineUnits(item)
 
       channelMap.set(item.sku, {
         sku: item.sku,
         name: product.name,
-        units_sold: existing.units_sold + item.quantity,
+        units_sold: existing.units_sold + unitCount,
         revenue: existing.revenue + itemRevenue,
         cost: existing.cost + itemCost,
         profit: existing.profit + (itemRevenue - itemCost),

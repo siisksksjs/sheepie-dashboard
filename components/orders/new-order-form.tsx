@@ -1,10 +1,16 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft, Plus, Trash2 } from "lucide-react"
+
 import { createOrder, generateNextOrderId } from "@/lib/actions/orders"
+import {
+  DEFAULT_PACK_SIZE,
+  getPackSizeLabel,
+  type PackSize,
+} from "@/lib/products/pack-sizes"
 import { formatCurrency } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,60 +18,46 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import type { Channel, OrderStatus, Product } from "@/lib/types/database.types"
+import type {
+  Channel,
+  OrderStatus,
+  Product,
+  ProductChannelPackPrice,
+  ProductPackSize,
+} from "@/lib/types/database.types"
 
 type LineItem = {
   id: string
   sku: string
+  pack_size: PackSize
   quantity: number
   selling_price: number
 }
 
-const BASE_DEFAULT_PRICES: Record<string, number> = {
-  "Cervi-001": 870000,
-  "Cervi-002": 198000,
-  "Lumi-001": 175000,
-  "Calmi-001": 75000,
-  "Bundle-Cervi": 870000,
+type Props = {
+  products: Product[]
+  packSizes: ProductPackSize[]
+  channelPrices: ProductChannelPackPrice[]
 }
 
-const SHOPEE_DEFAULT_PRICES: Record<string, number> = {
-  "Cervi-001": 880000,
-  "Lumi-001": 198000,
-  "Calmi-001": 80000,
-  "Bundle-Cervi": 880000,
-}
-
-const OFFLINE_DEFAULT_PRICES: Record<string, number> = {
-  "Cervi-001": 880000,
-  "Lumi-001": 180000,
-  "Calmi-001": 80000,
-  "Bundle-Cervi": 880000,
-}
-
-const TOKOPEDIA_DEFAULT_PRICES: Record<string, number> = {
-  "Lumi-001": 193000,
-}
-
-const CHANNEL_PRICE_OVERRIDES: Partial<Record<Channel, Record<string, number>>> = {
-  shopee: SHOPEE_DEFAULT_PRICES,
-  tokopedia: TOKOPEDIA_DEFAULT_PRICES,
-  offline: OFFLINE_DEFAULT_PRICES,
-}
-
-function getDefaultPriceForChannel(sku: string, channel?: Channel | ""): number {
-  const channelOverride = channel ? CHANNEL_PRICE_OVERRIDES[channel]?.[sku] : undefined
-  if (typeof channelOverride === "number") return channelOverride
-  return BASE_DEFAULT_PRICES[sku] || 0
+function createEmptyLineItem(): LineItem {
+  return {
+    id: crypto.randomUUID(),
+    sku: "",
+    pack_size: DEFAULT_PACK_SIZE,
+    quantity: 1,
+    selling_price: 0,
+  }
 }
 
 function allocatePricesByDefaultRatio(
   items: LineItem[],
   channel: Channel,
-  grossRevenue: number
+  grossRevenue: number,
+  channelPriceMap: Map<string, number>,
 ): LineItem[] {
   const ratioBaseByItem = items.map((item) => {
-    const defaultPrice = getDefaultPriceForChannel(item.sku, channel)
+    const defaultPrice = channelPriceMap.get(`${item.sku}:${item.pack_size}:${channel}`) || 0
     return defaultPrice * item.quantity
   })
 
@@ -96,11 +88,7 @@ function allocatePricesByDefaultRatio(
   }))
 }
 
-type Props = {
-  products: Product[]
-}
-
-export function NewOrderForm({ products }: Props) {
+export function NewOrderForm({ products, packSizes, channelPrices }: Props) {
   const router = useRouter()
   const [lineItems, setLineItems] = useState<LineItem[]>([])
   const [saving, setSaving] = useState(false)
@@ -109,6 +97,45 @@ export function NewOrderForm({ products }: Props) {
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split("T")[0])
   const [orderId, setOrderId] = useState("")
   const [actualGrossRevenue, setActualGrossRevenue] = useState("")
+
+  const channelPriceMap = useMemo(
+    () => new Map(
+      channelPrices.map((row) => [
+        `${row.sku}:${row.pack_size}:${row.channel}`,
+        row.default_selling_price,
+      ]),
+    ),
+    [channelPrices],
+  )
+
+  const enabledPackSizesBySku = useMemo(() => {
+    const map = new Map<string, PackSize[]>()
+
+    for (const row of packSizes) {
+      const existing = map.get(row.sku) || []
+      existing.push(row.pack_size)
+      map.set(row.sku, existing)
+    }
+
+    return map
+  }, [packSizes])
+
+  const getAvailablePackSizesForSku = (sku: string): PackSize[] => {
+    const available = enabledPackSizesBySku.get(sku)
+    if (!available || available.length === 0) {
+      return [DEFAULT_PACK_SIZE]
+    }
+    return available
+  }
+
+  const getDefaultPriceForSelection = (
+    sku: string,
+    packSize: PackSize,
+    channel?: Channel | "",
+  ): number => {
+    if (!sku || !channel) return 0
+    return channelPriceMap.get(`${sku}:${packSize}:${channel}`) || 0
+  }
 
   useEffect(() => {
     if (selectedChannel && orderDate) {
@@ -122,22 +149,14 @@ export function NewOrderForm({ products }: Props) {
     setLineItems((current) =>
       current.map((item) => {
         if (!item.sku) return item
-        const defaultPrice = getDefaultPriceForChannel(item.sku, selectedChannel)
-        return defaultPrice ? { ...item, selling_price: defaultPrice } : item
-      })
+        const defaultPrice = getDefaultPriceForSelection(item.sku, item.pack_size, selectedChannel)
+        return defaultPrice > 0 ? { ...item, selling_price: defaultPrice } : item
+      }),
     )
-  }, [selectedChannel])
+  }, [selectedChannel, channelPriceMap])
 
   const addLineItem = () => {
-    setLineItems((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        sku: "",
-        quantity: 1,
-        selling_price: 0,
-      },
-    ])
+    setLineItems((current) => [...current, createEmptyLineItem()])
   }
 
   const updateLineItem = (id: string, field: keyof LineItem, value: string | number) => {
@@ -145,13 +164,29 @@ export function NewOrderForm({ products }: Props) {
       current.map((item) => {
         if (item.id !== id) return item
 
-        const updatedItem = { ...item, [field]: value }
-        if (field === "sku" && value) {
-          updatedItem.selling_price = getDefaultPriceForChannel(String(value), selectedChannel)
+        const updatedItem = { ...item, [field]: value } as LineItem
+
+        if (field === "sku") {
+          const sku = String(value)
+          const availablePackSizes = getAvailablePackSizesForSku(sku)
+          updatedItem.pack_size = availablePackSizes[0] || DEFAULT_PACK_SIZE
+          updatedItem.selling_price = getDefaultPriceForSelection(
+            sku,
+            updatedItem.pack_size,
+            selectedChannel,
+          )
+        }
+
+        if (field === "pack_size") {
+          updatedItem.selling_price = getDefaultPriceForSelection(
+            updatedItem.sku,
+            value as PackSize,
+            selectedChannel,
+          )
         }
 
         return updatedItem
-      })
+      }),
     )
   }
 
@@ -184,7 +219,7 @@ export function NewOrderForm({ products }: Props) {
       return
     }
 
-    setLineItems(allocatePricesByDefaultRatio(lineItems, selectedChannel, grossRevenue))
+    setLineItems(allocatePricesByDefaultRatio(lineItems, selectedChannel, grossRevenue, channelPriceMap))
     setError(null)
   }
 
@@ -217,6 +252,7 @@ export function NewOrderForm({ products }: Props) {
       notes: (formData.get("notes") as string) || null,
       line_items: lineItems.map((item) => ({
         sku: item.sku,
+        pack_size: item.pack_size,
         quantity: item.quantity,
         selling_price: item.selling_price,
       })),
@@ -235,7 +271,7 @@ export function NewOrderForm({ products }: Props) {
   const canUseGrossRevenueAllocation = Boolean(
     selectedChannel &&
     selectedChannel !== "offline" &&
-    uniqueSkuCount >= 2
+    uniqueSkuCount >= 2,
   )
 
   return (
@@ -247,7 +283,7 @@ export function NewOrderForm({ products }: Props) {
         </Button>
       </Link>
 
-      <Card className="max-w-4xl">
+      <Card className="max-w-5xl">
         <CardHeader>
           <CardTitle>Create New Order</CardTitle>
           <CardDescription>
@@ -256,7 +292,7 @@ export function NewOrderForm({ products }: Props) {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="order_id">
                   Order ID <span className="text-destructive">*</span>
@@ -289,7 +325,7 @@ export function NewOrderForm({ products }: Props) {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="channel">
                   Sales Channel <span className="text-destructive">*</span>
@@ -311,7 +347,7 @@ export function NewOrderForm({ products }: Props) {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Product prices auto-fill based on selected channel
+                  Product prices auto-fill based on selected channel and pack size
                 </p>
               </div>
 
@@ -336,7 +372,7 @@ export function NewOrderForm({ products }: Props) {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="channel_fees">Channel Fees (IDR)</Label>
                 <Input
@@ -356,7 +392,7 @@ export function NewOrderForm({ products }: Props) {
             </div>
 
             <div className="border-t pt-6">
-              <div className="flex items-center justify-between mb-4">
+              <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-lg font-semibold">Order Items</h3>
                 <Button type="button" variant="outline" size="sm" onClick={addLineItem}>
                   <Plus className="mr-2 h-4 w-4" />
@@ -365,8 +401,8 @@ export function NewOrderForm({ products }: Props) {
               </div>
 
               {canUseGrossRevenueAllocation && (
-                <div className="mb-4 p-3 border rounded-lg bg-muted/30">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                <div className="mb-4 rounded-lg border bg-muted/30 p-3">
+                  <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-3">
                     <div className="space-y-2 md:col-span-2">
                       <Label htmlFor="actual_gross_revenue">Actual Gross Revenue (IDR)</Label>
                       <Input
@@ -390,16 +426,16 @@ export function NewOrderForm({ products }: Props) {
               )}
 
               {lineItems.length === 0 ? (
-                <div className="text-center py-8 border rounded-lg bg-muted/50">
+                <div className="rounded-lg border bg-muted/50 py-8 text-center">
                   <p className="text-sm text-muted-foreground">
                     No products added. Click "Add Product" to start.
                   </p>
                 </div>
               ) : (
                 <>
-                  <div className="md:hidden space-y-4">
+                  <div className="space-y-4 md:hidden">
                     {lineItems.map((item) => (
-                      <div key={item.id} className="border rounded-lg p-4 space-y-3">
+                      <div key={item.id} className="space-y-3 rounded-lg border p-4">
                         <div className="space-y-2">
                           <Label className="text-xs">Product</Label>
                           <Select
@@ -413,6 +449,26 @@ export function NewOrderForm({ products }: Props) {
                               {products.map((product) => (
                                 <SelectItem key={product.id} value={product.sku}>
                                   <span className="font-mono text-sm">{product.sku}</span> - {product.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-xs">Pack Size</Label>
+                          <Select
+                            value={item.pack_size}
+                            onValueChange={(value) => updateLineItem(item.id, "pack_size", value)}
+                            disabled={!item.sku}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select pack size" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {getAvailablePackSizesForSku(item.sku).map((packSize) => (
+                                <SelectItem key={packSize} value={packSize}>
+                                  {getPackSizeLabel(packSize)}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -441,7 +497,7 @@ export function NewOrderForm({ products }: Props) {
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between pt-2 border-t">
+                        <div className="flex items-center justify-between border-t pt-2">
                           <span className="text-sm font-medium">
                             Subtotal: {formatCurrency(item.quantity * item.selling_price)}
                           </span>
@@ -457,18 +513,19 @@ export function NewOrderForm({ products }: Props) {
                       </div>
                     ))}
                     <div className="border-t pt-4">
-                      <div className="flex justify-between items-center">
+                      <div className="flex items-center justify-between">
                         <span className="font-semibold">Total:</span>
-                        <span className="font-bold text-lg">{formatCurrency(totalAmount)}</span>
+                        <span className="text-lg font-bold">{formatCurrency(totalAmount)}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="hidden md:block overflow-x-auto">
+                  <div className="hidden overflow-x-auto md:block">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Product</TableHead>
+                          <TableHead className="w-40">Pack</TableHead>
                           <TableHead className="w-32">Quantity</TableHead>
                           <TableHead className="w-40">Price (IDR)</TableHead>
                           <TableHead className="text-right">Subtotal</TableHead>
@@ -490,6 +547,24 @@ export function NewOrderForm({ products }: Props) {
                                   {products.map((product) => (
                                     <SelectItem key={product.id} value={product.sku}>
                                       <span className="font-mono text-sm">{product.sku}</span> - {product.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell>
+                              <Select
+                                value={item.pack_size}
+                                onValueChange={(value) => updateLineItem(item.id, "pack_size", value)}
+                                disabled={!item.sku}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select pack size" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {getAvailablePackSizesForSku(item.sku).map((packSize) => (
+                                    <SelectItem key={packSize} value={packSize}>
+                                      {getPackSizeLabel(packSize)}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
@@ -529,32 +604,32 @@ export function NewOrderForm({ products }: Props) {
                         ))}
                       </TableBody>
                     </Table>
+                    <div className="mt-4 border-t pt-4">
+                      <div className="flex items-center justify-end gap-3 text-right">
+                        <span className="font-semibold">Total:</span>
+                        <span className="text-lg font-bold">{formatCurrency(totalAmount)}</span>
+                      </div>
+                    </div>
                   </div>
                 </>
               )}
             </div>
 
             {error && (
-              <div className="p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg">
+              <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
                 {error}
               </div>
             )}
 
-            <div className="flex items-center justify-between border-t pt-6">
-              <div>
-                <p className="text-sm text-muted-foreground">Order Total</p>
-                <p className="text-2xl font-bold">{formatCurrency(totalAmount)}</p>
-              </div>
-              <div className="flex gap-3">
-                <Link href="/orders">
-                  <Button type="button" variant="outline">
-                    Cancel
-                  </Button>
-                </Link>
-                <Button type="submit" disabled={saving}>
-                  {saving ? "Creating..." : "Create Order"}
+            <div className="flex gap-3 border-t pt-6">
+              <Button type="submit" disabled={saving}>
+                {saving ? "Saving..." : "Create Order"}
+              </Button>
+              <Link href="/orders">
+                <Button type="button" variant="outline">
+                  Cancel
                 </Button>
-              </div>
+              </Link>
             </div>
           </form>
         </CardContent>

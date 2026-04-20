@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { createProduct } from "./products"
 import { createOrder } from "./orders"
+import { DEFAULT_PACK_SIZE } from "@/lib/products/pack-sizes"
 import { createLedgerEntry } from "./inventory"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
@@ -145,6 +146,7 @@ export async function importOrders(csvText: string) {
       // Build line items
       const line_items = orderRows.map(row => ({
         sku: row.sku,
+        pack_size: DEFAULT_PACK_SIZE,
         quantity: parseInt(row.quantity),
         selling_price: parseFloat(row.selling_price),
       }))

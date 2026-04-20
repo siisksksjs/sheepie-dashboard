@@ -10,16 +10,29 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import type { Product } from "@/lib/types/database.types"
+import type { Product, ProductChannelPackPrice, ProductPackSize } from "@/lib/types/database.types"
+import type { ProductCogsHistoryEntry } from "@/lib/products/cogs-history"
+import { ProductPackSettings } from "./product-pack-settings"
+import { ProductChannelPricing } from "./product-channel-pricing"
+import { ProductCogsHistory } from "./product-cogs-history"
 
 type Props = {
   product: Product
+  initialPackSizes: ProductPackSize[]
+  channelPrices: ProductChannelPackPrice[]
+  cogsHistory: ProductCogsHistoryEntry[]
 }
 
-export function EditProductForm({ product }: Props) {
+export function EditProductForm({
+  product,
+  initialPackSizes,
+  channelPrices,
+  cogsHistory,
+}: Props) {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [packSizes, setPackSizes] = useState<ProductPackSize[]>(initialPackSizes)
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -46,7 +59,7 @@ export function EditProductForm({ product }: Props) {
   }
 
   return (
-    <div>
+    <div className="space-y-6">
       <Link href="/products">
         <Button variant="ghost" className="mb-4">
           <ArrowLeft className="mr-2 h-4 w-4" />
@@ -148,6 +161,31 @@ export function EditProductForm({ product }: Props) {
           </form>
         </CardContent>
       </Card>
+
+      {!product.is_bundle ? (
+        <>
+          <ProductPackSettings
+            sku={product.sku}
+            packSizes={packSizes}
+            onSaved={setPackSizes}
+          />
+          <ProductChannelPricing
+            sku={product.sku}
+            packSizes={packSizes}
+            channelPrices={channelPrices}
+          />
+          <ProductCogsHistory product={product} history={cogsHistory} />
+        </>
+      ) : (
+        <Card className="max-w-2xl">
+          <CardHeader>
+            <CardTitle>Bundle-only Product</CardTitle>
+            <CardDescription>
+              Pack-size pricing and direct COGS history are managed on the underlying component SKUs.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
     </div>
   )
 }

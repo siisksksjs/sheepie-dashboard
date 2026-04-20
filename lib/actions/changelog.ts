@@ -65,8 +65,14 @@ function isAllowedAutomaticChangelogEvent(input: {
   area: string
   action_summary: string
 }) {
+  const normalizedArea = input.area.trim()
+
+  if (normalizedArea === "products") {
+    return true
+  }
+
   return (
-    input.area.trim() === "inventory" &&
+    normalizedArea === "inventory" &&
     isAllowedInventoryActionSummary(input.action_summary)
   )
 }

@@ -6,6 +6,7 @@ import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
 import { duplicateOrder, updateOrderStatus } from "@/lib/actions/orders"
 import { getLineItemTotalCost } from "@/lib/line-item-costs"
+import { getPackMultiplier, getPackSizeLabel } from "@/lib/products/pack-sizes"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -218,6 +219,9 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
                       {product?.variant && (
                         <p className="text-xs text-muted-foreground">{product.variant}</p>
                       )}
+                      <p className="text-xs text-muted-foreground">
+                        {getPackSizeLabel(item.pack_size)} · {item.quantity} order(s) · {item.quantity * getPackMultiplier(item.pack_size)} unit(s)
+                      </p>
                     </div>
                     <div className="grid grid-cols-3 gap-2 text-sm">
                       <div>
@@ -260,6 +264,9 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
                           {product?.variant && (
                             <div className="text-sm text-muted-foreground">{product.variant}</div>
                           )}
+                          <div className="text-xs text-muted-foreground">
+                            {getPackSizeLabel(item.pack_size)}
+                          </div>
                         </TableCell>
                         <TableCell className="text-right">{item.quantity}</TableCell>
                         <TableCell className="text-right">{formatCurrency(item.selling_price)}</TableCell>

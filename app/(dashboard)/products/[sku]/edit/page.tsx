@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation"
-import { getProductBySku } from "@/lib/actions/products"
+import { getProductEditWorkspace } from "@/lib/actions/products"
 import { EditProductForm } from "@/components/products/edit-product-form"
 
 type Props = {
@@ -8,11 +8,18 @@ type Props = {
 
 export default async function EditProductPage({ params }: Props) {
   const { sku } = await params
-  const product = await getProductBySku(sku)
+  const workspace = await getProductEditWorkspace(sku)
 
-  if (!product) {
+  if (!workspace) {
     notFound()
   }
 
-  return <EditProductForm product={product} />
+  return (
+    <EditProductForm
+      product={workspace.product}
+      initialPackSizes={workspace.packSizes}
+      channelPrices={workspace.channelPrices}
+      cogsHistory={workspace.cogsHistory}
+    />
+  )
 }

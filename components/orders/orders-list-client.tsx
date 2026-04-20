@@ -7,6 +7,7 @@ import { Eye } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { getPackSizeLabel } from "@/lib/products/pack-sizes"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { cn, formatCurrency, formatDate } from "@/lib/utils"
 
@@ -134,7 +135,7 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
                   {order.order_line_items.map((item: OrderListLineItem) => (
                     <div key={item.id} className="text-xs">
                       <span className="text-muted-foreground">
-                        {item.quantity}x {item.product_name}
+                        {item.quantity}x {item.product_name} · {getPackSizeLabel(item.pack_size)}
                       </span>
                     </div>
                   ))}
@@ -212,7 +213,7 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
                       <div className="space-y-1">
                         {order.order_line_items.map((item: OrderListLineItem) => (
                           <div key={item.id} className="text-sm text-muted-foreground">
-                            {item.quantity}x {item.product_name}
+                            {item.quantity}x {item.product_name} · {getPackSizeLabel(item.pack_size)}
                           </div>
                         ))}
                       </div>
