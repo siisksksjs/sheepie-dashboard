@@ -48,7 +48,7 @@ type InventoryPurchaseItemInput = {
 }
 
 type InventoryPurchaseBatchWithItems = InventoryPurchaseBatch & {
-  account_name: string
+  account_name: string | null
   items: Array<InventoryPurchaseBatchItem & { product_name: string; variant: string | null }>
 }
 
@@ -328,7 +328,7 @@ export const getInventoryPurchaseBatches = cache(async (filters?: {
 
   return typedBatches.map((batch) => ({
     ...batch,
-    account_name: accountMap.get(batch.account_id) || "Unknown account",
+    account_name: batch.account_id ? accountMap.get(batch.account_id) || "Unknown account" : null,
     items: itemsByBatch.get(batch.id) || [],
   }))
 })

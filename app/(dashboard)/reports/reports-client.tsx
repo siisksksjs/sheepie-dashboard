@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { formatCurrency } from "@/lib/utils"
-import { TrendingUp, DollarSign, Package, ShoppingBag, Target } from "lucide-react"
+import { ChevronDown, ChevronRight, TrendingUp, DollarSign, Package, ShoppingBag, Target } from "lucide-react"
 import Link from "next/link"
 import { InfoTooltip } from "@/components/ui/info-tooltip"
 import type { Channel, PackSize } from "@/lib/types/database.types"
@@ -103,6 +103,8 @@ export function ReportsClient({
   const [selectedYearlyMonth, setSelectedYearlyMonth] = useState<number | null>(null)
   const [selectedYearlyCalendarDate, setSelectedYearlyCalendarDate] = useState<string | null>(null)
   const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>("units")
+  const [showMonthlyAdsSkuTable, setShowMonthlyAdsSkuTable] = useState(true)
+  const [showMonthlyAdsChannelTable, setShowMonthlyAdsChannelTable] = useState(true)
 
   // Update URL when filters change (navigates to new page with server-side data fetch)
   const updateFilters = (year: number | undefined, month: number | undefined) => {
@@ -469,7 +471,7 @@ export function ReportsClient({
                 </div>
               ) : null}
 
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-4">
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -477,7 +479,7 @@ export function ReportsClient({
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">
+                    <div className="text-2xl font-bold leading-tight break-words tabular-nums">
                       {formatCount(monthlyAds.totals.total_target_units)}
                     </div>
                   </CardContent>
@@ -490,7 +492,7 @@ export function ReportsClient({
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">
+                    <div className="text-2xl font-bold leading-tight break-words tabular-nums">
                       {formatCount(monthlyAds.totals.total_actual_units)}
                     </div>
                   </CardContent>
@@ -503,7 +505,7 @@ export function ReportsClient({
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">
+                    <div className="text-2xl font-bold leading-tight break-words tabular-nums">
                       {formatCurrency(monthlyAds.totals.total_ads_spent)}
                     </div>
                   </CardContent>
@@ -517,7 +519,7 @@ export function ReportsClient({
                   </CardHeader>
                   <CardContent>
                     <div
-                      className={`text-2xl font-bold ${
+                      className={`text-2xl font-bold leading-tight break-words tabular-nums ${
                         monthlyAds.totals.profit_before_ads >= 0 ? "text-success" : "text-destructive"
                       }`}
                     >
@@ -534,7 +536,7 @@ export function ReportsClient({
                   </CardHeader>
                   <CardContent>
                     <div
-                      className={`text-2xl font-bold ${
+                      className={`text-2xl font-bold leading-tight break-words tabular-nums ${
                         monthlyAds.totals.profit_after_ads >= 0 ? "text-success" : "text-destructive"
                       }`}
                     >
@@ -550,113 +552,169 @@ export function ReportsClient({
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">
+                    <div className="text-2xl font-bold leading-tight break-words tabular-nums">
                       {monthlyAds.totals.target_achievement_percent.toFixed(1)}%
                     </div>
                   </CardContent>
                 </Card>
               </div>
 
-              <div className="overflow-x-auto rounded-lg border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>SKU</TableHead>
-                      <TableHead className="text-right">Target</TableHead>
-                      <TableHead className="text-right">Actual</TableHead>
-                      <TableHead className="text-right">Ads Units</TableHead>
-                      <TableHead className="text-right">Organic Units</TableHead>
-                      <TableHead className="text-right">Ads Spend</TableHead>
-                      <TableHead className="text-right">Budget Cap</TableHead>
-                      <TableHead className="text-right">Profit After Ads</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {monthlyAds.skuSummaries.map((summary) => (
-                      <TableRow key={summary.sku}>
-                        <TableCell>
-                          <div className="font-medium">
-                            {monthlyAdsProductLabels.get(summary.sku) || summary.sku}
-                          </div>
-                          <div className="text-xs text-muted-foreground">{summary.sku}</div>
-                        </TableCell>
-                        <TableCell className="text-right">{formatCount(summary.target_units)}</TableCell>
-                        <TableCell className="text-right">{formatCount(summary.actual_units)}</TableCell>
-                        <TableCell className="text-right">
-                          {formatCount(summary.ads_active_channel_units)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {formatCount(summary.organic_channel_units)}
-                        </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {formatCurrency(summary.total_ads_spent)}
-                        </TableCell>
-                        <TableCell className="text-right text-muted-foreground">
-                          {formatCurrency(summary.total_budget_cap)}
-                        </TableCell>
-                        <TableCell
-                          className={`text-right font-semibold ${
-                            summary.profit_after_ads >= 0 ? "text-success" : "text-destructive"
-                          }`}
-                        >
-                          {formatCurrency(summary.profit_after_ads)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+              <div className="rounded-lg border">
+                <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold">SKU Summary</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Targets, sales split, spend, and profit by SKU.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-controls="monthly-ads-sku-table"
+                    aria-expanded={showMonthlyAdsSkuTable}
+                    onClick={() => setShowMonthlyAdsSkuTable((current) => !current)}
+                    className="w-full justify-center sm:w-auto"
+                  >
+                    {showMonthlyAdsSkuTable ? (
+                      <ChevronDown className="mr-2 h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="mr-2 h-4 w-4" />
+                    )}
+                    {showMonthlyAdsSkuTable ? "Hide" : "Show"} Table
+                  </Button>
+                </div>
+                {showMonthlyAdsSkuTable ? (
+                  <div id="monthly-ads-sku-table" className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>SKU</TableHead>
+                          <TableHead className="text-right">Target</TableHead>
+                          <TableHead className="text-right">Actual</TableHead>
+                          <TableHead className="text-right">Ads Units</TableHead>
+                          <TableHead className="text-right">Organic Units</TableHead>
+                          <TableHead className="text-right">Ads Spend</TableHead>
+                          <TableHead className="text-right">Budget Cap</TableHead>
+                          <TableHead className="text-right">Profit After Ads</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {monthlyAds.skuSummaries.map((summary) => (
+                          <TableRow key={summary.sku}>
+                            <TableCell>
+                              <div className="font-medium">
+                                {monthlyAdsProductLabels.get(summary.sku) || summary.sku}
+                              </div>
+                              <div className="text-xs text-muted-foreground">{summary.sku}</div>
+                            </TableCell>
+                            <TableCell className="text-right">{formatCount(summary.target_units)}</TableCell>
+                            <TableCell className="text-right">{formatCount(summary.actual_units)}</TableCell>
+                            <TableCell className="text-right">
+                              {formatCount(summary.ads_active_channel_units)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {formatCount(summary.organic_channel_units)}
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                              {formatCurrency(summary.total_ads_spent)}
+                            </TableCell>
+                            <TableCell className="text-right text-muted-foreground">
+                              {formatCurrency(summary.total_budget_cap)}
+                            </TableCell>
+                            <TableCell
+                              className={`text-right font-semibold ${
+                                summary.profit_after_ads >= 0 ? "text-success" : "text-destructive"
+                              }`}
+                            >
+                              {formatCurrency(summary.profit_after_ads)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : null}
               </div>
 
-              <div className="overflow-x-auto rounded-lg border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>Channel</TableHead>
-                      <TableHead>Classification</TableHead>
-                      <TableHead className="text-right">Units</TableHead>
-                      <TableHead className="text-right">Ads Spend</TableHead>
-                      <TableHead className="text-right">Revenue</TableHead>
-                      <TableHead className="text-right">Profit After Ads</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {monthlyAds.channelBreakdown.map((row) => (
-                      <TableRow key={`${row.sku}-${row.channel}`}>
-                        <TableCell>
-                          <div className="font-medium">{formatMonthlyAdsProductLabel(row)}</div>
-                          <div className="text-xs text-muted-foreground">{row.sku}</div>
-                        </TableCell>
-                        <TableCell>{channelLabels[row.channel]}</TableCell>
-                        <TableCell>
-                          <Badge variant={row.classification === "ads-active" ? "success" : "secondary"}>
-                            {formatAdsClassificationLabel(row.classification)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">{formatCount(row.units)}</TableCell>
-                        <TableCell className="text-right">
-                          {row.actual_spend_missing
-                            ? "Missing"
-                            : row.uses_shared_budget
-                              ? "Shared at SKU level"
-                              : formatCurrency(row.ads_spent)}
-                        </TableCell>
-                        <TableCell className="text-right">{formatCurrency(row.revenue)}</TableCell>
-                        <TableCell
-                          className={`text-right font-semibold ${
-                            row.profit_after_ads >= 0 ? "text-success" : "text-destructive"
-                          }`}
-                        >
-                          {row.actual_spend_missing
-                            ? "Missing"
-                            : row.uses_shared_budget
-                              ? "Shared at SKU level"
-                              : formatCurrency(row.profit_after_ads)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+              <div className="rounded-lg border">
+                <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold">Channel Breakdown</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Ads-active versus organic sales by SKU and channel.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-controls="monthly-ads-channel-table"
+                    aria-expanded={showMonthlyAdsChannelTable}
+                    onClick={() => setShowMonthlyAdsChannelTable((current) => !current)}
+                    className="w-full justify-center sm:w-auto"
+                  >
+                    {showMonthlyAdsChannelTable ? (
+                      <ChevronDown className="mr-2 h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="mr-2 h-4 w-4" />
+                    )}
+                    {showMonthlyAdsChannelTable ? "Hide" : "Show"} Table
+                  </Button>
+                </div>
+                {showMonthlyAdsChannelTable ? (
+                  <div id="monthly-ads-channel-table" className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>SKU</TableHead>
+                          <TableHead>Channel</TableHead>
+                          <TableHead>Classification</TableHead>
+                          <TableHead className="text-right">Units</TableHead>
+                          <TableHead className="text-right">Ads Spend</TableHead>
+                          <TableHead className="text-right">Revenue</TableHead>
+                          <TableHead className="text-right">Profit After Ads</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {monthlyAds.channelBreakdown.map((row) => (
+                          <TableRow key={`${row.sku}-${row.channel}`}>
+                            <TableCell>
+                              <div className="font-medium">{formatMonthlyAdsProductLabel(row)}</div>
+                              <div className="text-xs text-muted-foreground">{row.sku}</div>
+                            </TableCell>
+                            <TableCell>{channelLabels[row.channel]}</TableCell>
+                            <TableCell>
+                              <Badge variant={row.classification === "ads-active" ? "success" : "secondary"}>
+                                {formatAdsClassificationLabel(row.classification)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">{formatCount(row.units)}</TableCell>
+                            <TableCell className="text-right">
+                              {row.actual_spend_missing
+                                ? "Missing"
+                                : row.uses_shared_budget
+                                  ? "Shared at SKU level"
+                                  : formatCurrency(row.ads_spent)}
+                            </TableCell>
+                            <TableCell className="text-right">{formatCurrency(row.revenue)}</TableCell>
+                            <TableCell
+                              className={`text-right font-semibold ${
+                                row.profit_after_ads >= 0 ? "text-success" : "text-destructive"
+                              }`}
+                            >
+                              {row.actual_spend_missing
+                                ? "Missing"
+                                : row.uses_shared_budget
+                                  ? "Shared at SKU level"
+                                  : formatCurrency(row.profit_after_ads)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : null}
               </div>
             </>
           )}

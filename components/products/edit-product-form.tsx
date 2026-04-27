@@ -137,7 +137,7 @@ export function EditProductForm({
 
             <div className="p-3 bg-muted rounded-lg">
               <p className="text-sm text-muted-foreground">
-                <strong>Note:</strong> Bundle status cannot be changed after creation.
+                <strong>Note:</strong> Product type cannot be changed after creation.
                 This product is a {product.is_bundle ? "bundle" : "single product"}.
               </p>
             </div>
@@ -162,30 +162,17 @@ export function EditProductForm({
         </CardContent>
       </Card>
 
-      {!product.is_bundle ? (
-        <>
-          <ProductPackSettings
-            sku={product.sku}
-            packSizes={packSizes}
-            onSaved={setPackSizes}
-          />
-          <ProductChannelPricing
-            sku={product.sku}
-            packSizes={packSizes}
-            channelPrices={channelPrices}
-          />
-          <ProductCogsHistory product={product} history={cogsHistory} />
-        </>
-      ) : (
-        <Card className="max-w-2xl">
-          <CardHeader>
-            <CardTitle>Bundle-only Product</CardTitle>
-            <CardDescription>
-              Pack-size pricing and direct COGS history are managed on the underlying component SKUs.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      )}
+      <ProductPackSettings
+        sku={product.sku}
+        packSizes={packSizes}
+        onSaved={setPackSizes}
+      />
+      <ProductChannelPricing
+        sku={product.sku}
+        packSizes={packSizes}
+        channelPrices={channelPrices}
+      />
+      <ProductCogsHistory product={product} history={cogsHistory} />
     </div>
   )
 }

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { formatCurrency } from "@/lib/utils"
+import { getBundleCompositionHref, getProductEditHref } from "@/lib/products/routes"
 import { Plus, Package, Settings } from "lucide-react"
 import Link from "next/link"
 
@@ -128,14 +129,14 @@ export default async function ProductsPage() {
 
                   <div className="flex gap-2 pt-2 border-t">
                     {product.is_bundle && (
-                      <Link href={`/products/${product.sku}/bundles`} className="flex-1">
+                      <Link href={getBundleCompositionHref(product.sku)} className="flex-1">
                         <Button variant="outline" size="sm" className="w-full">
                           <Settings className="h-4 w-4 mr-1" />
                           Bundle
                         </Button>
                       </Link>
                     )}
-                    <Link href={`/products/${product.sku}/edit`} className="flex-1">
+                    <Link href={getProductEditHref(product.sku)} className="flex-1">
                       <Button variant="ghost" size="sm" className="w-full">
                         Edit
                       </Button>
@@ -224,14 +225,14 @@ export default async function ProductsPage() {
                       <TableCell className="text-right">
                         <div className="flex gap-1 justify-end">
                           {product.is_bundle && (
-                            <Link href={`/products/${product.sku}/bundles`}>
+                            <Link href={getBundleCompositionHref(product.sku)}>
                               <Button variant="ghost" size="sm">
                                 <Settings className="h-4 w-4 mr-1" />
                                 Bundle
                               </Button>
                             </Link>
                           )}
-                          <Link href={`/products/${product.sku}/edit`}>
+                          <Link href={getProductEditHref(product.sku)}>
                             <Button variant="ghost" size="sm">
                               Edit
                             </Button>

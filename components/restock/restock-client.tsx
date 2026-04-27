@@ -15,7 +15,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import type {
-  FinanceAccount,
   Product,
   ShippingMode,
 } from "@/lib/types/database.types"
@@ -24,7 +23,6 @@ type RestockRow = Awaited<ReturnType<typeof import("@/lib/actions/finance").getI
 
 type Props = {
   restocks: RestockRow[]
-  accounts: FinanceAccount[]
   products: Product[]
 }
 
@@ -68,7 +66,7 @@ function getLeadDays(orderDate: string, arrivalDate: string | null) {
   return Math.round(diffMs / 86_400_000)
 }
 
-export function RestockClient({ restocks, accounts, products }: Props) {
+export function RestockClient({ restocks, products }: Props) {
   const router = useRouter()
   const [isCreating, startCreateTransition] = useTransition()
   const [isArriving, startArrivalTransition] = useTransition()
@@ -77,7 +75,6 @@ export function RestockClient({ restocks, accounts, products }: Props) {
   const [purchaseItems, setPurchaseItems] = useState<RestockItemForm[]>([createEmptyItem()])
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split("T")[0])
   const [shippingMode, setShippingMode] = useState<ShippingMode>("air")
-  const [accountId, setAccountId] = useState("")
   const [vendor, setVendor] = useState("")
   const [notes, setNotes] = useState("")
   const [arrivalDates, setArrivalDates] = useState<Record<string, string>>({})
@@ -114,7 +111,6 @@ export function RestockClient({ restocks, accounts, products }: Props) {
   const resetForm = () => {
     setOrderDate(new Date().toISOString().split("T")[0])
     setShippingMode("air")
-    setAccountId("")
     setVendor("")
     setNotes("")
     setPurchaseItems([createEmptyItem()])
@@ -128,7 +124,6 @@ export function RestockClient({ restocks, accounts, products }: Props) {
       const result = await createRestock({
         order_date: orderDate,
         shipping_mode: shippingMode,
-        account_id: accountId,
         vendor: vendor || null,
         notes: notes || null,
         items: purchaseItems.map((item) => ({
@@ -192,12 +187,12 @@ export function RestockClient({ restocks, accounts, products }: Props) {
           <CardHeader>
             <CardTitle>Create Restock</CardTitle>
             <CardDescription>
-              Record the supplier cash-out on order date now, then receive inventory later when the batch arrives.
+              Record the supplier order now, then receive inventory later when the batch arrives.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleCreateRestock} className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="order_date">China Order Date *</Label>
                   <Input
@@ -218,21 +213,6 @@ export function RestockClient({ restocks, accounts, products }: Props) {
                       {shippingModeOptions.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Cash Account *</Label>
-                  <Select value={accountId} onValueChange={setAccountId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select account" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {accounts.map((account) => (
-                        <SelectItem key={account.id} value={account.id}>
-                          {account.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -327,7 +307,7 @@ export function RestockClient({ restocks, accounts, products }: Props) {
                 </div>
               )}
 
-              <Button type="submit" disabled={isCreating || !accountId}>
+              <Button type="submit" disabled={isCreating}>
                 {isCreating ? "Saving..." : "Create Restock"}
               </Button>
             </form>

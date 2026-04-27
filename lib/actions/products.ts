@@ -36,6 +36,26 @@ type ProductRestockCostRow = Pick<
   >
 }
 
+function getSupabaseErrorLog(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return error
+  }
+
+  const errorRecord = error as {
+    code?: unknown
+    message?: unknown
+    details?: unknown
+    hint?: unknown
+  }
+
+  return {
+    code: errorRecord.code,
+    message: errorRecord.message,
+    details: errorRecord.details,
+    hint: errorRecord.hint,
+  }
+}
+
 function revalidateProductPaths(sku?: string) {
   revalidatePath("/products")
   revalidatePath("/dashboard")
@@ -73,7 +93,10 @@ export async function getProductBySku(sku: string) {
     .single()
 
   if (error) {
-    console.error("Error fetching product:", error)
+    console.error("Error fetching product:", {
+      sku,
+      error: getSupabaseErrorLog(error),
+    })
     return null
   }
 
@@ -186,7 +209,10 @@ export async function getProductEditWorkspace(sku: string): Promise<ProductEditW
   ])
 
   if (productError || !product) {
-    console.error("Error fetching product edit workspace:", productError)
+    console.error("Error fetching product edit workspace:", {
+      sku,
+      error: getSupabaseErrorLog(productError),
+    })
     return null
   }
 
@@ -278,20 +304,18 @@ export async function createProduct(formData: {
     return { success: false, error: error.message }
   }
 
-  if (!data.is_bundle) {
-    const defaultPackRows = PACK_SIZE_OPTIONS.map((pack) => ({
-      sku: data.sku,
-      pack_size: pack.value,
-      is_enabled: pack.value === "single",
-    }))
+  const defaultPackRows = PACK_SIZE_OPTIONS.map((pack) => ({
+    sku: data.sku,
+    pack_size: pack.value,
+    is_enabled: pack.value === "single",
+  }))
 
-    const { error: packSizeError } = await supabase
-      .from("product_pack_sizes")
-      .upsert(defaultPackRows, { onConflict: "sku,pack_size" })
+  const { error: packSizeError } = await supabase
+    .from("product_pack_sizes")
+    .upsert(defaultPackRows, { onConflict: "sku,pack_size" })
 
-    if (packSizeError) {
-      console.error("Error creating default product pack sizes:", packSizeError)
-    }
+  if (packSizeError) {
+    console.error("Error creating default product pack sizes:", packSizeError)
   }
 
   revalidateProductPaths(data.sku)

@@ -249,6 +249,8 @@ async function loadReportsClient() {
   vi.doMock("lucide-react", () => {
     const Icon = () => React.createElement("svg")
     return {
+      ChevronDown: Icon,
+      ChevronRight: Icon,
       TrendingUp: Icon,
       DollarSign: Icon,
       Package: Icon,

@@ -64,7 +64,7 @@ function revalidateRestockArrivalPaths() {
 export async function createRestock(input: {
   order_date: string
   shipping_mode: ShippingMode
-  account_id: string
+  account_id?: string | null
   vendor?: string | null
   notes?: string | null
   items: RestockItemInput[]
@@ -105,7 +105,7 @@ export async function createRestock(input: {
     {
       target_order_date: input.order_date,
       target_shipping_mode: input.shipping_mode,
-      target_account_id: input.account_id,
+      target_account_id: input.account_id || null,
       target_vendor: trimmedVendor,
       target_notes: trimmedNotes,
       target_created_by: user?.id || null,

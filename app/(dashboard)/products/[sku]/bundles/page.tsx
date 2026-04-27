@@ -5,13 +5,15 @@ import { getBundleCompositions } from "@/lib/actions/bundles"
 import { getProductBySku, getProducts } from "@/lib/actions/products"
 import { BundleCompositionClient } from "@/components/products/bundle-composition-client"
 import { Button } from "@/components/ui/button"
+import { decodeProductSkuParam } from "@/lib/products/routes"
 
 type Props = {
   params: Promise<{ sku: string }>
 }
 
 export default async function BundleCompositionPage({ params }: Props) {
-  const { sku } = await params
+  const { sku: skuParam } = await params
+  const sku = decodeProductSkuParam(skuParam)
   const [product, compositions, allProducts] = await Promise.all([
     getProductBySku(sku),
     getBundleCompositions(sku),

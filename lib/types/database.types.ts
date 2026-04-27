@@ -260,7 +260,7 @@ export type InventoryPurchaseBatch = {
   restock_status: RestockStatus
   shipping_mode: ShippingMode | null
   vendor: string | null
-  account_id: string
+  account_id: string | null
   finance_entry_id: string | null
   total_amount: number
   notes: string | null
