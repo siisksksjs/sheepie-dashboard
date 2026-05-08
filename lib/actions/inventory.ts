@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 import type { InventoryLedger, StockOnHand, MovementType } from "@/lib/types/database.types"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
+import { triggerNotificationSender } from "@/lib/notifications/trigger-sender"
 
 function formatProductName(name: string, variant?: string | null) {
   return variant ? `${name} - ${variant}` : name
@@ -117,6 +118,11 @@ export async function createLedgerEntry(formData: {
   revalidatePath("/ledger")
   revalidatePath("/dashboard")
   revalidatePath("/products")
+
+  const notificationResult = await triggerNotificationSender()
+  if (!notificationResult.success && !notificationResult.skipped) {
+    console.error("Error triggering notification sender:", notificationResult.error)
+  }
 
   const { data: stockAfter } = await supabase
     .from("stock_on_hand")

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 
+import { triggerNotificationSender } from "@/lib/notifications/trigger-sender"
 import { resolveRestockItemCosts } from "@/lib/restock/item-costs"
 import { createClient } from "@/lib/supabase/server"
 import type {
@@ -158,6 +159,11 @@ export async function markRestockArrived(input: {
   }
 
   revalidateRestockArrivalPaths()
+
+  const notificationResult = await triggerNotificationSender()
+  if (!notificationResult.success && !notificationResult.skipped) {
+    console.error("Error triggering notification sender after restock arrival:", notificationResult.error)
+  }
 
   return { success: true }
 }
