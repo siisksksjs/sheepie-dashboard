@@ -47,6 +47,25 @@ export type StockOnHand = {
   updated_at: string
 }
 
+export type NotificationEventStatus = 'pending' | 'sending' | 'sent' | 'failed'
+
+export type NotificationEventType =
+  | 'restock_alert'
+  | 'weekly_sales_report'
+  | 'monthly_sales_report'
+
+export type NotificationEvent = {
+  id: string
+  event_type: NotificationEventType
+  status: NotificationEventStatus
+  idempotency_key: string
+  payload: Record<string, unknown>
+  error_message: string | null
+  sent_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type Channel = 'shopee' | 'tokopedia' | 'tiktok' | 'offline'
 
 export type OrderStatus = 'paid' | 'shipped' | 'cancelled' | 'returned'
