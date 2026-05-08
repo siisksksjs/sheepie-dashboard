@@ -47,3 +47,18 @@ describe("notification migration contracts", () => {
     expect(source).not.toMatch(/Cervi-002/i)
   })
 })
+
+describe("notification edge function source contracts", () => {
+  it("defines shared edge helpers and function entrypoints", async () => {
+    const authSource = await readFile("supabase/functions/_shared/auth.ts", "utf8")
+    const resendSource = await readFile("supabase/functions/_shared/resend.ts", "utf8")
+    const notificationSource = await readFile("supabase/functions/send-notification-events/index.ts", "utf8")
+    const reportSource = await readFile("supabase/functions/send-sales-report/index.ts", "utf8")
+
+    expect(authSource).toContain("assertAuthorizedRequest")
+    expect(resendSource).toContain("sendEmail")
+    expect(notificationSource).toContain("notification_events")
+    expect(reportSource).toContain("weekly_sales_report")
+    expect(reportSource).toContain("monthly_sales_report")
+  })
+})
