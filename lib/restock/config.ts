@@ -27,6 +27,14 @@ export const RESTOCK_GUIDANCE_CONFIG: RestockGuidanceConfig[] = [
     bufferDays: 7,
   },
   {
+    sku: "Lumi-001",
+    name: "LumiCloud Eye Mask",
+    mode: "sea",
+    fallbackLeadMin: 28,
+    fallbackLeadMax: 42,
+    bufferDays: 14,
+  },
+  {
     sku: "Calmi-001",
     name: "CalmiCloud Ear Plug",
     mode: "air",
