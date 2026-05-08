@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "supabase/functions/**",
     ".worktrees/**",
     "next-env.d.ts",
   ]),
