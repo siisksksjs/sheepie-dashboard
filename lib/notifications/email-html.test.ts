@@ -13,6 +13,15 @@ describe("renderRestockAlertEmailHtml", () => {
         {
           sku: "Lumi-001",
           productName: "LumiCloud Eye Mask",
+          shippingMode: "air",
+          threshold: 65,
+          previousStock: 70,
+          currentStock: 58,
+          leadTimeLabel: "Lead 40d + Buffer 7d = 47d",
+        },
+        {
+          sku: "Lumi-001",
+          productName: "LumiCloud Eye Mask",
           shippingMode: "sea",
           threshold: 160,
           previousStock: 185,
@@ -23,12 +32,16 @@ describe("renderRestockAlertEmailHtml", () => {
     })
 
     expect(html).toContain("Restock reorder alert")
+    expect(html).toContain("Sheepie.")
     expect(html).toContain("LumiCloud Eye Mask")
     expect(html).toContain("Lumi-001")
+    expect(html).toContain("Air")
     expect(html).toContain("Sea")
     expect(html).toContain("158")
     expect(html).toContain("160")
     expect(html).toContain("Fallback 28-42d + Buffer 14d")
+    expect(html).toContain("Shipment methods")
+    expect(html.match(/LumiCloud Eye Mask/g)?.length).toBe(1)
     expect(html).toContain("<table")
     expect(html).not.toContain(".csv")
   })

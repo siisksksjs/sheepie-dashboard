@@ -33,6 +33,12 @@ type LowStockRow = {
   currentStock: number
 }
 
+type RestockEmailSkuGroup = {
+  sku: string
+  productName: string
+  events: RestockEmailEvent[]
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")
@@ -54,6 +60,30 @@ function formatMode(mode: ShippingMode) {
   return mode === "air" ? "Air" : "Sea"
 }
 
+function groupRestockEventsBySku(events: RestockEmailEvent[]): RestockEmailSkuGroup[] {
+  const groups = new Map<string, RestockEmailSkuGroup>()
+
+  for (const event of events) {
+    const existing = groups.get(event.sku)
+
+    if (existing) {
+      existing.events.push(event)
+      continue
+    }
+
+    groups.set(event.sku, {
+      sku: event.sku,
+      productName: event.productName,
+      events: [event],
+    })
+  }
+
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    events: group.events.sort((a, b) => a.shippingMode.localeCompare(b.shippingMode)),
+  }))
+}
+
 function pageShell(title: string, body: string) {
   return `<!doctype html>
 <html>
@@ -62,10 +92,15 @@ function pageShell(title: string, body: string) {
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
     <title>${escapeHtml(title)}</title>
   </head>
-  <body style="margin:0;background:#f6f7f9;color:#111827;font-family:Arial,sans-serif;">
-    <div style="max-width:680px;margin:0 auto;padding:20px;">
+  <body style="margin:0;background:#f4f8fb;color:#213368;font-family:Arial,sans-serif;">
+    <div style="max-width:720px;margin:0 auto;padding:20px;">
+      <div style="padding:18px 20px;background:#213368;border-radius:16px 16px 0 0;color:#ffffff;">
+        <div style="font-size:24px;font-weight:700;letter-spacing:0;">Sheepie.</div>
+      </div>
+      <div style="background:#ffffff;border:1px solid #e2e8f0;border-top:0;border-radius:0 0 16px 16px;padding:20px;">
       ${body}
-      <p style="margin:24px 0 0;color:#6b7280;font-size:12px;">Sent by Sheepie Dashboard.</p>
+      <p style="margin:24px 0 0;color:#64748b;font-size:12px;">Sent by Sheepie Dashboard.</p>
+      </div>
     </div>
   </body>
 </html>`
@@ -75,27 +110,35 @@ export function renderRestockAlertEmailHtml(input: {
   title: string
   events: RestockEmailEvent[]
 }) {
-  const rows = input.events.map((event) => `
+  const rows = groupRestockEventsBySku(input.events).map((group) => {
+    const routeRows = group.events.map((event) => `
+      <div style="margin:0 0 8px;padding:10px 12px;background:#f4f8fb;border:1px solid #dbe8f5;border-radius:12px;">
+        <div style="margin:0 0 5px;">
+          <span style="display:inline-block;padding:3px 8px;border-radius:999px;background:#a2c1e0;color:#213368;font-size:12px;font-weight:700;">${formatMode(event.shippingMode)}</span>
+        </div>
+        <div style="font-size:14px;line-height:1.5;color:#213368;">
+          <strong>Stock:</strong> ${event.currentStock} &nbsp; <strong>Reorder:</strong> ${event.threshold}
+        </div>
+        <div style="font-size:12px;line-height:1.4;color:#64748b;">${escapeHtml(event.leadTimeLabel)}</div>
+      </div>
+    `).join("")
+
+    return `
     <tr>
-      <td style="padding:10px;border-bottom:1px solid #e5e7eb;"><strong>${escapeHtml(event.productName)}</strong><br /><span style="color:#6b7280;">${escapeHtml(event.sku)}</span></td>
-      <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${formatMode(event.shippingMode)}</td>
-      <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:right;">${event.currentStock}</td>
-      <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:right;">${event.threshold}</td>
-      <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${escapeHtml(event.leadTimeLabel)}</td>
+      <td style="padding:14px;border-bottom:1px solid #e2e8f0;vertical-align:top;"><strong style="color:#213368;">${escapeHtml(group.productName)}</strong><br /><span style="color:#64748b;">${escapeHtml(group.sku)}</span></td>
+      <td style="padding:14px;border-bottom:1px solid #e2e8f0;vertical-align:top;">${routeRows}</td>
     </tr>
-  `).join("")
+  `
+  }).join("")
 
   return pageShell(input.title, `
-    <h1 style="margin:0 0 8px;font-size:24px;line-height:1.25;">${escapeHtml(input.title)}</h1>
-    <p style="margin:0 0 18px;color:#4b5563;">The following SKU shipment routes crossed their reorder threshold.</p>
-    <table style="width:100%;border-collapse:collapse;background:#ffffff;border:1px solid #e5e7eb;">
+    <h1 style="margin:0 0 8px;font-size:24px;line-height:1.25;color:#213368;">${escapeHtml(input.title)}</h1>
+    <p style="margin:0 0 18px;color:#64748b;">The following SKUs crossed their reorder threshold.</p>
+    <table style="width:100%;border-collapse:collapse;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
       <thead>
         <tr>
-          <th align="left" style="padding:10px;border-bottom:1px solid #e5e7eb;">SKU</th>
-          <th align="left" style="padding:10px;border-bottom:1px solid #e5e7eb;">Mode</th>
-          <th align="right" style="padding:10px;border-bottom:1px solid #e5e7eb;">Stock</th>
-          <th align="right" style="padding:10px;border-bottom:1px solid #e5e7eb;">Reorder</th>
-          <th align="left" style="padding:10px;border-bottom:1px solid #e5e7eb;">Lead time</th>
+          <th align="left" style="padding:12px 14px;border-bottom:1px solid #dbe8f5;background:#f4f8fb;color:#213368;">SKU</th>
+          <th align="left" style="padding:12px 14px;border-bottom:1px solid #dbe8f5;background:#f4f8fb;color:#213368;">Shipment methods</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -139,8 +182,8 @@ export function renderSalesReportEmailHtml(input: {
   `).join("")
 
   return pageShell(input.title, `
-    <h1 style="margin:0 0 4px;font-size:24px;line-height:1.25;">${escapeHtml(input.title)}</h1>
-    <p style="margin:0 0 18px;color:#4b5563;">${escapeHtml(input.periodLabel)}</p>
+    <h1 style="margin:0 0 4px;font-size:24px;line-height:1.25;color:#213368;">${escapeHtml(input.title)}</h1>
+    <p style="margin:0 0 18px;color:#64748b;">${escapeHtml(input.periodLabel)}</p>
     <table style="width:100%;border-collapse:collapse;background:#ffffff;border:1px solid #e5e7eb;margin-bottom:18px;">
       <tbody>
         <tr><td style="padding:10px;">Orders</td><td style="padding:10px;text-align:right;"><strong>${input.totals.orders}</strong></td></tr>
