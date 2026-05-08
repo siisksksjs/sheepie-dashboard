@@ -2,6 +2,15 @@ import type { ShippingMode } from "./config"
 
 const MS_PER_DAY = 86_400_000
 
+export type RestockGuidanceRouteConfig = {
+  sku: string
+  name: string
+  mode: ShippingMode
+  fallbackLeadMin: number
+  fallbackLeadMax: number
+  bufferDays: number
+}
+
 export type ShipmentSample = {
   sku: string
   shipping_mode: ShippingMode | null
@@ -42,9 +51,35 @@ export type LeadBufferLabelInput = {
   isFallback: boolean
 }
 
+export type BuildGuidanceRouteConfigsInput = {
+  baseConfigs: RestockGuidanceRouteConfig[]
+  samples: ShipmentSample[]
+  productNamesBySku?: Map<string, string>
+}
+
 type CompletedLeadTimeSample = CompletedShipmentSample & {
   shipping_mode: ShippingMode
   leadDays: number
+}
+
+const DEFAULT_ROUTE_SETTINGS: Record<
+  ShippingMode,
+  Pick<RestockGuidanceRouteConfig, "fallbackLeadMin" | "fallbackLeadMax" | "bufferDays">
+> = {
+  air: {
+    fallbackLeadMin: 7,
+    fallbackLeadMax: 10,
+    bufferDays: 7,
+  },
+  sea: {
+    fallbackLeadMin: 28,
+    fallbackLeadMax: 42,
+    bufferDays: 14,
+  },
+}
+
+function routeKey(sku: string, mode: ShippingMode) {
+  return `${sku}:${mode}`
 }
 
 function daysBetween(orderDate: string, arrivalDate: string): number | null {
@@ -109,6 +144,41 @@ export function averageLatestLeadTimes(
   }, 0)
 
   return Math.round(totalLeadDays / completed.length)
+}
+
+export function buildGuidanceRouteConfigs(
+  input: BuildGuidanceRouteConfigsInput,
+): RestockGuidanceRouteConfig[] {
+  const routes = new Map<string, RestockGuidanceRouteConfig>()
+
+  for (const config of input.baseConfigs) {
+    routes.set(routeKey(config.sku, config.mode), config)
+  }
+
+  for (const sample of filterCompletedShipmentSamples(input.samples)) {
+    const key = routeKey(sample.sku, sample.shipping_mode)
+
+    if (routes.has(key)) {
+      continue
+    }
+
+    routes.set(key, {
+      sku: sample.sku,
+      name: input.productNamesBySku?.get(sample.sku) || sample.sku,
+      mode: sample.shipping_mode,
+      ...DEFAULT_ROUTE_SETTINGS[sample.shipping_mode],
+    })
+  }
+
+  return Array.from(routes.values()).sort((a, b) => {
+    const skuCompare = a.sku.localeCompare(b.sku)
+
+    if (skuCompare !== 0) {
+      return skuCompare
+    }
+
+    return a.mode.localeCompare(b.mode)
+  })
 }
 
 export function buildArrivalChangelogItems(input: {

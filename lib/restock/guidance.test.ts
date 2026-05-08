@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest"
 import {
   averageLatestLeadTimes,
   buildArrivalChangelogItems,
+  buildGuidanceRouteConfigs,
   buildLeadBufferLabel,
   buildReorderWindow,
   filterCompletedShipmentSamples,
@@ -199,6 +200,74 @@ describe("filterCompletedShipmentSamples", () => {
         shipping_mode: "air",
         order_date: "2026-04-01",
         arrival_date: "2026-04-12",
+      },
+    ])
+  })
+})
+
+describe("buildGuidanceRouteConfigs", () => {
+  it("keeps configured routes and adds learned sku-mode routes from arrived history", () => {
+    const routes = buildGuidanceRouteConfigs({
+      baseConfigs: [
+        {
+          sku: "Calmi-001",
+          name: "CalmiCloud Ear Plug",
+          mode: "air",
+          fallbackLeadMin: 7,
+          fallbackLeadMax: 10,
+          bufferDays: 7,
+        },
+      ],
+      productNamesBySku: new Map([
+        ["Calmi-001", "CalmiCloud Ear Plug"],
+        ["Cervi-001", "CerviCloud Pillow"],
+      ]),
+      samples: [
+        {
+          sku: "Calmi-001",
+          shipping_mode: "air",
+          order_date: "2026-04-01",
+          arrival_date: "2026-04-10",
+        },
+        {
+          sku: "Calmi-001",
+          shipping_mode: "sea",
+          order_date: "2026-04-01",
+          arrival_date: "2026-05-10",
+        },
+        {
+          sku: "Cervi-001",
+          shipping_mode: "sea",
+          order_date: "2026-04-02",
+          arrival_date: "2026-05-11",
+        },
+      ],
+    })
+
+    expect(routes).toEqual([
+      {
+        sku: "Calmi-001",
+        name: "CalmiCloud Ear Plug",
+        mode: "air",
+        fallbackLeadMin: 7,
+        fallbackLeadMax: 10,
+        bufferDays: 7,
+      },
+      {
+        sku: "Calmi-001",
+        name: "CalmiCloud Ear Plug",
+        mode: "sea",
+        fallbackLeadMin: 28,
+        fallbackLeadMax: 42,
+        bufferDays: 14,
+      },
+      {
+        sku: "Cervi-001",
+        name: "CerviCloud Pillow",
+        mode: "sea",
+        fallbackLeadMin: 28,
+        fallbackLeadMax: 42,
+        bufferDays: 14,
       },
     ])
   })
@@ -430,7 +499,17 @@ describe("dashboard restock guidance integration", () => {
     const fs = await import("node:fs/promises")
     const dashboardSource = await fs.readFile("app/(dashboard)/dashboard/page.tsx", "utf8")
 
+    expect(dashboardSource).toContain("groupedReorderRecommendations")
     expect(dashboardSource).toContain("rec.leadTimeLabel")
     expect(dashboardSource).not.toContain("rec.leadMin + rec.buffer")
+  })
+
+  it("expects arrived restock history to show product details", async () => {
+    const fs = await import("node:fs/promises")
+    const restockSource = await fs.readFile("components/restock/restock-client.tsx", "utf8")
+
+    expect(restockSource).toContain("<TableHead>Product</TableHead>")
+    expect(restockSource).toContain("item.product_name")
+    expect(restockSource).toContain("item.sku} x{item.quantity")
   })
 })

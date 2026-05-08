@@ -393,6 +393,7 @@ export function RestockClient({ restocks, products }: Props) {
                 <TableRow>
                   <TableHead>Order Date</TableHead>
                   <TableHead>Arrival Date</TableHead>
+                  <TableHead>Product</TableHead>
                   <TableHead className="text-right">Lead Days</TableHead>
                   <TableHead>Vendor</TableHead>
                   <TableHead>Mode</TableHead>
@@ -408,6 +409,22 @@ export function RestockClient({ restocks, products }: Props) {
                     <TableRow key={restock.id}>
                       <TableCell>{formatDate(restock.order_date)}</TableCell>
                       <TableCell>{restock.arrival_date ? formatDate(restock.arrival_date) : "-"}</TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          {restock.items.length === 0 ? (
+                            <span className="text-muted-foreground">-</span>
+                          ) : (
+                            restock.items.map((item) => (
+                              <div key={item.id}>
+                                <div className="font-medium">{item.product_name}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {item.sku} x{item.quantity}
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-right">{leadDays === null ? "-" : `${leadDays}d`}</TableCell>
                       <TableCell className="font-medium">{restock.vendor || "Restock Batch"}</TableCell>
                       <TableCell>{getModeLabel(restock.shipping_mode)}</TableCell>

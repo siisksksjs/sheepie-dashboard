@@ -10,6 +10,7 @@ import { InfoTooltip } from "@/components/ui/info-tooltip"
 import { formatCurrency } from "@/lib/utils"
 import { Package, AlertTriangle, TrendingUp, Box, DollarSign } from "lucide-react"
 import Link from "next/link"
+import { Fragment } from "react"
 import { DateFilter } from "./date-filter"
 
 const channelLabels: Record<string, string> = {
@@ -72,6 +73,23 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
       return acc
     }, [])
   )
+  const groupedReorderRecommendations = reorderRecommendations.recommendations.reduce<
+    Array<{ sku: string; name: string; routes: typeof reorderRecommendations.recommendations }>
+  >((groups, rec) => {
+    const existing = groups.find((group) => group.sku === rec.sku)
+
+    if (existing) {
+      existing.routes.push(rec)
+      return groups
+    }
+
+    groups.push({
+      sku: rec.sku,
+      name: rec.name,
+      routes: [rec],
+    })
+    return groups
+  }, [])
 
   // Get low stock items based on dynamic reorder points from Restock Guidance
   const lowStockItems = stockData
@@ -313,21 +331,31 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
               </TableRow>
             </TableHeader>
             <TableBody>
-              {reorderRecommendations.recommendations.map((rec) => (
-                <TableRow key={`${rec.sku}-${rec.mode}`}>
-                  <TableCell className="font-mono text-sm">{rec.sku}</TableCell>
-                  <TableCell className="font-medium">{rec.name}</TableCell>
-                  <TableCell>{rec.mode}</TableCell>
-                  <TableCell className="text-right">{rec.avgDaily.toFixed(2)}</TableCell>
-                  <TableCell className="text-right">
-                    {rec.leadTimeLabel}
-                  </TableCell>
-                  <TableCell className="text-right font-semibold">
-                    {rec.reorderMin === rec.reorderMax
-                      ? `${rec.reorderMin} units`
-                      : `${rec.reorderMin}-${rec.reorderMax} units`}
-                  </TableCell>
-                </TableRow>
+              {groupedReorderRecommendations.map((group) => (
+                <Fragment key={group.sku}>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    <TableCell className="font-mono text-sm font-semibold">{group.sku}</TableCell>
+                    <TableCell colSpan={5} className="font-semibold">
+                      {group.name}
+                    </TableCell>
+                  </TableRow>
+                  {group.routes.map((rec) => (
+                    <TableRow key={`${rec.sku}-${rec.mode}`}>
+                      <TableCell />
+                      <TableCell />
+                      <TableCell>{rec.mode}</TableCell>
+                      <TableCell className="text-right">{rec.avgDaily.toFixed(2)}</TableCell>
+                      <TableCell className="text-right">
+                        {rec.leadTimeLabel}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">
+                        {rec.reorderMin === rec.reorderMax
+                          ? `${rec.reorderMin} units`
+                          : `${rec.reorderMin}-${rec.reorderMax} units`}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </Fragment>
               ))}
             </TableBody>
           </Table>

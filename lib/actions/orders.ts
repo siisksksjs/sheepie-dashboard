@@ -12,6 +12,7 @@ import { DEFAULT_PACK_SIZE, getPackMultiplier } from "@/lib/products/pack-sizes"
 import { RESTOCK_GUIDANCE_CONFIG } from "@/lib/restock/config"
 import {
   averageLatestLeadTimes,
+  buildGuidanceRouteConfigs,
   buildLeadBufferLabel,
   buildReorderWindow,
 } from "@/lib/restock/guidance"
@@ -1390,11 +1391,71 @@ export async function getReorderRecommendations() {
   const endDate = new Date()
   const days = Math.max(1, Math.floor((endDate.getTime() - startDate.getTime()) / 86400000) + 1)
 
-  // Include Bundle-Cervi to track its impact on component stock
   const configSkus = Array.from(new Set(RESTOCK_GUIDANCE_CONFIG.map((config) => config.sku)))
-  const targetSkus = [...configSkus, "Bundle-Cervi"]
+  const [{ data: restockBatches }, { data: products }] = await Promise.all([
+    supabase
+      .from("inventory_purchase_batches")
+      .select("id, order_date, arrival_date, shipping_mode, restock_status")
+      .eq("restock_status", "arrived")
+      .not("arrival_date", "is", null),
+    supabase
+      .from("products")
+      .select("sku, name, status, is_bundle"),
+  ])
 
-  const [{ data: orders }, { data: restockBatches }, { data: stockRows }, { data: ledgerRows }] = await Promise.all([
+  const typedRestockBatches = (restockBatches || []) as Array<{
+    id: string
+    order_date: string
+    arrival_date: string | null
+    shipping_mode: "air" | "sea" | null
+    restock_status: "in_transit" | "arrived"
+  }>
+  const batchIds = typedRestockBatches.map((batch) => batch.id)
+  const { data: restockItems } = batchIds.length === 0
+    ? { data: [] as Array<{ batch_id: string; sku: string }> }
+    : await supabase
+      .from("inventory_purchase_batch_items")
+      .select("batch_id, sku")
+      .in("batch_id", batchIds)
+
+  const productRows = (products || []) as Array<{
+    sku: string
+    name: string
+    status: "active" | "discontinued"
+    is_bundle: boolean
+  }>
+  const productMap = new Map(productRows.map((product) => [product.sku, product]))
+  const productNamesBySku = new Map(productRows.map((product) => [product.sku, product.name]))
+  const batchMap = new Map(typedRestockBatches.map((batch) => [batch.id, batch]))
+  const allShipmentSamples = (restockItems || []).flatMap((item) => {
+    const batch = batchMap.get(item.batch_id)
+
+    if (!batch) {
+      return []
+    }
+
+    return [{
+      sku: item.sku,
+      shipping_mode: batch.shipping_mode,
+      order_date: batch.order_date,
+      arrival_date: batch.arrival_date,
+    }]
+  })
+  const historySkus = Array.from(new Set((restockItems || []).map((item) => item.sku)))
+    .filter((sku) => {
+      const product = productMap.get(sku)
+      return !product || (product.status === "active" && !product.is_bundle)
+    })
+  const guidanceSkus = Array.from(new Set([...configSkus, ...historySkus]))
+  const routeConfigs = buildGuidanceRouteConfigs({
+    baseConfigs: RESTOCK_GUIDANCE_CONFIG,
+    samples: allShipmentSamples.filter((sample) => guidanceSkus.includes(sample.sku)),
+    productNamesBySku,
+  })
+  // Include Bundle-Cervi to track its impact on component stock.
+  const targetSkus = [...guidanceSkus, "Bundle-Cervi"]
+
+  const [{ data: orders }, { data: stockRows }, { data: ledgerRows }] = await Promise.all([
     supabase
       .from("orders")
       .select("order_date, order_line_items!inner(quantity, pack_size, selling_price, sku)")
@@ -1402,18 +1463,13 @@ export async function getReorderRecommendations() {
       .gte("order_date", startDate.toISOString())
       .in("order_line_items.sku", targetSkus),
     supabase
-      .from("inventory_purchase_batches")
-      .select("id, order_date, arrival_date, shipping_mode, restock_status")
-      .eq("restock_status", "arrived")
-      .not("arrival_date", "is", null),
-    supabase
       .from("stock_on_hand")
       .select("sku, current_stock")
-      .in("sku", configSkus),
+      .in("sku", guidanceSkus),
     supabase
       .from("inventory_ledger")
       .select("entry_date, sku, quantity")
-      .in("sku", configSkus)
+      .in("sku", guidanceSkus)
       .gte("entry_date", startDate.toISOString().slice(0, 10))
       .lte("entry_date", endDate.toISOString().slice(0, 10)),
   ])
@@ -1431,18 +1487,14 @@ export async function getReorderRecommendations() {
     }
   }
 
-  // Bundle-Cervi sales consume Cervi-001 and Calmi-001 components
-  // Add bundle sales to component totals for accurate restock calculation
   const bundleSales = unitsBySku.get("Bundle-Cervi") || 0
-  const cerviTotal = (unitsBySku.get("Cervi-001") || 0) + bundleSales
-  const calmiTotal = (unitsBySku.get("Calmi-001") || 0) + bundleSales
+  const effectiveUnits = new Map<string, number>()
 
-  // Use combined totals for restock calculation
-  const effectiveUnits = new Map<string, number>([
-    ["Cervi-001", cerviTotal],
-    ["Lumi-001", unitsBySku.get("Lumi-001") || 0],
-    ["Calmi-001", calmiTotal],
-  ])
+  for (const sku of guidanceSkus) {
+    const bundleComponentUnits = sku === "Cervi-001" || sku === "Calmi-001" ? bundleSales : 0
+    effectiveUnits.set(sku, (unitsBySku.get(sku) || 0) + bundleComponentUnits)
+  }
+
   const stockBySku = new Map(
     ((stockRows || []) as Array<{ sku: string; current_stock: number }>).map((row) => [
       row.sku,
@@ -1460,40 +1512,7 @@ export async function getReorderRecommendations() {
     deltasBySku.set(row.sku, existing)
   }
 
-  const typedRestockBatches = (restockBatches || []) as Array<{
-    id: string
-    order_date: string
-    arrival_date: string | null
-    shipping_mode: "air" | "sea" | null
-    restock_status: "in_transit" | "arrived"
-  }>
-
-  const batchIds = typedRestockBatches.map((batch) => batch.id)
-  const { data: restockItems } = batchIds.length === 0
-    ? { data: [] as Array<{ batch_id: string; sku: string }> }
-    : await supabase
-      .from("inventory_purchase_batch_items")
-      .select("batch_id, sku")
-      .in("batch_id", batchIds)
-      .in("sku", configSkus)
-
-  const batchMap = new Map(typedRestockBatches.map((batch) => [batch.id, batch]))
-  const shipmentSamples = (restockItems || []).flatMap((item) => {
-    const batch = batchMap.get(item.batch_id)
-
-    if (!batch) {
-      return []
-    }
-
-    return [{
-      sku: item.sku,
-      shipping_mode: batch.shipping_mode,
-      order_date: batch.order_date,
-      arrival_date: batch.arrival_date,
-    }]
-  })
-
-  const recommendations = RESTOCK_GUIDANCE_CONFIG.map((config) => {
+  const recommendations = routeConfigs.map((config) => {
     const unitsSold = effectiveUnits.get(config.sku) || 0
     const inStockDays = calculateInStockDays({
       currentStock: stockBySku.get(config.sku) || 0,
@@ -1505,7 +1524,7 @@ export async function getReorderRecommendations() {
     const learnedLeadDays = averageLatestLeadTimes({
       sku: config.sku,
       shippingMode: config.mode,
-      samples: shipmentSamples,
+      samples: allShipmentSamples,
     })
     const reorderWindow = buildReorderWindow({
       avgDaily,
