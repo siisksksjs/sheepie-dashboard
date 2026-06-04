@@ -495,6 +495,35 @@ describe("dashboard restock guidance integration", () => {
     expect(reorderSection).toContain("buildLeadBufferLabel")
   })
 
+  it("expects reorder recommendations to use the fixed sales average window", async () => {
+    const fs = await import("node:fs/promises")
+    const ordersSource = await fs.readFile("lib/actions/orders.ts", "utf8")
+    const reorderSection = ordersSource.slice(
+      ordersSource.indexOf("export async function getReorderRecommendations"),
+      ordersSource.indexOf("/**", ordersSource.indexOf("export async function getReorderRecommendations")),
+    )
+
+    expect(reorderSection).toContain('const recommendationStartDay = "2026-06-03"')
+    expect(reorderSection).toContain('const recommendationEndDay = "2026-06-04"')
+    expect(reorderSection).toContain(".lte(\"order_date\", endDateInclusive)")
+    expect(reorderSection).not.toContain("const endDate = new Date()")
+  })
+
+  it("expects reorder recommendations to expand configured bundles into component sales", async () => {
+    const fs = await import("node:fs/promises")
+    const ordersSource = await fs.readFile("lib/actions/orders.ts", "utf8")
+    const reorderSection = ordersSource.slice(
+      ordersSource.indexOf("export async function getReorderRecommendations"),
+      ordersSource.indexOf("/**", ordersSource.indexOf("export async function getReorderRecommendations")),
+    )
+
+    expect(ordersSource).toContain('import { buildEffectiveUnitsBySku } from "@/lib/restock/effective-units"')
+    expect(reorderSection).toContain('from("bundle_compositions")')
+    expect(reorderSection).toContain('select("bundle_sku, component_sku, quantity")')
+    expect(reorderSection).toContain("buildEffectiveUnitsBySku")
+    expect(reorderSection).not.toContain("const bundleSales")
+  })
+
   it("expects the dashboard to render the computed lead-time label", async () => {
     const fs = await import("node:fs/promises")
     const dashboardSource = await fs.readFile("app/(dashboard)/dashboard/page.tsx", "utf8")

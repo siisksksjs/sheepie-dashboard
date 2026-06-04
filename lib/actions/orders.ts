@@ -23,6 +23,7 @@ import {
   createMarketplaceSettlementReversalEntry,
   isSettledOrderStatus,
 } from "@/lib/marketplace-settlements"
+import { buildEffectiveUnitsBySku } from "@/lib/restock/effective-units"
 
 export async function getOrders(filters?: {
   status?: OrderStatus
@@ -1387,8 +1388,11 @@ export const getReturnSummary = cache(async (year?: number, month?: number) => {
 
 export async function getReorderRecommendations() {
   const supabase = await createClient()
-  const startDate = new Date("2025-12-27T00:00:00Z")
-  const endDate = new Date()
+  const recommendationStartDay = "2026-06-03"
+  const recommendationEndDay = "2026-06-04"
+  const startDate = new Date(`${recommendationStartDay}T00:00:00.000Z`)
+  const endDate = new Date(`${recommendationEndDay}T00:00:00.000Z`)
+  const endDateInclusive = `${recommendationEndDay}T23:59:59.999Z`
   const days = Math.max(1, Math.floor((endDate.getTime() - startDate.getTime()) / 86400000) + 1)
 
   const configSkus = Array.from(new Set(RESTOCK_GUIDANCE_CONFIG.map((config) => config.sku)))
@@ -1452,8 +1456,23 @@ export async function getReorderRecommendations() {
     samples: allShipmentSamples.filter((sample) => guidanceSkus.includes(sample.sku)),
     productNamesBySku,
   })
-  // Include Bundle-Cervi to track its impact on component stock.
-  const targetSkus = [...guidanceSkus, "Bundle-Cervi"]
+  const { data: bundleCompositions } = guidanceSkus.length === 0
+    ? { data: [] as Array<{ bundle_sku: string; component_sku: string; quantity: number }> }
+    : await supabase
+      .from("bundle_compositions")
+      .select("bundle_sku, component_sku, quantity")
+      .in("component_sku", guidanceSkus)
+  const compositionRows = (bundleCompositions || []) as Array<{
+    bundle_sku: string
+    component_sku: string
+    quantity: number
+  }>
+  // Keep Bundle-Cervi as a legacy fallback if it has no configured composition.
+  const targetSkus = Array.from(new Set([
+    ...guidanceSkus,
+    ...compositionRows.map((composition) => composition.bundle_sku),
+    "Bundle-Cervi",
+  ]))
 
   const [{ data: orders }, { data: stockRows }, { data: ledgerRows }] = await Promise.all([
     supabase
@@ -1461,6 +1480,7 @@ export async function getReorderRecommendations() {
       .select("order_date, order_line_items!inner(quantity, pack_size, selling_price, sku)")
       .in("status", ["paid", "shipped"])
       .gte("order_date", startDate.toISOString())
+      .lte("order_date", endDateInclusive)
       .in("order_line_items.sku", targetSkus),
     supabase
       .from("stock_on_hand")
@@ -1470,30 +1490,21 @@ export async function getReorderRecommendations() {
       .from("inventory_ledger")
       .select("entry_date, sku, quantity")
       .in("sku", guidanceSkus)
-      .gte("entry_date", startDate.toISOString().slice(0, 10))
-      .lte("entry_date", endDate.toISOString().slice(0, 10)),
+      .gte("entry_date", recommendationStartDay)
+      .lte("entry_date", recommendationEndDay),
   ])
 
-  // Track units sold by SKU
-  const unitsBySku = new Map<string, number>()
-  for (const sku of targetSkus) unitsBySku.set(sku, 0)
-
-  for (const order of orders || []) {
-    const lineItems = (order as any).order_line_items || []
-    for (const item of lineItems) {
-      if (item.selling_price > 0) {
-        unitsBySku.set(item.sku, (unitsBySku.get(item.sku) || 0) + getOrderLineUnits(item))
-      }
-    }
-  }
-
-  const bundleSales = unitsBySku.get("Bundle-Cervi") || 0
-  const effectiveUnits = new Map<string, number>()
-
-  for (const sku of guidanceSkus) {
-    const bundleComponentUnits = sku === "Cervi-001" || sku === "Calmi-001" ? bundleSales : 0
-    effectiveUnits.set(sku, (unitsBySku.get(sku) || 0) + bundleComponentUnits)
-  }
+  const effectiveUnits = buildEffectiveUnitsBySku({
+    guidanceSkus,
+    lineItems: (orders || []).flatMap((order) => (order as any).order_line_items || []),
+    bundleCompositions: compositionRows,
+    legacyBundleMappings: [
+      {
+        bundleSku: "Bundle-Cervi",
+        componentSkus: ["Cervi-001", "Calmi-001"],
+      },
+    ],
+  })
 
   const stockBySku = new Map(
     ((stockRows || []) as Array<{ sku: string; current_stock: number }>).map((row) => [
@@ -1516,8 +1527,8 @@ export async function getReorderRecommendations() {
     const unitsSold = effectiveUnits.get(config.sku) || 0
     const inStockDays = calculateInStockDays({
       currentStock: stockBySku.get(config.sku) || 0,
-      startDate: startDate.toISOString().slice(0, 10),
-      endDate: endDate.toISOString().slice(0, 10),
+      startDate: recommendationStartDay,
+      endDate: recommendationEndDay,
       deltas: deltasBySku.get(config.sku) || [],
     })
     const avgDaily = unitsSold / Math.max(1, inStockDays)
@@ -1557,8 +1568,8 @@ export async function getReorderRecommendations() {
       leadTimeLabel,
       reorderMin: reorderWindow.reorderMin,
       reorderMax: reorderWindow.reorderMax,
-      startDate: startDate.toISOString().slice(0, 10),
-      endDate: endDate.toISOString().slice(0, 10),
+      startDate: recommendationStartDay,
+      endDate: recommendationEndDay,
     }
   })
 
