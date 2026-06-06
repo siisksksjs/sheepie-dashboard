@@ -210,6 +210,18 @@ function buildPackAwareOrderReference(orderLabel: string, packSize?: OrderLineIt
     : `${orderLabel} (${effectivePackSize})`
 }
 
+function getJakartaDateOnly(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date)
+  const partMap = new Map(parts.map((part) => [part.type, part.value]))
+
+  return `${partMap.get("year")}-${partMap.get("month")}-${partMap.get("day")}`
+}
+
 export async function buildDuplicateOrderInput({
   sourceOrder,
   sourceLineItems,
@@ -1388,8 +1400,8 @@ export const getReturnSummary = cache(async (year?: number, month?: number) => {
 
 export async function getReorderRecommendations() {
   const supabase = await createClient()
-  const recommendationStartDay = "2026-06-03"
-  const recommendationEndDay = "2026-06-04"
+  const recommendationStartDay = "2026-06-01"
+  const recommendationEndDay = getJakartaDateOnly(new Date())
   const startDate = new Date(`${recommendationStartDay}T00:00:00.000Z`)
   const endDate = new Date(`${recommendationEndDay}T00:00:00.000Z`)
   const endDateInclusive = `${recommendationEndDay}T23:59:59.999Z`

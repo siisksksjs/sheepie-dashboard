@@ -503,10 +503,10 @@ describe("dashboard restock guidance integration", () => {
       ordersSource.indexOf("/**", ordersSource.indexOf("export async function getReorderRecommendations")),
     )
 
-    expect(reorderSection).toContain('const recommendationStartDay = "2026-06-03"')
-    expect(reorderSection).toContain('const recommendationEndDay = "2026-06-04"')
+    expect(reorderSection).toContain('const recommendationStartDay = "2026-06-01"')
+    expect(reorderSection).toContain("const recommendationEndDay = getJakartaDateOnly(new Date())")
     expect(reorderSection).toContain(".lte(\"order_date\", endDateInclusive)")
-    expect(reorderSection).not.toContain("const endDate = new Date()")
+    expect(reorderSection).not.toContain('const recommendationEndDay = "2026-06-04"')
   })
 
   it("expects reorder recommendations to expand configured bundles into component sales", async () => {
