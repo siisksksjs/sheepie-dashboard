@@ -193,7 +193,7 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 CREATE TRIGGER enqueue_restock_alert_events_after_insert
 AFTER INSERT ON inventory_ledger

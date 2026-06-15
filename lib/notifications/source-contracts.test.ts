@@ -37,6 +37,8 @@ describe("notification migration contracts", () => {
     expect(source).toMatch(/status text not null default 'pending'/i)
     expect(source).toMatch(/payload jsonb not null default '\{\}'::jsonb/i)
     expect(source).toMatch(/create or replace function enqueue_restock_alert_events/i)
+    expect(source).toMatch(/security definer/i)
+    expect(source).toMatch(/set search_path = public/i)
     expect(source).toMatch(/create trigger enqueue_restock_alert_events_after_insert/i)
     expect(source).toMatch(/after insert on inventory_ledger/i)
     expect(source).toMatch(/'Cervi-001'::TEXT, 'sea'::TEXT/i)
