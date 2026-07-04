@@ -21,7 +21,7 @@ describe("notification event types", () => {
     expectTypeOf(event.payload).toEqualTypeOf<Record<string, unknown>>()
     expectTypeOf(event.sent_at).toEqualTypeOf<string | null>()
     expectTypeOf(status).toEqualTypeOf<"pending" | "sending" | "sent" | "failed">()
-    expectTypeOf(type).toEqualTypeOf<"restock_alert" | "weekly_sales_report" | "monthly_sales_report">()
+    expectTypeOf(type).toEqualTypeOf<"restock_alert" | "weekly_sales_report" | "monthly_sales_report" | "daily_kpi_report">()
     expect(source).toContain("export type NotificationEventStatus")
     expect(source).toContain("export type NotificationEvent = {")
   })
@@ -56,11 +56,23 @@ describe("notification edge function source contracts", () => {
     const resendSource = await readFile("supabase/functions/_shared/resend.ts", "utf8")
     const notificationSource = await readFile("supabase/functions/send-notification-events/index.ts", "utf8")
     const reportSource = await readFile("supabase/functions/send-sales-report/index.ts", "utf8")
+    const kpiReportSource = await readFile("supabase/functions/send-daily-kpi-report/index.ts", "utf8")
 
     expect(authSource).toContain("assertAuthorizedRequest")
     expect(resendSource).toContain("sendEmail")
     expect(notificationSource).toContain("notification_events")
     expect(reportSource).toContain("weekly_sales_report")
     expect(reportSource).toContain("monthly_sales_report")
+    expect(kpiReportSource).toContain("daily_kpi_report")
+    expect(kpiReportSource).toContain("monthly_kpi_targets")
+  })
+
+  it("defines the daily KPI report migration and midnight Jakarta cron", async () => {
+    const eventTypeMigration = await readFile("supabase/migrations/20260704_add_daily_kpi_report_event_type.sql", "utf8")
+    const scheduleMigration = await readFile("supabase/migrations/20260704_schedule_daily_kpi_email.sql", "utf8")
+
+    expect(eventTypeMigration).toContain("daily_kpi_report")
+    expect(scheduleMigration).toContain("send-daily-kpi-report")
+    expect(scheduleMigration).toContain("'0 17 * * *'")
   })
 })

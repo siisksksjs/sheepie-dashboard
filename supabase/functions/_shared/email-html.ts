@@ -33,6 +33,28 @@ type LowStockRow = {
   currentStock: number
 }
 
+type DailyKpiProductRow = {
+  sku: string
+  name: string
+  targetUnits: number
+  actualUnits: number
+  targetRevenue: number
+  actualRevenue: number
+  remainingUnits: number
+  remainingRevenue: number
+  todayUnitPace: number
+  todayRevenuePace: number
+  unitProgress: number
+  revenueProgress: number
+}
+
+type DailySalesEmailRow = {
+  label: string
+  channel: string
+  units: number
+  revenue: number
+}
+
 type RestockEmailSkuGroup = {
   sku: string
   productName: string
@@ -54,6 +76,43 @@ function formatCurrency(value: number) {
     currency: "IDR",
     maximumFractionDigits: 0,
   }).format(value).replace(/\s/g, "")
+}
+
+function formatPercent(value: number) {
+  return `${Math.max(0, Math.min(value, 100)).toFixed(0)}%`
+}
+
+function metricCard(label: string, value: string, note = "") {
+  return `
+    <td style="width:50%;padding:6px;">
+      <div style="background:#f4f8fb;border:1px solid #dbe8f5;border-radius:14px;padding:14px;">
+        <div style="font-size:12px;color:#64748b;margin-bottom:6px;">${escapeHtml(label)}</div>
+        <div style="font-size:22px;line-height:1.2;font-weight:800;color:#213368;">${escapeHtml(value)}</div>
+        ${note ? `<div style="font-size:12px;color:#64748b;margin-top:5px;">${escapeHtml(note)}</div>` : ""}
+      </div>
+    </td>
+  `
+}
+
+function progressBar(value: number, label: string) {
+  return `
+    <div style="margin:8px 0 0;">
+      <div style="height:10px;background:#dbe8f5;border-radius:999px;overflow:hidden;">
+        <div style="height:10px;width:${formatPercent(value)};background:#213368;border-radius:999px;"></div>
+      </div>
+      <div style="font-size:12px;color:#64748b;margin-top:5px;">${escapeHtml(label)} · ${formatPercent(value)}</div>
+    </div>
+  `
+}
+
+function horizontalBar(value: number, maxValue: number) {
+  const width = maxValue > 0 ? Math.max(4, Math.min((value / maxValue) * 100, 100)) : 0
+
+  return `
+    <div style="height:9px;background:#dbe8f5;border-radius:999px;overflow:hidden;">
+      <div style="height:9px;width:${width.toFixed(0)}%;background:#213368;border-radius:999px;"></div>
+    </div>
+  `
 }
 
 function formatMode(mode: ShippingMode) {
@@ -200,5 +259,107 @@ export function renderSalesReportEmailHtml(input: {
     <table style="width:100%;border-collapse:collapse;background:#ffffff;border:1px solid #e5e7eb;margin-bottom:18px;"><tbody>${channelRows}</tbody></table>
     <h2 style="font-size:18px;">Low stock</h2>
     <ul style="background:#ffffff;border:1px solid #e5e7eb;margin:0;padding:14px 14px 14px 32px;">${lowStockRows || "<li>No monitored SKU routes are below threshold.</li>"}</ul>
+  `)
+}
+
+export function renderDailyKpiReportEmailHtml(input: {
+  title: string
+  dateLabel: string
+  monthLabel: string
+  daysRemaining: number
+  totals: {
+    targetUnits: number
+    actualUnits: number
+    targetRevenue: number
+    actualRevenue: number
+    remainingUnits: number
+    remainingRevenue: number
+    todayUnitPace: number
+    todayRevenuePace: number
+    unitProgress: number
+    revenueProgress: number
+    gmvProgress: number
+  }
+  rows: DailyKpiProductRow[]
+  dailySales: {
+    dateLabel: string
+    totalOrders: number
+    totalUnits: number
+    totalRevenue: number
+    items: DailySalesEmailRow[]
+  }
+}) {
+  const productCards = input.rows.map((row) => `
+    <div style="margin:0 0 12px;padding:14px;background:#ffffff;border:1px solid #dbe8f5;border-radius:14px;">
+      <div style="font-size:15px;font-weight:800;color:#213368;margin-bottom:8px;">${escapeHtml(row.name)}</div>
+      <table style="width:100%;border-collapse:collapse;">
+        <tr>
+          <td style="padding:0 8px 0 0;color:#64748b;font-size:12px;">Units</td>
+          <td style="padding:0;text-align:right;color:#213368;font-weight:700;">${row.actualUnits} / ${row.targetUnits}</td>
+        </tr>
+        <tr>
+          <td colspan="2">${progressBar(row.unitProgress, "Unit progress")}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 8px 0 0;color:#64748b;font-size:12px;">GMV</td>
+          <td style="padding:10px 0 0;text-align:right;color:#213368;font-weight:700;">${formatCurrency(row.actualRevenue)} / ${formatCurrency(row.targetRevenue)}</td>
+        </tr>
+        <tr>
+          <td colspan="2">${progressBar(row.revenueProgress, "GMV progress")}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 8px 0 0;color:#64748b;font-size:12px;">Today pace</td>
+          <td style="padding:10px 0 0;text-align:right;color:#213368;font-weight:700;">${row.todayUnitPace} units · ${formatCurrency(row.todayRevenuePace)}</td>
+        </tr>
+      </table>
+    </div>
+  `).join("")
+
+  const maxDailyRevenue = Math.max(...input.dailySales.items.map((item) => item.revenue), 0)
+  const dailySalesBars = input.dailySales.items.length > 0
+    ? input.dailySales.items.map((item) => `
+      <div style="margin:0 0 12px;">
+        <table style="width:100%;border-collapse:collapse;margin-bottom:5px;">
+          <tr>
+            <td style="font-size:13px;font-weight:700;color:#213368;">${escapeHtml(item.label)}</td>
+            <td style="font-size:13px;text-align:right;color:#213368;font-weight:700;">${formatCurrency(item.revenue)}</td>
+          </tr>
+          <tr>
+            <td style="font-size:12px;color:#64748b;">${escapeHtml(item.channel)}</td>
+            <td style="font-size:12px;text-align:right;color:#64748b;">${item.units} units</td>
+          </tr>
+        </table>
+        ${horizontalBar(item.revenue, maxDailyRevenue)}
+      </div>
+    `).join("")
+    : `<div style="padding:14px;background:#f4f8fb;border:1px dashed #dbe8f5;border-radius:14px;color:#64748b;">No paid or shipped sales recorded today.</div>`
+
+  return pageShell(input.title, `
+    <h1 style="margin:0 0 4px;font-size:24px;line-height:1.25;color:#213368;">${escapeHtml(input.title)}</h1>
+    <p style="margin:0 0 18px;color:#64748b;">${escapeHtml(input.dateLabel)} · ${escapeHtml(input.monthLabel)} · ${input.daysRemaining} day${input.daysRemaining === 1 ? "" : "s"} remaining including today</p>
+
+    <table style="width:100%;border-collapse:collapse;margin:0 -6px 18px;">
+      <tbody>
+        <tr>
+          ${metricCard("Current GMV", formatCurrency(input.totals.actualRevenue), `${formatPercent(input.totals.gmvProgress)} of target`)}
+          ${metricCard("Target GMV", formatCurrency(input.totals.targetRevenue))}
+        </tr>
+        <tr>
+          ${metricCard("Yesterday sales", formatCurrency(input.dailySales.totalRevenue), `${input.dailySales.totalOrders} orders · ${input.dailySales.totalUnits} units`)}
+          ${metricCard("Today pace needed", formatCurrency(input.totals.todayRevenuePace), `${input.totals.todayUnitPace} units`)}
+        </tr>
+      </tbody>
+    </table>
+
+    <div style="margin:0 0 18px;padding:16px;background:#f4f8fb;border:1px solid #dbe8f5;border-radius:16px;">
+      <h2 style="margin:0 0 4px;font-size:18px;color:#213368;">Yesterday Sales</h2>
+      <div style="margin:0 0 12px;font-size:12px;color:#64748b;">${escapeHtml(input.dailySales.dateLabel)}</div>
+      ${dailySalesBars}
+    </div>
+
+    <div style="margin:0 0 18px;padding:16px;background:#f4f8fb;border:1px solid #dbe8f5;border-radius:16px;">
+      <h2 style="margin:0 0 12px;font-size:18px;color:#213368;">Product KPI</h2>
+      ${productCards}
+    </div>
   `)
 }

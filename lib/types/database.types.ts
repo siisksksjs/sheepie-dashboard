@@ -53,6 +53,7 @@ export type NotificationEventType =
   | 'restock_alert'
   | 'weekly_sales_report'
   | 'monthly_sales_report'
+  | 'daily_kpi_report'
 
 export type NotificationEvent = {
   id: string

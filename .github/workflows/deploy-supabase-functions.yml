@@ -1,0 +1,32 @@
+name: Deploy Supabase Edge Functions
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "supabase/functions/**"
+      - ".github/workflows/deploy-supabase-functions.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate secrets
+        run: |
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_PROJECT_REF"
+
+      - name: Deploy daily KPI report function
+        run: |
+          npx supabase@2.109.0 functions deploy send-daily-kpi-report \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --no-verify-jwt
