@@ -2,8 +2,6 @@ import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { MonthlyAdsReportBundle } from "./reporting"
-
 afterEach(() => {
   vi.clearAllMocks()
   vi.resetModules()
@@ -45,86 +43,6 @@ const baseAdPerformance = {
   active_campaigns_count: 0,
 }
 
-const baseMonthlyAds: MonthlyAdsReportBundle = {
-  month: "2026-04-01",
-  skuSummaries: [
-    {
-      month: "2026-04-01",
-      sku: "LUMI",
-      target_units: 60,
-      actual_units: 42,
-      ads_active_channel_units: 30,
-      organic_channel_units: 12,
-      total_ads_spent: 2100000,
-      total_budget_cap: 3000000,
-      gross_profit: 4500000,
-      profit_after_ads: 2400000,
-      channels: [],
-    },
-  ],
-  channelBreakdown: [
-    {
-      month: "2026-04-01",
-      sku: "LUMI",
-      product_name: "Lumi Oil",
-      product_variant: "30ml",
-      channel: "shopee",
-      classification: "ads-active",
-      units: 30,
-      ads_spent: 0,
-      budget_cap: 3000000,
-      revenue: 6000000,
-      cost: 1500000,
-      profit: 4500000,
-      uses_shared_budget: false,
-      profit_after_ads: 2400000,
-      actual_spend_missing: true,
-    },
-    {
-      month: "2026-04-01",
-      sku: "LUMI",
-      product_name: "Lumi Oil",
-      product_variant: "30ml",
-      channel: "tokopedia",
-      classification: "organic",
-      units: 12,
-      ads_spent: 0,
-      budget_cap: 0,
-      revenue: 1800000,
-      cost: 600000,
-      profit: 1200000,
-      uses_shared_budget: false,
-      profit_after_ads: 1200000,
-      actual_spend_missing: false,
-    },
-  ],
-  missingSpendScopes: [
-    {
-      month: "2026-04-01",
-      sku: "LUMI",
-      channels: ["shopee"],
-      budget_cap: 3000000,
-      product_name: "Lumi Oil",
-      product_variant: "30ml",
-    },
-  ],
-  monthlySpendRows: [],
-  totals: {
-    total_target_units: 60,
-    total_actual_units: 42,
-    ads_active_channel_units: 30,
-    organic_channel_units: 12,
-    total_ads_spent: 2100000,
-    total_budget_cap: 3000000,
-    profit_before_ads: 4500000,
-    profit_after_ads: 2400000,
-    target_achievement_percent: 70,
-    has_missing_spend: true,
-    ads_active_rows_missing_spend: 1,
-  },
-  load_error: null,
-}
-
 async function renderReportsPage(input: {
   searchParams: Promise<{ year?: string; month?: string }>
 }) {
@@ -134,7 +52,6 @@ async function renderReportsPage(input: {
 
   const getReportsBundle = vi.fn().mockResolvedValue(baseReportsBundle)
   const getAdPerformanceSummary = vi.fn().mockResolvedValue(baseAdPerformance)
-  const getMonthlyAdsReportBundle = vi.fn().mockResolvedValue(baseMonthlyAds)
   const reportsClientSpy = vi.fn()
 
   vi.doMock("@/lib/actions/orders", () => ({
@@ -142,7 +59,6 @@ async function renderReportsPage(input: {
   }))
   vi.doMock("@/lib/actions/ad-campaigns", () => ({
     getAdPerformanceSummary,
-    getMonthlyAdsReportBundle,
   }))
   vi.doMock("../../app/(dashboard)/reports/reports-client", () => ({
     ReportsClient: (props: Record<string, unknown>) => {
@@ -157,7 +73,6 @@ async function renderReportsPage(input: {
   return {
     html,
     getReportsBundle,
-    getMonthlyAdsReportBundle,
     reportsClientSpy,
   }
 }
@@ -290,7 +205,6 @@ describe("reports monthly ads contract", () => {
 
     expect(invalidResult.html).toContain("Reports client")
     expect(invalidResult.getReportsBundle).toHaveBeenCalledWith(undefined, undefined)
-    expect(invalidResult.getMonthlyAdsReportBundle).toHaveBeenCalledWith("2026-04-01")
     expect(invalidResult.reportsClientSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         selectedYear: undefined,
@@ -317,17 +231,15 @@ describe("reports monthly ads contract", () => {
     })
 
     expect(result.getReportsBundle).toHaveBeenCalledWith(2025, 2)
-    expect(result.getMonthlyAdsReportBundle).toHaveBeenCalledWith("2025-02-01")
     expect(result.reportsClientSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        initialMonthlyAds: baseMonthlyAds,
         selectedYear: 2025,
         selectedMonth: 2,
       }),
     )
   })
 
-  it("renders the monthly ads section and keyboard-accessible heatmap cells", async () => {
+  it("hides the monthly ads section and keeps keyboard-accessible heatmap cells", async () => {
     const ReportsClient = await loadReportsClient()
 
     const html = renderToStaticMarkup(
@@ -348,7 +260,6 @@ describe("reports monthly ads contract", () => {
         },
         initialChannelProduct: baseReportsBundle.channelProduct,
         initialAdPerformance: baseAdPerformance,
-        initialMonthlyAds: baseMonthlyAds,
         initialReturnSummary: baseReportsBundle.returns,
         initialCalendarDetails: {
           byDate: {
@@ -365,16 +276,11 @@ describe("reports monthly ads contract", () => {
       }),
     )
 
-    expect(html).toContain("Monthly Ads Profitability")
-    expect(html).toContain("Profit Before Ads")
-    expect(html).toContain("Profit After Ads")
-    expect(html).toContain("Ads-Active")
-    expect(html).toContain("Organic")
+    expect(html).not.toContain("Monthly Ads Profitability")
     expect(html).toContain('label for="year"')
     expect(html).toContain('button id="year"')
     expect(html).toContain('label for="month"')
     expect(html).toContain('button id="month"')
-    expect(html).toContain("Spend rows still missing for ads-active channel scopes")
     expect(html).toContain('aria-label="Open details for 2026-04-01: 2 orders, 3 units, Rp400 revenue"')
     expect(html).toContain(">1<")
   })

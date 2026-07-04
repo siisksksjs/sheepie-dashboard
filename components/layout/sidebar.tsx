@@ -15,7 +15,8 @@ import {
   History,
   LogOut,
   Menu,
-  X
+  X,
+  Goal,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
@@ -52,6 +53,11 @@ const navigation = [
     name: "Reports",
     href: "/reports",
     icon: BarChart3,
+  },
+  {
+    name: "KPI",
+    href: "/kpi",
+    icon: Goal,
   },
   {
     name: "Ad Campaigns",

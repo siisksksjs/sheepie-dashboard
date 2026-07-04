@@ -1,28 +1,19 @@
 import { getReportsBundle } from "@/lib/actions/orders"
-import {
-  getAdPerformanceSummary,
-  getMonthlyAdsReportBundle,
-} from "@/lib/actions/ad-campaigns"
+import { getAdPerformanceSummary } from "@/lib/actions/ad-campaigns"
 import { ReportsClient } from "./reports-client"
 
 type SearchParams = Promise<{ year?: string; month?: string }>
 
 export default async function ReportsPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams
-  const currentYear = new Date().getFullYear()
-  const currentMonth = new Date().getMonth() + 1
 
   const selectedYear = parseYearParam(params.year)
   const selectedMonth = selectedYear ? parseMonthParam(params.month) : undefined
-  const reportYear = selectedYear ?? currentYear
-  const reportMonthNumber = selectedMonth ?? currentMonth
-  const reportMonth = `${reportYear}-${String(reportMonthNumber).padStart(2, "0")}-01`
 
-  const [{ overview, monthly, channelProduct, returns, calendar }, adPerf, monthlyAds] =
+  const [{ overview, monthly, channelProduct, returns, calendar }, adPerf] =
     await Promise.all([
       getReportsBundle(selectedYear, selectedMonth),
       getAdPerformanceSummary(),
-      getMonthlyAdsReportBundle(reportMonth),
     ])
 
   return (
@@ -31,7 +22,6 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
       initialMonthly={monthly}
       initialChannelProduct={channelProduct}
       initialAdPerformance={adPerf}
-      initialMonthlyAds={monthlyAds}
       initialReturnSummary={returns}
       initialCalendarDetails={calendar}
       selectedYear={selectedYear}

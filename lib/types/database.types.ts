@@ -114,6 +114,16 @@ export type ProductChannelPackPrice = {
   updated_at: string
 }
 
+export type MonthlyKpiTarget = {
+  id: string
+  month: string
+  sku: string
+  target_units: number
+  target_revenue: number
+  created_at: string
+  updated_at: string
+}
+
 export type BundleComposition = {
   id: string
   bundle_sku: string
