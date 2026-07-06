@@ -2,16 +2,6 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
 import { CalendarDays, Save, TrendingUp } from "lucide-react"
 import type { KpiWorkspace } from "@/lib/actions/kpi"
 import { saveMonthlyKpiTargets } from "@/lib/actions/kpi"
@@ -56,14 +46,7 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
     }
   }, [rows])
 
-  const chartData = rows.map((row) => ({
-    product: row.variant ? `${row.name} - ${row.variant}` : row.name,
-    sku: row.sku,
-    targetUnits: row.target_units,
-    actualUnits: row.actual_units,
-    targetRevenue: row.target_revenue,
-    actualRevenue: row.actual_revenue,
-  }))
+  const monthPacing = getMonthPacing(month)
 
   const updateRow = (sku: string, field: "target_units" | "target_revenue", value: string) => {
     const parsed = Number(value)
@@ -182,47 +165,62 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
         <MetricCard title="Actual Revenue" value={formatCurrency(totals.actual_revenue)} />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Units by Product</CardTitle>
-            <CardDescription>Target versus actual units sold.</CardDescription>
-          </CardHeader>
-          <CardContent className="h-[360px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="sku" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="targetUnits" name="Target" fill="#3b82f6" />
-                <Bar dataKey="actualUnits" name="Actual" fill="#10b981" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>SKU Monthly Pace</CardTitle>
+          <CardDescription>
+            Unit progress by SKU against the expected pace for day {monthPacing.elapsedDays} of {monthPacing.daysInMonth}.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {rows.map((row) => {
+            const status = getPaceStatus(row, monthPacing)
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Revenue by Product</CardTitle>
-            <CardDescription>Target versus actual monthly revenue.</CardDescription>
-          </CardHeader>
-          <CardContent className="h-[360px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="sku" />
-                <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} />
-                <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-                <Legend />
-                <Bar dataKey="targetRevenue" name="Target" fill="#6366f1" />
-                <Bar dataKey="actualRevenue" name="Actual" fill="#f59e0b" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      </div>
+            return (
+              <div key={row.sku} className="rounded-lg border bg-card p-4">
+                <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="text-lg font-semibold">{formatProductShortName(row).replace(" | Units Sold", "")}</div>
+                    <div className="text-sm text-muted-foreground">{row.sku}</div>
+                  </div>
+                  <div className={`rounded-full px-3 py-1 text-sm font-semibold ${status.className}`}>
+                    {status.label}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <ProgressRow
+                    label="Units sold"
+                    actual={row.actual_units}
+                    target={row.target_units}
+                    value={getProgress(row.actual_units, row.target_units)}
+                    valueLabel={`${row.actual_units.toLocaleString()} / ${row.target_units.toLocaleString()} units`}
+                  />
+                  <ProgressRow
+                    label="Revenue"
+                    actual={row.actual_revenue}
+                    target={row.target_revenue}
+                    value={getProgress(row.actual_revenue, row.target_revenue)}
+                    valueLabel={`${formatCurrency(row.actual_revenue)} / ${formatCurrency(row.target_revenue)}`}
+                  />
+                </div>
+
+                <div className="mt-4 grid gap-3 text-sm text-muted-foreground md:grid-cols-3">
+                  <div>
+                    Expected by today: <span className="font-semibold text-foreground">{status.requiredByToday.toLocaleString()} units</span>
+                  </div>
+                  <div>
+                    Monthly target: <span className="font-semibold text-foreground">{row.target_units.toLocaleString()} units</span>
+                  </div>
+                  <div>
+                    Remaining: <span className="font-semibold text-foreground">{Math.max(0, row.target_units - row.actual_units).toLocaleString()} units</span>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -299,6 +297,33 @@ function MetricCard({ title, value }: { title: string; value: string }) {
         <div className="text-2xl font-bold leading-tight break-words tabular-nums">{value}</div>
       </CardContent>
     </Card>
+  )
+}
+
+function ProgressRow({
+  label,
+  value,
+  valueLabel,
+}: {
+  label: string
+  actual: number
+  target: number
+  value: number
+  valueLabel: string
+}) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-4 text-sm">
+        <span className="font-medium text-muted-foreground">{label}</span>
+        <span className="font-semibold text-foreground">{valueLabel}</span>
+      </div>
+      <div className="h-3 overflow-hidden rounded-full bg-[#dbe8f5]">
+        <div
+          className="h-full rounded-full bg-primary transition-all"
+          style={{ width: `${Math.max(0, Math.min(value, 100))}%` }}
+        />
+      </div>
+    </div>
   )
 }
 
@@ -388,6 +413,57 @@ function getProgress(actual: number, target: number) {
   }
 
   return Math.min((actual / target) * 100, 100)
+}
+
+function getMonthPacing(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number)
+  const today = new Date()
+  const selectedMonthStart = new Date(year, monthNumber - 1, 1)
+  const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+  const daysInMonth = new Date(year, monthNumber, 0).getDate()
+  let elapsedDays = today.getDate()
+
+  if (selectedMonthStart < currentMonthStart) {
+    elapsedDays = daysInMonth
+  }
+
+  if (selectedMonthStart > currentMonthStart) {
+    elapsedDays = 0
+  }
+
+  return {
+    daysInMonth,
+    elapsedDays: Math.max(0, Math.min(elapsedDays, daysInMonth)),
+  }
+}
+
+function getPaceStatus(row: EditableRow, pacing: { elapsedDays: number; daysInMonth: number }) {
+  const requiredByToday = pacing.elapsedDays <= 0
+    ? 0
+    : Math.ceil((row.target_units * pacing.elapsedDays) / pacing.daysInMonth)
+  const unitDelta = row.actual_units - requiredByToday
+
+  if (unitDelta < 0) {
+    return {
+      label: `Behind by ${Math.abs(unitDelta).toLocaleString()} units`,
+      requiredByToday,
+      className: "bg-destructive/10 text-destructive",
+    }
+  }
+
+  if (unitDelta > 0) {
+    return {
+      label: `In front by ${unitDelta.toLocaleString()} units`,
+      requiredByToday,
+      className: "bg-success/10 text-success",
+    }
+  }
+
+  return {
+    label: "On track",
+    requiredByToday,
+    className: "bg-primary/10 text-primary",
+  }
 }
 
 function formatMonthName(month: string) {
