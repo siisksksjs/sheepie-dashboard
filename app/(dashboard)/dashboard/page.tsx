@@ -13,13 +13,6 @@ import Link from "next/link"
 import { Fragment } from "react"
 import { DateFilter } from "./date-filter"
 
-const channelLabels: Record<string, string> = {
-  shopee: "Shopee",
-  tokopedia: "Tokopedia",
-  tiktok: "TikTok",
-  offline: "Offline",
-}
-
 type SearchParams = Promise<{ date?: string }>
 
 export default async function DashboardPage({ searchParams }: { searchParams: SearchParams }) {
@@ -216,21 +209,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
                 <TableRow>
                   <TableHead>Product</TableHead>
                   <TableHead className="text-right">Quantity</TableHead>
-                  <TableHead className="text-right">Revenue</TableHead>
-                  <TableHead>Platform</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {dailySales.items.map((item) => (
-                  <TableRow key={`${item.sku}-${item.platform}`}>
+                  <TableRow key={item.sku}>
                     <TableCell className="font-medium">{item.productName}</TableCell>
                     <TableCell className="text-right font-semibold">{item.quantity}</TableCell>
-                    <TableCell className="text-right font-semibold">{formatCurrency(item.revenue)}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">
-                        {channelLabels[item.platform] || item.platform}
-                      </Badge>
-                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

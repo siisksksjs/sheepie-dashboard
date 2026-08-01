@@ -24,6 +24,10 @@ import {
   isSettledOrderStatus,
 } from "@/lib/marketplace-settlements"
 import { buildEffectiveUnitsBySku } from "@/lib/restock/effective-units"
+import {
+  buildDailySalesSummary,
+  type DailyProductSalesItem,
+} from "@/lib/orders/daily-sales"
 
 export async function getOrders(filters?: {
   status?: OrderStatus
@@ -805,78 +809,21 @@ export async function getDailySalesSnippet(date?: string) {
       totalOrders: 0,
       totalUnits: 0,
       totalRevenue: 0,
-      items: [] as {
-        sku: string
-        productName: string
-        platform: Channel
-        quantity: number
-        revenue: number
-      }[],
+      items: [] as DailyProductSalesItem[],
     }
   }
 
-  const { data: products } = await supabase
-    .from("products")
-    .select("sku, name, variant")
+  const [{ data: products }, { data: bundleCompositions }] = await Promise.all([
+    supabase.from("products").select("sku, name, variant"),
+    supabase.from("bundle_compositions").select("bundle_sku, component_sku, quantity"),
+  ])
 
-  const productMap = new Map(
-    (products || []).map((product) => [
-      product.sku,
-      product.variant ? `${product.name} - ${product.variant}` : product.name,
-    ])
-  )
-
-  const byProductAndChannel = new Map<string, {
-    sku: string
-    productName: string
-    platform: Channel
-    quantity: number
-    revenue: number
-  }>()
-
-  let totalUnits = 0
-  let totalRevenue = 0
-
-  for (const order of orders as any[]) {
-    const lineItems = order.order_line_items || []
-    const totalOrderValue = lineItems.reduce(
-      (sum: number, item: any) => sum + ((item.selling_price || 0) * (item.quantity || 0)),
-      0
-    )
-
-    for (const item of lineItems) {
-      totalUnits += getOrderLineUnits(item)
-      const itemGross = (item.selling_price || 0) * (item.quantity || 0)
-      const allocatedFee = totalOrderValue > 0
-        ? ((order.channel_fees || 0) * itemGross) / totalOrderValue
-        : 0
-      const itemRevenue = itemGross - allocatedFee
-      totalRevenue += itemRevenue
-      const key = `${item.sku}__${order.channel}`
-      const existing = byProductAndChannel.get(key)
-
-      if (existing) {
-        existing.quantity += getOrderLineUnits(item)
-        existing.revenue += itemRevenue
-      } else {
-        byProductAndChannel.set(key, {
-          sku: item.sku,
-          productName: productMap.get(item.sku) || item.sku,
-          platform: order.channel as Channel,
-          quantity: getOrderLineUnits(item),
-          revenue: itemRevenue,
-        })
-      }
-    }
-  }
-
-  return {
+  return buildDailySalesSummary({
     date: targetDate,
-    totalOrders: orders.length,
-    totalUnits,
-    totalRevenue,
-    items: Array.from(byProductAndChannel.values()).sort((a, b) => b.revenue - a.revenue),
-  }
+    orders,
+    products: products || [],
+    bundleCompositions: bundleCompositions || [],
+  })
 }
 
 export async function getMonthlySalesByDay(month: string) {
