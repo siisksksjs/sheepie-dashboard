@@ -807,6 +807,7 @@ export async function getDailySalesSnippet(date?: string) {
       date: targetDate,
       totalOrders: 0,
       totalUnits: 0,
+      totalGmv: 0,
       totalRevenue: 0,
       items: [] as DailyProductSalesItem[],
     }

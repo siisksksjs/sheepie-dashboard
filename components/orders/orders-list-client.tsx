@@ -148,11 +148,12 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
 
               <div className="flex items-center justify-between gap-3 pt-2 border-t">
                 <div className="flex flex-col gap-1">
+                  <span className="text-sm font-medium">GMV: {formatCurrency(order.gmv)}</span>
                   <span className="text-sm font-medium">
                     Revenue: {formatCurrency(order.revenue)}
                   </span>
                   <span className="text-sm font-semibold text-success">
-                    Net Profit: {formatCurrency(order.net_profit)}
+                    Profit: {formatCurrency(order.profit)}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -186,8 +187,9 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
               <TableHead>Channel</TableHead>
               <TableHead>Products</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead className="text-right">GMV</TableHead>
               <TableHead className="text-right">Revenue</TableHead>
-              <TableHead className="text-right">Net Profit</TableHead>
+              <TableHead className="text-right">Profit</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -226,11 +228,12 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
                       {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
                     </Badge>
                   </TableCell>
+                  <TableCell className="text-right font-medium">{formatCurrency(order.gmv)}</TableCell>
                   <TableCell className="text-right font-medium">
                     {formatCurrency(order.revenue)}
                   </TableCell>
                   <TableCell className="text-right font-semibold text-success">
-                    {formatCurrency(order.net_profit)}
+                    {formatCurrency(order.profit)}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">

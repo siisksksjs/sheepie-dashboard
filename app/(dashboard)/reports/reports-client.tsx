@@ -69,6 +69,7 @@ type ChannelProductRow = {
   name: string
   pack_size: PackSize
   units_sold: number
+  gmv: number
   revenue: number
   cost: number
   profit: number
@@ -117,9 +118,10 @@ export function ReportsClient({
   const adPerformance = initialAdPerformance
   const returnSummary = initialReturnSummary
 
+  const totalGmv = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.gmv, 0) || 0
   const totalRevenue = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.revenue, 0) || 0
   const totalFees = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.fees, 0) || 0
-  const totalProfit = overviewReport?.byProduct.reduce((sum: number, p: any) => sum + p.profit, 0) || 0
+  const totalProfit = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.profit, 0) || 0
   const totalUnitsSold = overviewReport?.byProduct.reduce((sum: number, p: any) => sum + p.units_sold, 0) || 0
   const totalOrders = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.orders, 0) || 0
   const returnedUnits = returnSummary?.returnedUnits || 0
@@ -127,7 +129,7 @@ export function ReportsClient({
     (returnSummary?.bySku || []).map((item: any) => [item.sku, item.units])
   )
   const grossUnitsSold = totalUnitsSold + returnedUnits
-  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
+  const avgOrderValue = totalOrders > 0 ? totalGmv / totalOrders : 0
   const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0
   const trendData = (selectedMonth && monthlyReport?.byDay?.length > 0)
     ? monthlyReport.byDay
@@ -341,14 +343,27 @@ export function ReportsClient({
       </Card>
 
       {/* KPI Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center">
+              Total GMV
+              <InfoTooltip content="GMV calculation" formula="Selling Price × Purchased Quantity" />
+            </CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatCurrency(totalGmv)}</div>
+            <p className="text-xs text-muted-foreground mt-1">Before channel fees</p>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center">
               Total Revenue
               <InfoTooltip
                 content="Revenue calculation"
-                formula="Selling Price - Allocated Channel Fees"
+                formula="GMV - Allocated Channel Fees"
               />
             </CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -364,7 +379,7 @@ export function ReportsClient({
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center">
-              Net Profit
+              Profit
               <InfoTooltip
                 content="Profit calculation"
                 formula="Revenue - Cost"

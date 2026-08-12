@@ -44,6 +44,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     totalStock: stockData.reduce((sum, item) => sum + item.current_stock, 0),
   }
   const paidOrdersCount = salesReport.byChannel.reduce((sum, channel) => sum + channel.orders, 0)
+  const totalGmv = salesReport.byChannel.reduce((sum, channel) => sum + channel.gmv, 0)
+  const totalRevenue = salesReport.byChannel.reduce((sum, channel) => sum + channel.revenue, 0)
+  const totalProfit = salesReport.byChannel.reduce((sum, channel) => sum + channel.profit, 0)
   const totalUnitsSold = salesReport.byProduct.reduce((sum, product) => sum + product.units_sold, 0)
   const returnedUnits = returnSummary.returnedUnits || 0
   const grossUnitsSold = totalUnitsSold + returnedUnits
@@ -112,7 +115,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
       </p>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6 mb-8">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -163,17 +166,37 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Revenue
+              Total GMV
             </CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold">
-              {formatCurrency(salesReport.byChannel.reduce((sum, ch) => sum + ch.revenue, 0))}
+              {formatCurrency(totalGmv)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
               From {paidOrdersCount} paid or shipped orders
             </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Total Revenue</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold">{formatCurrency(totalRevenue)}</div>
+            <p className="text-xs text-muted-foreground mt-1">GMV minus channel fees</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Profit</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold">{formatCurrency(totalProfit)}</div>
+            <p className="text-xs text-muted-foreground mt-1">Revenue minus COGS</p>
           </CardContent>
         </Card>
       </div>
@@ -197,7 +220,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             {dailySales.totalOrders} orders and {dailySales.totalUnits} units sold on {dailySales.date}
           </div>
           <div className="mb-4 text-sm">
-            Daily Total Revenue: <span className="font-semibold">{formatCurrency(dailySales.totalRevenue)}</span>
+            Daily GMV: <span className="font-semibold">{formatCurrency(dailySales.totalGmv)}</span>
+            <span className="mx-2">·</span>
+            Daily Revenue: <span className="font-semibold">{formatCurrency(dailySales.totalRevenue)}</span>
           </div>
           {dailySales.items.length === 0 ? (
             <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">

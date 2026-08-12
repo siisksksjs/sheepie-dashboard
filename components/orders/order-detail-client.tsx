@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
 import { duplicateOrder, updateOrderStatus } from "@/lib/actions/orders"
-import { getLineItemTotalCost } from "@/lib/line-item-costs"
+import { resolveSalesUnitCost, calculateSalesOrder } from "@/supabase/functions/_shared/sales-metrics"
 import { getPackMultiplier, getPackSizeLabel } from "@/lib/products/pack-sizes"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -87,13 +87,16 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
   }
 
   const productMap = new Map(products.map((product) => [product.sku, product]))
-  const totalAmount = lineItems.reduce((sum, item) => sum + item.quantity * item.selling_price, 0)
-  const totalCost = lineItems.reduce((sum, item) => {
-    const product = productMap.get(item.sku)
-    return sum + getLineItemTotalCost(item, product)
-  }, 0)
-  const grossProfit = totalAmount - totalCost
-  const netProfit = grossProfit - (order.channel_fees || 0)
+  const metrics = calculateSalesOrder({
+    channelFees: order.channel_fees,
+    lines: lineItems.map((item) => ({
+      key: item.id,
+      sellingPrice: item.selling_price,
+      quantity: item.quantity,
+      packSize: item.pack_size,
+      unitCost: resolveSalesUnitCost(item.cost_per_unit_snapshot, productMap.get(item.sku)?.cost_per_unit),
+    })),
+  })
 
   return (
     <div className="space-y-4 pb-6">
@@ -282,8 +285,8 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
 
             <div className="mt-4 space-y-2 border-t pt-4">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Subtotal</span>
-                <span className="font-medium">{formatCurrency(totalAmount)}</span>
+                <span className="text-muted-foreground">GMV</span>
+                <span className="font-medium">{formatCurrency(metrics.totals.gmv)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Channel Fees</span>
@@ -292,17 +295,24 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
                 </span>
               </div>
               <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Revenue</span>
+                <span className="font-medium">{formatCurrency(metrics.totals.revenue)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Total Cost (COGS)</span>
                 <span className="font-medium text-destructive">
-                  -{formatCurrency(totalCost)}
+                  -{formatCurrency(metrics.totals.cogs)}
                 </span>
               </div>
               <div className="flex justify-between text-lg font-bold border-t pt-2">
-                <span>Net Profit</span>
-                <span className={netProfit >= 0 ? "text-success" : "text-destructive"}>
-                  {formatCurrency(netProfit)}
+                <span>Profit</span>
+                <span className={metrics.totals.profit >= 0 ? "text-success" : "text-destructive"}>
+                  {formatCurrency(metrics.totals.profit)}
                 </span>
               </div>
+              {!metrics.totals.hasCompleteCostData && (
+                <p className="text-xs text-warning">Cost data missing—Profit may be overstated.</p>
+              )}
             </div>
           </CardContent>
         </Card>
