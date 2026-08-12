@@ -807,7 +807,7 @@ export function ReportsClient({
                           `${Number(value).toLocaleString()} orders`,
                           channelLabels[String(item.payload.channel)] || String(item.payload.channel),
                         ]}
-                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
+                        contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}
                       />
                       </PieChart>
                     </ResponsiveContainer>
@@ -1521,7 +1521,7 @@ export function ReportsClient({
                       <YAxis />
                       <Tooltip
                         formatter={(value) => formatCurrency(Number(value))}
-                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
+                        contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}
                       />
                       <Legend />
                       <Bar dataKey="total_spend" fill="#ef4444" name="Ad Spend" />

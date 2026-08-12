@@ -116,13 +116,13 @@ export function FinancialTrendChart({
     <div>
       <ResponsiveContainer width="100%" height={380}>
         <LineChart data={data} margin={{ top: 12, right: 24, left: 32, bottom: 8 }}>
-          <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 5" vertical={false} />
+          <CartesianGrid stroke="var(--border)" strokeDasharray="3 5" vertical={false} />
           <XAxis
             dataKey={xKey}
             tickFormatter={xTickFormatter}
             axisLine={false}
             tickLine={false}
-            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+            tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
             tickMargin={12}
           />
           <YAxis
@@ -130,10 +130,10 @@ export function FinancialTrendChart({
             tickFormatter={formatCompactRupiahAxis}
             axisLine={false}
             tickLine={false}
-            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+            tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
           />
           <Tooltip
-            cursor={{ stroke: "hsl(var(--border))", strokeWidth: 1 }}
+            cursor={{ stroke: "var(--border)", strokeWidth: 1 }}
             content={(props) => (
               <FinancialTooltip
                 active={props.active}
@@ -151,7 +151,7 @@ export function FinancialTrendChart({
               name={series.label}
               stroke={series.color}
               strokeWidth={index < 2 ? 3 : 2.5}
-              dot={{ r: 3, fill: "hsl(var(--card))", strokeWidth: 2 }}
+              dot={{ r: 3, fill: "var(--card)", strokeWidth: 2 }}
               activeDot={{ r: 6, strokeWidth: 2 }}
             />
           ))}
@@ -182,13 +182,13 @@ export function FinancialComparisonChart({
           margin={{ top: 8, right: 24, left: 16, bottom: 8 }}
           barCategoryGap="20%"
         >
-          <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 5" horizontal={false} />
+          <CartesianGrid stroke="var(--border)" strokeDasharray="3 5" horizontal={false} />
           <XAxis
             type="number"
             tickFormatter={formatCompactRupiahAxis}
             axisLine={false}
             tickLine={false}
-            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+            tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
             tickMargin={10}
           />
           <YAxis
@@ -198,10 +198,10 @@ export function FinancialComparisonChart({
             tickFormatter={categoryFormatter}
             axisLine={false}
             tickLine={false}
-            tick={{ fill: "hsl(var(--foreground))", fontSize: 12 }}
+            tick={{ fill: "var(--foreground)", fontSize: 12 }}
           />
           <Tooltip
-            cursor={{ fill: "hsl(var(--muted) / 0.45)" }}
+            cursor={{ fill: "var(--muted)" }}
             content={(props) => (
               <FinancialTooltip
                 active={props.active}
@@ -242,13 +242,13 @@ export function UnitsTrendChart({
     <div>
       <ResponsiveContainer width="100%" height={320}>
         <BarChart data={data} margin={{ top: 12, right: 24, left: 8, bottom: 8 }} barCategoryGap="22%">
-          <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 5" vertical={false} />
+          <CartesianGrid stroke="var(--border)" strokeDasharray="3 5" vertical={false} />
           <XAxis
             dataKey={xKey}
             tickFormatter={xTickFormatter}
             axisLine={false}
             tickLine={false}
-            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+            tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
             tickMargin={12}
           />
           <YAxis
@@ -256,10 +256,10 @@ export function UnitsTrendChart({
             axisLine={false}
             tickLine={false}
             allowDecimals={false}
-            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+            tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}
           />
           <Tooltip
-            cursor={{ fill: "hsl(var(--muted) / 0.3)" }}
+            cursor={{ fill: "var(--muted)" }}
             content={(props) => (
               <UnitsTooltip
                 active={props.active}
