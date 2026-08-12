@@ -131,11 +131,15 @@ export default async function AdCampaignsPage() {
                         <span className="font-medium">{formatCurrency(campaign.total_spend)}</span>
                       </div>
                       <div className="flex justify-between">
+                        <span className="text-muted-foreground">GMV:</span>
+                        <span className="font-medium">{formatCurrency(campaign.gmv)}</span>
+                      </div>
+                      <div className="flex justify-between">
                         <span className="text-muted-foreground">Revenue:</span>
                         <span className="font-medium">{formatCurrency(campaign.revenue)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-muted-foreground">ROAS:</span>
+                        <span className="text-muted-foreground">GMV ROAS:</span>
                         <span
                           className={`font-semibold ${
                             campaign.roas >= 2
@@ -174,8 +178,9 @@ export default async function AdCampaignsPage() {
                     <TableHead>Channels</TableHead>
                     <TableHead className="text-right">Spend</TableHead>
                     <TableHead className="text-right">Orders</TableHead>
+                    <TableHead className="text-right">GMV</TableHead>
                     <TableHead className="text-right">Revenue</TableHead>
-                    <TableHead className="text-right">ROAS</TableHead>
+                    <TableHead className="text-right">GMV ROAS</TableHead>
                     <TableHead className="text-right">Cost/Order</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -221,6 +226,7 @@ export default async function AdCampaignsPage() {
                           {formatCurrency(campaign.total_spend)}
                         </TableCell>
                         <TableCell className="text-right">{campaign.orders_count}</TableCell>
+                        <TableCell className="text-right font-medium">{formatCurrency(campaign.gmv)}</TableCell>
                         <TableCell className="text-right font-medium">
                           {formatCurrency(campaign.revenue)}
                         </TableCell>

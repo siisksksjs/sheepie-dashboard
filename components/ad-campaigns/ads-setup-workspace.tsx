@@ -375,6 +375,7 @@ export function AdsSetupWorkspace(props: {
                       <TableHead>Classification</TableHead>
                       <TableHead className="text-right">Units</TableHead>
                       <TableHead className="text-right">Ads Spend</TableHead>
+                      <TableHead className="text-right">GMV</TableHead>
                       <TableHead className="text-right">Revenue</TableHead>
                       <TableHead className="text-right">Profit After Ads</TableHead>
                     </TableRow>
@@ -400,6 +401,7 @@ export function AdsSetupWorkspace(props: {
                               ? "Shared at SKU level"
                               : formatCurrency(row.ads_spent)}
                         </TableCell>
+                        <TableCell className="text-right">{formatCurrency(row.gmv || 0)}</TableCell>
                         <TableCell className="text-right">{formatCurrency(row.revenue)}</TableCell>
                         <TableCell
                           className={`text-right font-semibold ${

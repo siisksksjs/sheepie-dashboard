@@ -3,7 +3,7 @@ import {
   normalizeChannels,
   scopeIncludesChannel,
 } from "./channel-scopes"
-import { getLineItemTotalCost } from "../line-item-costs"
+import { calculateSalesOrder, resolveSalesUnitCost } from "../../supabase/functions/_shared/sales-metrics"
 import type {
   Channel,
   MonthlyAdSpend,
@@ -37,6 +37,7 @@ export type SkuChannelMonthlyPerformance = {
   sku: string
   channel: Channel
   units: number
+  gmv?: number
   revenue: number
   cost: number
   profit: number
@@ -48,6 +49,7 @@ export type SkuMonthlyChannelSummary = {
   units: number
   ads_spent: number
   budget_cap: number
+  gmv?: number
   revenue: number
   cost: number
   profit: number
@@ -249,6 +251,7 @@ export function computeSkuMonthlySummary(input: {
       (row) => row.sku === input.sku && row.channel === channel,
     )
     const channelUnits = performanceRows.reduce((sum, row) => sum + row.units, 0)
+    const channelGmv = performanceRows.reduce((sum, row) => sum + (row.gmv || 0), 0)
     const channelRevenue = performanceRows.reduce((sum, row) => sum + row.revenue, 0)
     const channelCost = performanceRows.reduce((sum, row) => sum + row.cost, 0)
     const channelProfit = performanceRows.reduce((sum, row) => sum + row.profit, 0)
@@ -320,6 +323,7 @@ export function computeSkuMonthlySummary(input: {
       units: channelUnits,
       ads_spent: channelAdsSpent,
       budget_cap: channelBudgetCap,
+      gmv: channelGmv,
       revenue: channelRevenue,
       cost: channelCost,
       profit: channelProfit,
@@ -359,38 +363,35 @@ export function buildSkuChannelMonthlyPerformance(input: {
 
   for (const order of input.orders) {
     const lineItems = order.order_line_items || []
-    const totalOrderValue = lineItems.reduce((sum, item) => {
-      return sum + (item.selling_price || 0) * (item.quantity || 0)
-    }, 0)
+    const calculatedOrder = calculateSalesOrder({
+      channelFees: order.channel_fees,
+      lines: lineItems.map((item, index) => ({
+        key: String(index), sellingPrice: item.selling_price, quantity: item.quantity,
+        packSize: "single",
+        unitCost: resolveSalesUnitCost(item.cost_per_unit_snapshot, productBySku.get(item.sku)?.cost_per_unit),
+      })),
+    })
 
-    for (const lineItem of lineItems) {
+    for (const [lineIndex, lineItem] of lineItems.entries()) {
+      const lineMetrics = calculatedOrder.lines[lineIndex]
       const key = `${lineItem.sku}::${order.channel}`
       const existing = performanceByKey.get(key) || {
         sku: lineItem.sku,
         channel: order.channel,
         units: 0,
+        gmv: 0,
         revenue: 0,
         cost: 0,
         profit: 0,
       }
-      const itemRevenue = calculateLineItemRevenue({
-        quantity: lineItem.quantity,
-        selling_price: lineItem.selling_price,
-        orderChannelFees: order.channel_fees,
-        totalOrderValue,
-      })
-      const itemCost = getLineItemTotalCost(
-        lineItem,
-        productBySku.get(lineItem.sku),
-      )
-
       performanceByKey.set(key, {
         sku: lineItem.sku,
         channel: order.channel,
         units: existing.units + (lineItem.quantity || 0),
-        revenue: existing.revenue + itemRevenue,
-        cost: existing.cost + itemCost,
-        profit: existing.profit + (itemRevenue - itemCost),
+        gmv: (existing.gmv || 0) + lineMetrics.gmv,
+        revenue: existing.revenue + lineMetrics.revenue,
+        cost: existing.cost + lineMetrics.cogs,
+        profit: existing.profit + lineMetrics.profit,
       })
     }
   }

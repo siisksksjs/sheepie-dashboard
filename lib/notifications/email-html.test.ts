@@ -55,6 +55,7 @@ describe("renderSalesReportEmailHtml", () => {
       totals: {
         orders: 12,
         unitsSold: 45,
+        gmv: 10_000_000,
         revenue: 9_500_000,
         cost: 3_000_000,
         profit: 6_500_000,
@@ -65,6 +66,7 @@ describe("renderSalesReportEmailHtml", () => {
           sku: "Calmi-001",
           name: "CalmiCloud Ear Plug",
           unitsSold: 25,
+          gmv: 2_700_000,
           revenue: 2_500_000,
           profit: 1_600_000,
         },
@@ -73,6 +75,7 @@ describe("renderSalesReportEmailHtml", () => {
         {
           channel: "shopee",
           orders: 8,
+          gmv: 6_500_000,
           revenue: 6_000_000,
           profit: 4_100_000,
         },
@@ -91,6 +94,7 @@ describe("renderSalesReportEmailHtml", () => {
     expect(html).toContain("Weekly sales report")
     expect(html).toContain("May 4-10, 2026")
     expect(html).toContain("Rp9.500.000")
+    expect(html).toContain("GMV")
     expect(html).toContain("CalmiCloud Ear Plug")
     expect(html).toContain("shopee")
     expect(html).toContain("Low stock")

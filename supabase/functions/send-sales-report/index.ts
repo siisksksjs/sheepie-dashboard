@@ -7,6 +7,7 @@ import {
   getCompletedWeeklyReportPeriod,
 } from "../_shared/report-periods.ts"
 import { sendEmail } from "../_shared/resend.ts"
+import { calculateSalesOrder, getSalesPackMultiplier, resolveSalesUnitCost } from "../_shared/sales-metrics.ts"
 
 type ReportKind = "weekly" | "monthly"
 
@@ -29,13 +30,6 @@ type ProductRow = {
   sku: string
   name: string
   cost_per_unit: number
-}
-
-function getPackMultiplier(packSize: string | null) {
-  if (packSize === "bundle_2") return 2
-  if (packSize === "bundle_3") return 3
-  if (packSize === "bundle_4") return 4
-  return 1
 }
 
 function uniqueEmails(users: Array<{ email?: string | null }>) {
@@ -105,10 +99,11 @@ async function buildReport(supabase: ReturnType<typeof createClient>, periodStar
   if (lowStockResult.error) throw new Error(lowStockResult.error.message)
 
   const products = new Map((productsResult.data as ProductRow[]).map((product) => [product.sku, product]))
-  const bySku = new Map<string, { sku: string; name: string; unitsSold: number; revenue: number; profit: number }>()
-  const byChannel = new Map<string, { channel: string; orders: number; revenue: number; profit: number }>()
+  const bySku = new Map<string, { sku: string; name: string; unitsSold: number; gmv: number; revenue: number; profit: number }>()
+  const byChannel = new Map<string, { channel: string; orders: number; gmv: number; revenue: number; profit: number }>()
   let orders = 0
   let unitsSold = 0
+  let gmv = 0
   let revenue = 0
   let cost = 0
   let profit = 0
@@ -116,34 +111,35 @@ async function buildReport(supabase: ReturnType<typeof createClient>, periodStar
 
   for (const order of ordersResult.data as OrderRow[]) {
     const lineItems = order.order_line_items || []
-    const totalOrderValue = lineItems.reduce((sum, item) => sum + item.selling_price * item.quantity, 0)
-
     if (order.status === "returned") {
       for (const item of lineItems) {
-        returnedUnits += item.quantity * getPackMultiplier(item.pack_size)
+        returnedUnits += item.quantity * getSalesPackMultiplier(item.pack_size)
       }
       continue
     }
 
     orders += 1
+    const calculatedOrder = calculateSalesOrder({
+      channelFees: order.channel_fees,
+      lines: lineItems.map((item, index) => ({
+        key: String(index), sellingPrice: item.selling_price, quantity: item.quantity,
+        packSize: item.pack_size,
+        unitCost: resolveSalesUnitCost(item.cost_per_unit_snapshot, products.get(item.sku)?.cost_per_unit),
+      })),
+    })
+    let orderGmv = 0
     let orderRevenue = 0
     let orderCost = 0
 
-    for (const item of lineItems) {
-      const unitCount = item.quantity * getPackMultiplier(item.pack_size)
-      const itemTotal = item.selling_price * item.quantity
-      const allocatedFee = totalOrderValue > 0 && order.channel_fees
-        ? (order.channel_fees * itemTotal) / totalOrderValue
-        : 0
-      const itemRevenue = itemTotal - allocatedFee
+    for (const [itemIndex, item] of lineItems.entries()) {
+      const itemMetrics = calculatedOrder.lines[itemIndex]
+      const unitCount = itemMetrics.units
       const product = products.get(item.sku)
-      const unitCost = item.cost_per_unit_snapshot ?? product?.cost_per_unit ?? 0
-      const itemCost = unitCost * unitCount
-      const itemProfit = itemRevenue - itemCost
       const existingSku = bySku.get(item.sku) || {
         sku: item.sku,
         name: product?.name || item.sku,
         unitsSold: 0,
+        gmv: 0,
         revenue: 0,
         profit: 0,
       }
@@ -151,29 +147,34 @@ async function buildReport(supabase: ReturnType<typeof createClient>, periodStar
       bySku.set(item.sku, {
         ...existingSku,
         unitsSold: existingSku.unitsSold + unitCount,
-        revenue: existingSku.revenue + itemRevenue,
-        profit: existingSku.profit + itemProfit,
+        gmv: existingSku.gmv + itemMetrics.gmv,
+        revenue: existingSku.revenue + itemMetrics.revenue,
+        profit: existingSku.profit + itemMetrics.profit,
       })
 
       unitsSold += unitCount
-      orderRevenue += itemRevenue
-      orderCost += itemCost
+      orderGmv += itemMetrics.gmv
+      orderRevenue += itemMetrics.revenue
+      orderCost += itemMetrics.cogs
     }
 
     const orderProfit = orderRevenue - orderCost
     const existingChannel = byChannel.get(order.channel) || {
       channel: order.channel,
       orders: 0,
+      gmv: 0,
       revenue: 0,
       profit: 0,
     }
     byChannel.set(order.channel, {
       channel: order.channel,
       orders: existingChannel.orders + 1,
+      gmv: existingChannel.gmv + orderGmv,
       revenue: existingChannel.revenue + orderRevenue,
       profit: existingChannel.profit + orderProfit,
     })
 
+    gmv += orderGmv
     revenue += orderRevenue
     cost += orderCost
     profit += orderProfit
@@ -188,7 +189,7 @@ async function buildReport(supabase: ReturnType<typeof createClient>, periodStar
   }))
 
   return {
-    totals: { orders, unitsSold, revenue, cost, profit, returnedUnits },
+    totals: { orders, unitsSold, gmv, revenue, cost, profit, returnedUnits },
     bySku: Array.from(bySku.values()).sort((a, b) => b.revenue - a.revenue),
     byChannel: Array.from(byChannel.values()).sort((a, b) => b.revenue - a.revenue),
     lowStock,

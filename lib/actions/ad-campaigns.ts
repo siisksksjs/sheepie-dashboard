@@ -29,7 +29,7 @@ import type {
   SkuAdSetup,
   SkuSalesTarget,
 } from "@/lib/types/database.types"
-import { getLineItemTotalCost } from "@/lib/line-item-costs"
+import { calculateSalesOrder, resolveSalesUnitCost } from "@/supabase/functions/_shared/sales-metrics"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
 
@@ -1611,8 +1611,9 @@ type AttributedOrderMetric = {
   channel: Channel
   order_date: string
   status: string
+  gmv: number
   revenue: number
-  net_profit: number
+  profit: number
   line_items_with_names: Array<{
     id: string
     sku: string
@@ -1639,6 +1640,7 @@ type CampaignMetric = {
   campaign: AdCampaign
   total_spend: number
   orders_count: number
+  gmv: number
   revenue: number
   profit: number
   roas: number
@@ -1682,6 +1684,7 @@ async function getCampaignMetricsBatch(options?: {
         status: CampaignStatus
         total_spend: number
         orders_count: number
+        gmv: number
         revenue: number
         profit: number
         roas: number
@@ -1704,6 +1707,7 @@ async function getCampaignMetricsBatch(options?: {
         status: CampaignStatus
         total_spend: number
         orders_count: number
+        gmv: number
         revenue: number
         profit: number
         roas: number
@@ -1764,15 +1768,14 @@ async function getCampaignMetricsBatch(options?: {
 
   for (const order of (ordersResult.data || []) as CampaignMetricOrder[]) {
     const lineItems = order.order_line_items || []
-    const totalSellingPrice = lineItems.reduce(
-      (sum: number, item) => sum + (item.selling_price * item.quantity),
-      0
-    )
-    const revenue = totalSellingPrice - (order.channel_fees || 0)
-    const totalCogs = lineItems.reduce((sum: number, item) => {
-      const product = productMap.get(item.sku)
-      return sum + getLineItemTotalCost(item, product)
-    }, 0)
+    const metrics = calculateSalesOrder({
+      channelFees: order.channel_fees,
+      lines: lineItems.map((item, index) => ({
+        key: String(index), sellingPrice: item.selling_price, quantity: item.quantity,
+        packSize: "single",
+        unitCost: resolveSalesUnitCost(item.cost_per_unit_snapshot, productMap.get(item.sku)?.cost_per_unit),
+      })),
+    })
 
     const decoratedOrder: AttributedOrderMetric = {
       id: order.id,
@@ -1780,8 +1783,9 @@ async function getCampaignMetricsBatch(options?: {
       channel: order.channel,
       order_date: order.order_date,
       status: order.status,
-      revenue,
-      net_profit: revenue - totalCogs,
+      gmv: metrics.totals.gmv,
+      revenue: metrics.totals.revenue,
+      profit: metrics.totals.profit,
       line_items_with_names: lineItems.map((item) => ({
         ...item,
         product_name: productMap.get(item.sku)?.name || "Unknown",
@@ -1808,6 +1812,7 @@ async function getCampaignMetricsBatch(options?: {
     status: CampaignStatus
     total_spend: number
     orders_count: number
+    gmv: number
     revenue: number
     profit: number
     roas: number
@@ -1821,16 +1826,18 @@ async function getCampaignMetricsBatch(options?: {
       .flatMap((channel) => decoratedOrdersByChannel.get(channel) || [])
       .filter((order) => order.order_date >= campaign.start_date && order.order_date <= campaignEnd)
 
+    const totalGmv = attributedOrders.reduce((sum, order) => sum + order.gmv, 0)
     const totalRevenue = attributedOrders.reduce((sum, order) => sum + order.revenue, 0)
-    const totalProfit = attributedOrders.reduce((sum, order) => sum + order.net_profit, 0)
+    const totalProfit = attributedOrders.reduce((sum, order) => sum + order.profit, 0)
     const ordersCount = attributedOrders.length
-    const roas = campaign.total_spend > 0 ? totalRevenue / campaign.total_spend : 0
+    const roas = campaign.total_spend > 0 ? totalGmv / campaign.total_spend : 0
     const costPerOrder = ordersCount > 0 ? campaign.total_spend / ordersCount : 0
 
     metricsById.set(campaign.id, {
       campaign,
       total_spend: campaign.total_spend,
       orders_count: ordersCount,
+      gmv: totalGmv,
       revenue: totalRevenue,
       profit: totalProfit,
       roas,
@@ -1848,6 +1855,7 @@ async function getCampaignMetricsBatch(options?: {
       status: campaign.status,
       total_spend: campaign.total_spend,
       orders_count: ordersCount,
+      gmv: totalGmv,
       revenue: totalRevenue,
       profit: totalProfit,
       roas,
@@ -1885,8 +1893,9 @@ export async function getAdPerformanceSummary() {
   if (campaigns.length === 0) {
     return {
       total_ad_spend: 0,
+      total_gmv: 0,
       total_revenue: 0,
-      overall_roas: 0,
+      overall_gmv_roas: 0,
       total_orders: 0,
       avg_cost_per_order: 0,
       active_campaigns_count: 0,
@@ -1895,14 +1904,16 @@ export async function getAdPerformanceSummary() {
   }
 
   const totalAdSpend = summaries.reduce((sum, campaign) => sum + campaign.total_spend, 0)
+  const totalGmv = summaries.reduce((sum, campaign) => sum + campaign.gmv, 0)
   const totalRevenue = summaries.reduce((sum, campaign) => sum + campaign.revenue, 0)
   const totalOrders = summaries.reduce((sum, campaign) => sum + campaign.orders_count, 0)
   const activeCampaignsCount = campaigns.filter((campaign) => campaign.status === "active").length
 
   return {
     total_ad_spend: totalAdSpend,
+    total_gmv: totalGmv,
     total_revenue: totalRevenue,
-    overall_roas: totalAdSpend > 0 ? totalRevenue / totalAdSpend : 0,
+    overall_gmv_roas: totalAdSpend > 0 ? totalGmv / totalAdSpend : 0,
     total_orders: totalOrders,
     avg_cost_per_order: totalOrders > 0 ? totalAdSpend / totalOrders : 0,
     active_campaigns_count: activeCampaignsCount,

@@ -14,6 +14,7 @@ type SalesReportSkuRow = {
   sku: string
   name: string
   unitsSold: number
+  gmv: number
   revenue: number
   profit: number
 }
@@ -21,6 +22,7 @@ type SalesReportSkuRow = {
 type SalesReportChannelRow = {
   channel: string
   orders: number
+  gmv: number
   revenue: number
   profit: number
 }
@@ -213,6 +215,7 @@ export function renderSalesReportEmailHtml(input: {
   totals: {
     orders: number
     unitsSold: number
+    gmv: number
     revenue: number
     cost: number
     profit: number
@@ -226,6 +229,7 @@ export function renderSalesReportEmailHtml(input: {
     <tr>
       <td style="padding:10px;border-bottom:1px solid #e5e7eb;"><strong>${escapeHtml(row.name)}</strong><br /><span style="color:#6b7280;">${escapeHtml(row.sku)}</span></td>
       <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:right;">${row.unitsSold}</td>
+      <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatCurrency(row.gmv)}</td>
       <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatCurrency(row.revenue)}</td>
       <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatCurrency(row.profit)}</td>
     </tr>
@@ -234,6 +238,7 @@ export function renderSalesReportEmailHtml(input: {
     <tr>
       <td style="padding:10px;border-bottom:1px solid #e5e7eb;">${escapeHtml(row.channel)}</td>
       <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:right;">${row.orders}</td>
+      <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatCurrency(row.gmv)}</td>
       <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatCurrency(row.revenue)}</td>
       <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:right;">${formatCurrency(row.profit)}</td>
     </tr>
@@ -249,6 +254,7 @@ export function renderSalesReportEmailHtml(input: {
       <tbody>
         <tr><td style="padding:10px;">Orders</td><td style="padding:10px;text-align:right;"><strong>${input.totals.orders}</strong></td></tr>
         <tr><td style="padding:10px;">Units sold</td><td style="padding:10px;text-align:right;"><strong>${input.totals.unitsSold}</strong></td></tr>
+        <tr><td style="padding:10px;">GMV</td><td style="padding:10px;text-align:right;"><strong>${formatCurrency(input.totals.gmv)}</strong></td></tr>
         <tr><td style="padding:10px;">Revenue</td><td style="padding:10px;text-align:right;"><strong>${formatCurrency(input.totals.revenue)}</strong></td></tr>
         <tr><td style="padding:10px;">COGS</td><td style="padding:10px;text-align:right;"><strong>${formatCurrency(input.totals.cost)}</strong></td></tr>
         <tr><td style="padding:10px;">Profit</td><td style="padding:10px;text-align:right;"><strong>${formatCurrency(input.totals.profit)}</strong></td></tr>

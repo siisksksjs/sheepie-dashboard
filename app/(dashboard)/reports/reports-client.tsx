@@ -1233,10 +1233,10 @@ export function ReportsClient({
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">
                       <span className="inline-flex items-center gap-1">
-                        Total Revenue
+                        Total GMV
                         <InfoTooltip
-                          content="Revenue from ad-driven orders"
-                          formula="Selling Price - Channel Fees"
+                          content="GMV from ad-driven orders"
+                          formula="Customer sales before channel fees"
                         />
                       </span>
                     </CardTitle>
@@ -1244,7 +1244,7 @@ export function ReportsClient({
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">
-                      {formatCurrency(adPerformance.total_revenue)}
+                      {formatCurrency(adPerformance.total_gmv)}
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
                       From ad-driven orders
@@ -1256,10 +1256,10 @@ export function ReportsClient({
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <CardTitle className="text-sm font-medium text-muted-foreground">
                       <span className="inline-flex items-center gap-1">
-                        Overall ROAS
+                        Overall GMV ROAS
                         <InfoTooltip
                           content="Return on Ad Spend"
-                          formula="Total Revenue ÷ Total Ad Spend"
+                          formula="Total GMV ÷ Total Ad Spend"
                         />
                       </span>
                     </CardTitle>
@@ -1267,11 +1267,11 @@ export function ReportsClient({
                   </CardHeader>
                   <CardContent>
                     <div className={`text-2xl font-bold ${
-                      adPerformance.overall_roas >= 2 ? 'text-success' :
-                      adPerformance.overall_roas >= 1 ? 'text-warning' :
+                      adPerformance.overall_gmv_roas >= 2 ? 'text-success' :
+                      adPerformance.overall_gmv_roas >= 1 ? 'text-warning' :
                       'text-destructive'
                     }`}>
-                      {adPerformance.overall_roas.toFixed(2)}x
+                      {adPerformance.overall_gmv_roas.toFixed(2)}x
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
                       Return on ad spend
@@ -1346,7 +1346,7 @@ export function ReportsClient({
                             <span className="font-medium">{formatCurrency(campaign.revenue)}</span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-muted-foreground">ROAS:</span>
+                            <span className="text-muted-foreground">GMV ROAS:</span>
                             <span className={`font-semibold ${
                               campaign.roas >= 2 ? 'text-success' :
                               campaign.roas >= 1 ? 'text-warning' :
@@ -1381,10 +1381,10 @@ export function ReportsClient({
                           </TableHead>
                           <TableHead className="text-right">
                             <span className="inline-flex items-center">
-                              ROAS
+                              GMV ROAS
                               <InfoTooltip
                                 content="Return on Ad Spend"
-                                formula="Revenue ÷ Ad Spend"
+                                formula="GMV ÷ Ad Spend"
                               />
                             </span>
                           </TableHead>

@@ -46,7 +46,7 @@ export default async function CampaignDetailPage({ params }: Props) {
     notFound()
   }
 
-  const { campaign, total_spend, orders_count, revenue, profit, roas, cost_per_order, attributed_orders } = metrics
+  const { campaign, total_spend, orders_count, gmv, revenue, profit, roas, cost_per_order, attributed_orders } = metrics
 
   const startDate = new Date(campaign.start_date).toLocaleDateString('en-US', {
     month: 'long',
@@ -129,20 +129,20 @@ export default async function CampaignDetailPage({ params }: Props) {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Revenue</CardTitle>
+            <CardTitle className="text-sm font-medium">GMV / Revenue</CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(revenue)}</div>
+            <div className="text-2xl font-bold">{formatCurrency(gmv)}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              Net profit: {formatCurrency(profit || 0)}
+              Revenue: {formatCurrency(revenue)} · Profit: {formatCurrency(profit || 0)}
             </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">ROAS</CardTitle>
+            <CardTitle className="text-sm font-medium">GMV ROAS</CardTitle>
             <Target className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -328,13 +328,17 @@ export default async function CampaignDetailPage({ params }: Props) {
                     )}
 
                     <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">GMV:</span>
+                      <span className="font-medium">{formatCurrency(order.gmv)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Revenue:</span>
                       <span className="font-medium">{formatCurrency(order.revenue)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Net Profit:</span>
-                      <span className={`font-medium ${order.net_profit >= 0 ? 'text-success' : 'text-destructive'}`}>
-                        {formatCurrency(order.net_profit)}
+                      <span className="text-muted-foreground">Profit:</span>
+                      <span className={`font-medium ${order.profit >= 0 ? 'text-success' : 'text-destructive'}`}>
+                        {formatCurrency(order.profit)}
                       </span>
                     </div>
 
@@ -360,8 +364,9 @@ export default async function CampaignDetailPage({ params }: Props) {
                       <TableHead>Channel</TableHead>
                       <TableHead>Products</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead className="text-right">GMV</TableHead>
                       <TableHead className="text-right">Revenue</TableHead>
-                      <TableHead className="text-right">Net Profit</TableHead>
+                      <TableHead className="text-right">Profit</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -401,13 +406,14 @@ export default async function CampaignDetailPage({ params }: Props) {
                             {order.status}
                           </Badge>
                         </TableCell>
+                        <TableCell className="text-right font-medium">{formatCurrency(order.gmv)}</TableCell>
                         <TableCell className="text-right font-medium">
                           {formatCurrency(order.revenue)}
                         </TableCell>
                         <TableCell className={`text-right font-medium ${
-                          order.net_profit >= 0 ? 'text-success' : 'text-destructive'
+                          order.profit >= 0 ? 'text-success' : 'text-destructive'
                         }`}>
-                          {formatCurrency(order.net_profit)}
+                          {formatCurrency(order.profit)}
                         </TableCell>
                         <TableCell className="text-right">
                           <Link href={`/orders/${order.id}`}>
