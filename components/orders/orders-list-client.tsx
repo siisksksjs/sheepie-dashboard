@@ -3,10 +3,12 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Eye } from "lucide-react"
+import { Eye, Search } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { filterOrdersForSearch } from "@/lib/orders/search"
 import { getPackSizeLabel } from "@/lib/products/pack-sizes"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { cn, formatCurrency, formatDate } from "@/lib/utils"
@@ -58,6 +60,8 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
   const router = useRouter()
   const [pendingOrderId, setPendingOrderId] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<FeedbackState>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+  const filteredOrders = filterOrdersForSearch(orders, searchQuery)
 
   const handleDuplicate = async (orderId: string) => {
     if (pendingOrderId) {
@@ -109,8 +113,42 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
         </div>
       )}
 
+      <div className="rounded-xl border bg-card p-4 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full sm:max-w-xl">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search by product name or exact GMV, revenue, or profit"
+              className="pl-10"
+              aria-label="Search orders"
+            />
+          </div>
+          <p className="shrink-0 text-sm text-muted-foreground" aria-live="polite">
+            {filteredOrders.length} matching order{filteredOrders.length === 1 ? "" : "s"}
+          </p>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Amounts are exact matches. Example: Rp500.000
+        </p>
+      </div>
+
+      {filteredOrders.length === 0 ? (
+        <div className="rounded-xl border bg-card px-6 py-12 text-center">
+          <Search className="mx-auto mb-3 h-9 w-9 text-muted-foreground" />
+          <h2 className="font-semibold text-foreground">No orders match your search</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Try another product name or enter the full GMV, revenue, or profit amount.
+          </p>
+          <Button className="mt-4" variant="outline" onClick={() => setSearchQuery("")}>
+            Clear Search
+          </Button>
+        </div>
+      ) : (
+        <>
       <div className="md:hidden space-y-3">
-        {orders.map((order) => {
+        {filteredOrders.map((order) => {
           const isPending = pendingOrderId === order.id
 
           return (
@@ -194,7 +232,7 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
             </TableRow>
           </TableHeader>
           <TableBody>
-            {orders.map((order) => {
+            {filteredOrders.map((order) => {
               const isPending = pendingOrderId === order.id
 
               return (
@@ -259,6 +297,8 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
           </TableBody>
         </Table>
       </div>
+        </>
+      )}
     </div>
   )
 }
