@@ -19,6 +19,7 @@ import { getPackSizeLabel } from "@/lib/products/pack-sizes"
 import {
   FinancialComparisonChart,
   FinancialTrendChart,
+  UnitsTrendChart,
 } from "@/components/reports/financial-charts"
 import { sortByGmvDescending } from "@/lib/reports/presentation"
 import {
@@ -735,19 +736,12 @@ export function ReportsClient({
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={320}>
-                    <BarChart data={trendData} margin={{ top: 8, right: 20, left: 8, bottom: 8 }}>
-                      <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 5" vertical={false} />
-                      <XAxis dataKey="month" tickFormatter={trendXAxisTickFormatter} axisLine={false} tickLine={false} />
-                      <YAxis width={48} axisLine={false} tickLine={false} />
-                      <Tooltip
-                        labelFormatter={trendTooltipLabelFormatter}
-                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
-                      />
-                      <Legend />
-                      <Bar dataKey="units_sold" fill="#8b5cf6" name="Units Sold" />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <UnitsTrendChart
+                    data={trendData}
+                    xKey="month"
+                    xTickFormatter={trendXAxisTickFormatter}
+                    labelFormatter={trendTooltipLabelFormatter}
+                  />
                 </CardContent>
               </Card>
             </>

@@ -73,6 +73,34 @@ function FinancialTooltip({
   )
 }
 
+function UnitsTooltip({
+  active,
+  label,
+  payload,
+  labelFormatter,
+}: FinancialTooltipProps) {
+  if (!active || !payload?.length) return null
+
+  const units = Number(payload[0]?.value || 0)
+
+  return (
+    <div className="min-w-48 rounded-xl border bg-card p-3 text-sm shadow-xl">
+      <div className="mb-2 font-semibold text-foreground">
+        {labelFormatter(String(label ?? ""))}
+      </div>
+      <div className="flex items-center justify-between gap-6">
+        <span className="flex items-center gap-2 text-violet-600">
+          <span className="h-2 w-2 rounded-full bg-violet-500" />
+          Units Sold
+        </span>
+        <span className="font-semibold tabular-nums text-foreground">
+          {units.toLocaleString("id-ID")}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 export function FinancialTrendChart({
   data,
   xKey,
@@ -195,6 +223,59 @@ export function FinancialComparisonChart({
         </BarChart>
       </ResponsiveContainer>
       <FinancialLegend />
+    </div>
+  )
+}
+
+export function UnitsTrendChart({
+  data,
+  xKey,
+  xTickFormatter,
+  labelFormatter,
+}: {
+  data: ChartRow[]
+  xKey: string
+  xTickFormatter: (value: string) => string
+  labelFormatter: (label: string) => string
+}) {
+  return (
+    <div>
+      <ResponsiveContainer width="100%" height={320}>
+        <BarChart data={data} margin={{ top: 12, right: 24, left: 8, bottom: 8 }} barCategoryGap="22%">
+          <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 5" vertical={false} />
+          <XAxis
+            dataKey={xKey}
+            tickFormatter={xTickFormatter}
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+            tickMargin={12}
+          />
+          <YAxis
+            width={48}
+            axisLine={false}
+            tickLine={false}
+            allowDecimals={false}
+            tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+          />
+          <Tooltip
+            cursor={{ fill: "hsl(var(--muted) / 0.3)" }}
+            content={(props) => (
+              <UnitsTooltip
+                active={props.active}
+                label={props.label}
+                payload={props.payload as TooltipPayloadEntry[] | undefined}
+                labelFormatter={labelFormatter}
+              />
+            )}
+          />
+          <Bar dataKey="units_sold" fill="#8b5cf6" name="Units Sold" radius={[5, 5, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+      <div className="mt-4 flex items-center justify-center gap-2 text-xs font-medium text-muted-foreground">
+        <span className="h-2.5 w-2.5 rounded-sm bg-violet-500" />
+        <span>Units Sold</span>
+      </div>
     </div>
   )
 }

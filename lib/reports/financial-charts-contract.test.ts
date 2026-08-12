@@ -16,4 +16,10 @@ describe("financial report charts", () => {
     expect(source).toContain("export function FinancialComparisonChart")
     expect(source).toContain('layout="vertical"')
   })
+
+  it("renders units with a readable custom tooltip and subtle cursor", () => {
+    expect(source).toContain("export function UnitsTrendChart")
+    expect(source).toContain("Units Sold")
+    expect(source).toContain('cursor={{ fill: "hsl(var(--muted) / 0.3)" }}')
+  })
 })
