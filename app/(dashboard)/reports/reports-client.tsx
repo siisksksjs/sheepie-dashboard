@@ -121,7 +121,6 @@ export function ReportsClient({
 
   const totalGmv = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.gmv, 0) || 0
   const totalRevenue = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.revenue, 0) || 0
-  const totalFees = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.fees, 0) || 0
   const totalProfit = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.profit, 0) || 0
   const totalUnitsSold = overviewReport?.byProduct.reduce((sum: number, p: any) => sum + p.units_sold, 0) || 0
   const totalOrders = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.orders, 0) || 0
@@ -140,7 +139,6 @@ export function ReportsClient({
   const selectedMonthKey = selectedYear && selectedMonth
     ? `${selectedYear}-${String(selectedMonth).padStart(2, "0")}`
     : null
-  const byDay = monthlyReport?.byDay || []
   const detailedByDate: Record<string, CalendarDaySummary> = initialCalendarDetails?.byDate || {}
   const detailedByDateEntries = Object.entries(detailedByDate)
   const byDateMap = new Map<string, {
