@@ -5,7 +5,8 @@ describe("orders smart search UI", () => {
   const source = fs.readFileSync("components/orders/orders-list-client.tsx", "utf8")
 
   it("offers one smart search and filters both order layouts", () => {
-    expect(source).toContain("Search by product name, GMV, revenue, or profit")
+    expect(source).toContain("Search by product name or revenue")
+    expect(source).not.toContain("Search by product name, GMV, revenue, or profit")
     expect(source).toContain("filterOrdersForSearch")
     expect(source).toContain("filteredOrders")
     expect(source.match(/filteredOrders\.map/g)).toHaveLength(2)

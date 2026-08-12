@@ -24,8 +24,9 @@ export function filterOrdersForSearch<Order extends SearchableOrder>(orders: Ord
 
   const amountQuery = parseRupiahQuery(normalizedQuery)
   if (amountQuery !== null) {
-    return orders.filter((order) => [order.gmv, order.revenue, order.profit]
-      .some((value) => String(Math.round(Number(value || 0))).includes(amountQuery)))
+    return orders.filter((order) =>
+      String(Math.round(Number(order.revenue || 0))).includes(amountQuery),
+    )
   }
 
   const productQuery = normalizedQuery.toLocaleLowerCase("id-ID")

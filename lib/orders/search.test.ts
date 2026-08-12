@@ -19,7 +19,7 @@ const orders = [
   {
     id: "order-calmi",
     gmv: 1_500_000,
-    revenue: 1_250_000,
+    revenue: 1_500_000,
     profit: 820_000,
     order_line_items: [{ product_name: "CalmiCloud Ear Plug" }],
   },
@@ -35,19 +35,20 @@ describe("order smart search", () => {
     expect(filterOrdersForSearch(orders, "PILLOW").map((order) => order.id)).toEqual(["order-cervi"])
   })
 
-  it.each(["Rp500.000", "500.000", "500000"])("matches amounts containing %s", (query) => {
+  it.each(["Rp500.000", "500.000", "500000"])("matches revenue containing %s", (query) => {
     expect(filterOrdersForSearch(orders, query).map((order) => order.id)).toEqual([
-      "order-lumi",
-      "order-cervi",
       "order-calmi",
     ])
   })
 
-  it("matches partial amount digits", () => {
+  it("matches partial revenue digits", () => {
     expect(filterOrdersForSearch(orders, "50000").map((order) => order.id)).toEqual([
-      "order-lumi",
-      "order-cervi",
       "order-calmi",
     ])
+  })
+
+  it("does not match GMV or profit when revenue does not contain the query", () => {
+    expect(filterOrdersForSearch(orders, "500000").map((order) => order.id)).not.toContain("order-lumi")
+    expect(filterOrdersForSearch(orders, "500000").map((order) => order.id)).not.toContain("order-cervi")
   })
 })

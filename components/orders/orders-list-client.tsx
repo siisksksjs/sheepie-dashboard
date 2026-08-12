@@ -124,7 +124,7 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
               data-lpignore="true"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search by product name, GMV, revenue, or profit"
+              placeholder="Search by product name or revenue"
               aria-label="Search orders"
             />
           </div>
@@ -133,7 +133,7 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
           </p>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          Amounts can be partial. Example: 500000
+          Revenue can be partial. Example: 500000
         </p>
       </div>
 
@@ -141,7 +141,7 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
         <div className="rounded-xl border bg-card px-6 py-12 text-center">
           <h2 className="font-semibold text-foreground">No orders match your search</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Try another product name or enter part of the GMV, revenue, or profit amount.
+            Try another product name or enter part of the revenue amount.
           </p>
           <Button className="mt-4" variant="outline" onClick={() => setSearchQuery("")}>
             Clear Search
