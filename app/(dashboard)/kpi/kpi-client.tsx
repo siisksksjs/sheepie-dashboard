@@ -250,9 +250,10 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
               </TableHeader>
               <TableBody>
                 {rows.map((row) => {
-                  const rowProgress = row.is_targetable
-                    ? (getProgress(row.actual_units, row.target_units) + getProgress(row.actual_gmv, row.target_gmv)) / 2
-                    : 0
+                  const rowProgress = (
+                    getProgress(row.actual_units, row.target_units)
+                    + getProgress(row.actual_gmv, row.target_gmv)
+                  ) / 2
 
                   return (
                     <TableRow key={row.sku}>
@@ -266,7 +267,6 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
                           min={0}
                           value={row.target_units}
                           onChange={(event) => updateRow(row.sku, "target_units", event.target.value)}
-                          disabled={!row.is_targetable}
                           className="text-right"
                         />
                       </TableCell>
@@ -278,13 +278,12 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
                           step="1000"
                           value={row.target_gmv}
                           onChange={(event) => updateRow(row.sku, "target_gmv", event.target.value)}
-                          disabled={!row.is_targetable}
                           className="text-right"
                         />
                       </TableCell>
                       <TableCell className="text-right font-medium">{formatCurrency(row.actual_gmv)}</TableCell>
                       <TableCell className="text-right font-medium">{formatCurrency(row.actual_revenue)}</TableCell>
-                      <TableCell className="text-right font-semibold">{row.is_targetable ? `${rowProgress.toFixed(0)}%` : "—"}</TableCell>
+                      <TableCell className="text-right font-semibold">{rowProgress.toFixed(0)}%</TableCell>
                     </TableRow>
                   )
                 })}

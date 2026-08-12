@@ -3,26 +3,26 @@ import { describe, expect, it } from "vitest"
 import { buildKpiActuals } from "@/lib/kpi/workspace"
 
 describe("KPI GMV workspace", () => {
-  it("preserves bundle totals and retains unmatched sales", () => {
+  it("counts only direct sales of the three tracked products", () => {
     const result = buildKpiActuals({
-      orders: [{ channel_fees: 30_000, order_line_items: [
+      orders: [{ channel_fees: 36_000, order_line_items: [
+        { sku: "Lumi-001", quantity: 1, pack_size: "single", selling_price: 60_000 },
         { sku: "Lumi-Calmi-Kit", quantity: 1, pack_size: "single", selling_price: 240_000 },
         { sku: "Other-001", quantity: 1, pack_size: "single", selling_price: 60_000 },
       ] }],
-      products: [
-        { sku: "Lumi-Calmi-Kit", name: "Kit", variant: null, is_bundle: true },
-        { sku: "Other-001", name: "Other", variant: null, is_bundle: false },
-      ],
-      bundleCompositions: [
-        { bundle_sku: "Lumi-Calmi-Kit", component_sku: "Lumi-001", quantity: 1 },
-        { bundle_sku: "Lumi-Calmi-Kit", component_sku: "Calmi-001", quantity: 1 },
-      ],
     })
 
-    expect(result.totals).toMatchObject({ actual_gmv: 300_000, actual_revenue: 270_000 })
-    expect(result.other).toMatchObject({ actual_gmv: 60_000, actual_revenue: 54_000 })
-    expect(result.bySku.get("Lumi-001")?.actual_gmv).toBe(120_000)
-    expect(result.bySku.get("Calmi-001")?.actual_gmv).toBe(120_000)
+    expect(result.totals).toMatchObject({ actual_units: 1, actual_gmv: 60_000, actual_revenue: 54_000 })
+    expect(result.other).toMatchObject({ actual_units: 2, actual_gmv: 300_000, actual_revenue: 270_000 })
+    expect(result.bySku.get("Lumi-001")).toMatchObject({ actual_units: 1, actual_gmv: 60_000 })
+    expect(Array.from(result.bySku.keys())).toEqual(["Lumi-001"])
+  })
+
+  it("does not expose a synthetic other-products KPI row", () => {
+    const actionSource = fs.readFileSync("lib/actions/kpi.ts", "utf8")
+
+    expect(actionSource).not.toContain('sku: "__other__"')
+    expect(actionSource).not.toContain('name: "Other products and bundles"')
   })
 
   it("defines a target_gmv database migration", () => {

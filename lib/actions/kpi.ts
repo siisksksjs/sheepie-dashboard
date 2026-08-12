@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
-import type { BundleComposition, MonthlyKpiTarget, OrderLineItem, Product } from "@/lib/types/database.types"
+import type { MonthlyKpiTarget, OrderLineItem, Product } from "@/lib/types/database.types"
 import { buildKpiActuals, KPI_BASE_SKUS } from "@/lib/kpi/workspace"
 
 const KPI_BASE_SKU_SET = new Set<string>(KPI_BASE_SKUS)
@@ -14,7 +14,6 @@ export type KpiProductRow = {
   sku: string
   name: string
   variant: string | null
-  is_targetable: boolean
   target_units: number
   target_gmv: number
   actual_units: number
@@ -93,16 +92,13 @@ export async function getKpiWorkspace(monthValue: string): Promise<KpiWorkspace>
   const monthKey = month.substring(0, 7)
   const supabase = await createClient()
 
-  const [productsResult, productCatalogResult, targetsResult, ordersResult, bundleCompositionsResult] = await Promise.all([
+  const [productsResult, targetsResult, ordersResult] = await Promise.all([
     supabase
       .from("products")
       .select("sku, name, variant, is_bundle")
       .eq("status", "active")
       .in("sku", KPI_BASE_SKUS)
       .order("name", { ascending: true }),
-    supabase
-      .from("products")
-      .select("sku, name, variant, is_bundle"),
     supabase
       .from("monthly_kpi_targets")
       .select("*")
@@ -121,9 +117,6 @@ export async function getKpiWorkspace(monthValue: string): Promise<KpiWorkspace>
       .in("status", ["paid", "shipped"])
       .gte("order_date", month)
       .lt("order_date", getNextMonthStart(monthKey)),
-    supabase
-      .from("bundle_compositions")
-      .select("bundle_sku, component_sku, quantity"),
   ])
 
   if (productsResult.error) {
@@ -134,28 +127,15 @@ export async function getKpiWorkspace(monthValue: string): Promise<KpiWorkspace>
     console.error("Error fetching KPI targets:", targetsResult.error)
   }
 
-  if (productCatalogResult.error) {
-    console.error("Error fetching KPI product catalog:", productCatalogResult.error)
-  }
-
   if (ordersResult.error) {
     console.error("Error fetching KPI actuals:", ordersResult.error)
   }
 
-  if (bundleCompositionsResult.error) {
-    console.error("Error fetching KPI bundle compositions:", bundleCompositionsResult.error)
-  }
-
   const products = (productsResult.data || []) as KpiProductCatalogRow[]
-  const productCatalog = (productCatalogResult.data || []) as KpiProductCatalogRow[]
   const targets = (targetsResult.data || []) as MonthlyKpiTarget[]
   const orders = (ordersResult.data || []) as KpiOrder[]
   const targetsBySku = new Map(targets.map((target) => [target.sku, target]))
-  const bundleCompositions = (bundleCompositionsResult.data || []) as Pick<
-    BundleComposition,
-    "bundle_sku" | "component_sku" | "quantity"
-  >[]
-  const actuals = buildKpiActuals({ orders, products: productCatalog, bundleCompositions })
+  const actuals = buildKpiActuals({ orders })
 
   const rows = products
     .map((product) => {
@@ -166,20 +146,12 @@ export async function getKpiWorkspace(monthValue: string): Promise<KpiWorkspace>
         sku: product.sku,
         name: product.name,
         variant: product.variant,
-        is_targetable: true,
         target_units: target?.target_units || 0,
         target_gmv: Number(target?.target_gmv || 0),
         ...actual,
       }
     })
     .sort((a, b) => (KPI_BASE_SKU_ORDER.get(a.sku) ?? 999) - (KPI_BASE_SKU_ORDER.get(b.sku) ?? 999))
-
-  if (actuals.other.actual_units || actuals.other.actual_gmv || actuals.other.actual_revenue) {
-    rows.push({
-      sku: "__other__", name: "Other products and bundles", variant: null,
-      is_targetable: false, target_units: 0, target_gmv: 0, ...actuals.other,
-    })
-  }
 
   const totals = rows.reduce(
     (acc, row) => ({
