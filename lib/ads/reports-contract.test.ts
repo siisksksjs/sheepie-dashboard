@@ -221,6 +221,15 @@ describe("reports monthly ads contract", () => {
     }
   })
 
+  it("adds GMV to calendar values and heatmap controls", () => {
+    const source = fs.readFileSync("app/(dashboard)/reports/reports-client.tsx", "utf8")
+
+    expect(source).toContain('type HeatmapMetric = "units" | "orders" | "gmv" | "revenue"')
+    expect(source.match(/<SelectItem value="gmv">GMV<\/SelectItem>/g)).toHaveLength(2)
+    expect(source).toContain("monthBlock.summary.gmv")
+    expect(source).toContain("dayData?.gmv")
+  })
+
   it("sanitizes invalid report filters and keeps All Years reachable", async () => {
     const invalidResult = await renderReportsPage({
       searchParams: Promise.resolve({ year: "nope", month: "13" }),
@@ -275,6 +284,7 @@ describe("reports monthly ads contract", () => {
               month: "2026-04-01",
               orders: 2,
               units_sold: 3,
+              gmv: 500,
               revenue: 400,
               cost: 100,
               profit: 300,
@@ -289,6 +299,7 @@ describe("reports monthly ads contract", () => {
             "2026-04-01": {
               orders: 2,
               units: 3,
+              gmv: 500,
               revenue: 400,
               items: [],
             },
@@ -304,7 +315,8 @@ describe("reports monthly ads contract", () => {
     expect(html).toContain('button id="year"')
     expect(html).toContain('label for="month"')
     expect(html).toContain('button id="month"')
-    expect(html).toContain('aria-label="Open details for 2026-04-01: 2 orders, 3 units, Rp400 revenue"')
+    expect(html).toContain('aria-label="Open details for 2026-04-01: 2 orders, 3 units, Rp500 GMV, Rp400 revenue"')
+    expect(html).toContain('data-value="gmv"')
     expect(html).toContain(">1<")
   })
 })

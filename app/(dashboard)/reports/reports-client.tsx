@@ -59,7 +59,7 @@ const channelColors: Record<string, string> = {
 }
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-type HeatmapMetric = "units" | "orders" | "revenue"
+type HeatmapMetric = "units" | "orders" | "gmv" | "revenue"
 type CalendarDaySummary = {
   orders: number
   units: number
@@ -150,6 +150,7 @@ export function ReportsClient({
   const byDateMap = new Map<string, {
     orders: number
     units_sold: number
+    gmv: number
     revenue: number
   }>(
     detailedByDateEntries.map(([date, value]) => [
@@ -157,6 +158,7 @@ export function ReportsClient({
       {
         orders: value.orders || 0,
         units_sold: value.units || 0,
+        gmv: value.gmv || 0,
         revenue: value.revenue || 0,
       },
     ])
@@ -170,11 +172,16 @@ export function ReportsClient({
   const maxDayRevenue = byDateMap.size > 0
     ? Math.max(...Array.from(byDateMap.values()).map((day) => day.revenue || 0))
     : 0
+  const maxDayGmv = byDateMap.size > 0
+    ? Math.max(...Array.from(byDateMap.values()).map((day) => day.gmv || 0))
+    : 0
   const maxHeatmapValue = heatmapMetric === "units"
     ? maxDayUnits
     : heatmapMetric === "orders"
       ? maxDayOrders
-      : maxDayRevenue
+      : heatmapMetric === "gmv"
+        ? maxDayGmv
+        : maxDayRevenue
   const calendarCells: Array<{ date: string; day: number } | null> = []
 
   if (selectedYear && selectedMonth) {
@@ -202,6 +209,7 @@ export function ReportsClient({
           month: monthKey,
           orders: 0,
           units_sold: 0,
+          gmv: 0,
           revenue: 0,
           cost: 0,
           profit: 0,
@@ -234,11 +242,16 @@ export function ReportsClient({
   const maxMonthRevenue = yearCalendarMonths.length > 0
     ? Math.max(...yearCalendarMonths.map((month) => month.summary.revenue || 0))
     : 0
+  const maxMonthGmv = yearCalendarMonths.length > 0
+    ? Math.max(...yearCalendarMonths.map((month) => month.summary.gmv || 0))
+    : 0
   const maxYearMonthValue = heatmapMetric === "units"
     ? maxMonthUnits
     : heatmapMetric === "orders"
       ? maxMonthOrders
-      : maxMonthRevenue
+      : heatmapMetric === "gmv"
+        ? maxMonthGmv
+        : maxMonthRevenue
   const selectedYearlyMonthBlock = selectedYearlyMonth
     ? yearCalendarMonths.find((month) => month.monthNumber === selectedYearlyMonth) || null
     : null
@@ -499,6 +512,7 @@ export function ReportsClient({
                       <SelectContent>
                         <SelectItem value="units">Units Sold</SelectItem>
                         <SelectItem value="orders">Order Count</SelectItem>
+                        <SelectItem value="gmv">GMV</SelectItem>
                         <SelectItem value="revenue">Revenue</SelectItem>
                       </SelectContent>
                     </Select>
@@ -529,12 +543,15 @@ export function ReportsClient({
                     const dayData = byDateMap.get(cell.date)
                     const orders = dayData?.orders || 0
                     const units = dayData?.units_sold || 0
+                    const gmv = dayData?.gmv || 0
                     const revenue = dayData?.revenue || 0
                     const heatmapValue = heatmapMetric === "units"
                       ? units
                       : heatmapMetric === "orders"
                         ? orders
-                        : revenue
+                        : heatmapMetric === "gmv"
+                          ? gmv
+                          : revenue
                     const heatmapIntensity = maxHeatmapValue > 0 ? heatmapValue / maxHeatmapValue : 0
                     const backgroundColor = heatmapIntensity > 0
                       ? `rgba(16,185,129,${(0.12 + heatmapIntensity * 0.42).toFixed(3)})`
@@ -544,17 +561,18 @@ export function ReportsClient({
                       <button
                         key={cell.date}
                         type="button"
-                        aria-label={formatHeatmapDayAriaLabel(cell.date, orders, units, revenue)}
-                        className="min-h-[84px] rounded-md border p-2 text-left transition hover:border-primary/60 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        aria-label={formatHeatmapDayAriaLabel(cell.date, orders, units, gmv, revenue)}
+                        className="min-h-[104px] rounded-md border p-2 text-left transition hover:border-primary/60 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         style={backgroundColor ? { backgroundColor } : undefined}
-                        title={`${cell.date}: ${orders} orders, ${units} units, ${formatCurrency(revenue)}`}
+                        title={`${cell.date}: ${orders} orders, ${units} units, GMV ${formatCurrency(gmv)}, Revenue ${formatCurrency(revenue)}`}
                         onClick={() => setSelectedCalendarDate(cell.date)}
                       >
                         <div className="text-xs font-semibold">{cell.day}</div>
                         <div className="mt-2 space-y-1 text-[11px] leading-tight text-muted-foreground">
                           <div>{orders} orders</div>
                           <div>{units} units</div>
-                          <div>{formatCurrency(revenue)}</div>
+                          <div className="font-medium text-foreground">GMV {formatCurrency(gmv)}</div>
+                          <div>Revenue {formatCurrency(revenue)}</div>
                         </div>
                       </button>
                     )
@@ -562,7 +580,10 @@ export function ReportsClient({
                 </div>
 
                 <div className="mt-3 text-xs text-muted-foreground">
-                  Peak day in selected month: {maxDayOrders} orders / {maxDayUnits} units / {formatCurrency(maxDayRevenue)}
+                  Peak {formatHeatmapMetricLabel(heatmapMetric)} in selected month: {formatHeatmapPeakValue(
+                    heatmapMetric,
+                    { orders: maxDayOrders, units: maxDayUnits, gmv: maxDayGmv, revenue: maxDayRevenue },
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -587,6 +608,7 @@ export function ReportsClient({
                       <SelectContent>
                         <SelectItem value="units">Units Sold</SelectItem>
                         <SelectItem value="orders">Order Count</SelectItem>
+                        <SelectItem value="gmv">GMV</SelectItem>
                         <SelectItem value="revenue">Revenue</SelectItem>
                       </SelectContent>
                     </Select>
@@ -609,7 +631,9 @@ export function ReportsClient({
                         ? monthBlock.summary.units_sold
                         : heatmapMetric === "orders"
                           ? monthBlock.summary.orders
-                          : monthBlock.summary.revenue
+                          : heatmapMetric === "gmv"
+                            ? monthBlock.summary.gmv
+                            : monthBlock.summary.revenue
                       const monthIntensity = maxYearMonthValue > 0 ? monthValue / maxYearMonthValue : 0
                       const backgroundColor = monthIntensity > 0
                         ? `rgba(16,185,129,${(0.12 + monthIntensity * 0.42).toFixed(3)})`
@@ -624,6 +648,7 @@ export function ReportsClient({
                             year: selectedYear,
                             orders: monthBlock.summary.orders,
                             units: monthBlock.summary.units_sold,
+                            gmv: monthBlock.summary.gmv,
                             revenue: monthBlock.summary.revenue,
                           })}
                           className="rounded-lg border bg-card p-3 text-left transition hover:border-primary/60 hover:shadow-sm"
@@ -649,8 +674,12 @@ export function ReportsClient({
                               <div className="font-semibold leading-tight">{monthBlock.summary.units_sold}</div>
                             </div>
                             <div>
+                              <div className="text-[10px] text-muted-foreground">GMV</div>
+                              <div className="text-xs font-semibold leading-tight tabular-nums">{formatCurrency(monthBlock.summary.gmv)}</div>
+                            </div>
+                            <div>
                               <div className="text-[10px] text-muted-foreground">Revenue</div>
-                              <div className="text-xs font-semibold leading-tight">{formatCurrency(monthBlock.summary.revenue)}</div>
+                              <div className="text-xs font-semibold leading-tight tabular-nums">{formatCurrency(monthBlock.summary.revenue)}</div>
                             </div>
                             <div>
                               <div className="text-[10px] text-muted-foreground">Profit</div>
@@ -670,7 +699,10 @@ export function ReportsClient({
                 </div>
 
                 <div className="mt-3 text-xs text-muted-foreground">
-                  Peak day in selected year: {maxDayOrders} orders / {maxDayUnits} units / {formatCurrency(maxDayRevenue)}
+                  Peak {formatHeatmapMetricLabel(heatmapMetric)} in selected year: {formatHeatmapPeakValue(
+                    heatmapMetric,
+                    { orders: maxDayOrders, units: maxDayUnits, gmv: maxDayGmv, revenue: maxDayRevenue },
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -680,7 +712,7 @@ export function ReportsClient({
             <>
               <Card>
                 <CardHeader>
-                  <CardTitle>GMV, Revenue & Profit Trends</CardTitle>
+                  <CardTitle>GMV, Revenue, Cost & Profit Trends</CardTitle>
                   <CardDescription>
                     {isDailyTrend ? "Daily performance through selected month" : "Monthly performance over time"}
                   </CardDescription>
@@ -1583,7 +1615,7 @@ export function ReportsClient({
               {selectedYearlyMonthBlock?.monthLabel} {selectedYear} Heatmap
             </DialogTitle>
             <DialogDescription>
-              Daily orders, units, and revenue for the selected month.
+              Daily orders, units, GMV, and revenue for the selected month.
             </DialogDescription>
           </DialogHeader>
 
@@ -1612,12 +1644,15 @@ export function ReportsClient({
                   const dayData = byDateMap.get(cell.date)
                   const orders = dayData?.orders || 0
                   const units = dayData?.units_sold || 0
+                  const gmv = dayData?.gmv || 0
                   const revenue = dayData?.revenue || 0
                   const heatmapValue = heatmapMetric === "units"
                     ? units
                     : heatmapMetric === "orders"
                       ? orders
-                      : revenue
+                      : heatmapMetric === "gmv"
+                        ? gmv
+                        : revenue
                   const heatmapIntensity = maxHeatmapValue > 0 ? heatmapValue / maxHeatmapValue : 0
                   const backgroundColor = heatmapIntensity > 0
                     ? `rgba(16,185,129,${(0.12 + heatmapIntensity * 0.42).toFixed(3)})`
@@ -1627,17 +1662,18 @@ export function ReportsClient({
                       <button
                         key={cell.date}
                         type="button"
-                        aria-label={formatHeatmapDayAriaLabel(cell.date, orders, units, revenue)}
-                        className="min-h-[84px] rounded-md border p-2 text-left transition hover:border-primary/60 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        aria-label={formatHeatmapDayAriaLabel(cell.date, orders, units, gmv, revenue)}
+                        className="min-h-[104px] rounded-md border p-2 text-left transition hover:border-primary/60 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         style={backgroundColor ? { backgroundColor } : undefined}
-                        title={`${cell.date}: ${orders} orders, ${units} units, ${formatCurrency(revenue)}`}
+                        title={`${cell.date}: ${orders} orders, ${units} units, GMV ${formatCurrency(gmv)}, Revenue ${formatCurrency(revenue)}`}
                         onClick={() => setSelectedYearlyCalendarDate(cell.date)}
                       >
                       <div className="text-xs font-semibold">{cell.day}</div>
                       <div className="mt-2 space-y-1 text-[11px] leading-tight text-muted-foreground">
                         <div>{orders} orders</div>
                          <div>{units} units</div>
-                         <div>{formatCurrency(revenue)}</div>
+                         <div className="font-medium text-foreground">GMV {formatCurrency(gmv)}</div>
+                         <div>Revenue {formatCurrency(revenue)}</div>
                        </div>
                       </button>
                     )
@@ -1689,9 +1725,10 @@ function formatHeatmapDayAriaLabel(
   date: string,
   orders: number,
   units: number,
+  gmv: number,
   revenue: number,
 ) {
-  return `Open details for ${date}: ${orders} orders, ${units} units, ${formatCurrency(revenue)} revenue`
+  return `Open details for ${date}: ${orders} orders, ${units} units, ${formatCurrency(gmv)} GMV, ${formatCurrency(revenue)} revenue`
 }
 
 function formatHeatmapMonthAriaLabel(input: {
@@ -1699,8 +1736,26 @@ function formatHeatmapMonthAriaLabel(input: {
   year: number | undefined
   orders: number
   units: number
+  gmv: number
   revenue: number
 }) {
-  return `Open ${input.label} ${input.year ?? ""} details: ${input.orders} orders, ${input.units} units, ${formatCurrency(input.revenue)} revenue`
+  return `Open ${input.label} ${input.year ?? ""} details: ${input.orders} orders, ${input.units} units, ${formatCurrency(input.gmv)} GMV, ${formatCurrency(input.revenue)} revenue`
     .trim()
+}
+
+function formatHeatmapMetricLabel(metric: HeatmapMetric) {
+  if (metric === "units") return "units sold"
+  if (metric === "orders") return "order count"
+  if (metric === "gmv") return "GMV"
+  return "Revenue"
+}
+
+function formatHeatmapPeakValue(
+  metric: HeatmapMetric,
+  values: { orders: number; units: number; gmv: number; revenue: number },
+) {
+  if (metric === "units") return `${values.units.toLocaleString()} units`
+  if (metric === "orders") return `${values.orders.toLocaleString()} orders`
+  if (metric === "gmv") return formatCurrency(values.gmv)
+  return formatCurrency(values.revenue)
 }
