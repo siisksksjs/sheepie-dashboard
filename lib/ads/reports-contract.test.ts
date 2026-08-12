@@ -1,6 +1,7 @@
 import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import fs from "node:fs"
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -198,6 +199,28 @@ async function loadReportsClient() {
 }
 
 describe("reports monthly ads contract", () => {
+  it("uses professional financial charts and canonical metric ordering", () => {
+    const source = fs.readFileSync("app/(dashboard)/reports/reports-client.tsx", "utf8")
+
+    expect(source).toContain("FinancialTrendChart")
+    expect(source).toContain("FinancialComparisonChart")
+    expect(source).toContain("sortByGmvDescending")
+    expect(source).toContain("Total Cost")
+    expect(source).not.toContain("Profit by Product")
+
+    const headings = ["GMV", "Revenue", "Cost", "Profit"]
+    const channelHeader = source.slice(
+      source.indexOf("Channel Performance Details"),
+      source.indexOf("{/* Products Tab */}"),
+    )
+    let cursor = -1
+    for (const heading of headings) {
+      const next = channelHeader.indexOf(heading, cursor + 1)
+      expect(next).toBeGreaterThan(cursor)
+      cursor = next
+    }
+  })
+
   it("sanitizes invalid report filters and keeps All Years reachable", async () => {
     const invalidResult = await renderReportsPage({
       searchParams: Promise.resolve({ year: "nope", month: "13" }),

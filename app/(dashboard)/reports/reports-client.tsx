@@ -17,8 +17,11 @@ import { InfoTooltip } from "@/components/ui/info-tooltip"
 import type { PackSize } from "@/lib/types/database.types"
 import { getPackSizeLabel } from "@/lib/products/pack-sizes"
 import {
-  LineChart,
-  Line,
+  FinancialComparisonChart,
+  FinancialTrendChart,
+} from "@/components/reports/financial-charts"
+import { sortByGmvDescending } from "@/lib/reports/presentation"
+import {
   BarChart,
   Bar,
   PieChart,
@@ -121,6 +124,7 @@ export function ReportsClient({
 
   const totalGmv = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.gmv, 0) || 0
   const totalRevenue = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.revenue, 0) || 0
+  const totalCost = overviewReport?.byProduct.reduce((sum: number, product: any) => sum + product.cost, 0) || 0
   const totalProfit = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.profit, 0) || 0
   const totalUnitsSold = overviewReport?.byProduct.reduce((sum: number, p: any) => sum + p.units_sold, 0) || 0
   const totalOrders = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.orders, 0) || 0
@@ -131,6 +135,8 @@ export function ReportsClient({
   const grossUnitsSold = totalUnitsSold + returnedUnits
   const avgOrderValue = totalOrders > 0 ? totalGmv / totalOrders : 0
   const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0
+  const channelsByGmv = sortByGmvDescending(overviewReport?.byChannel || [])
+  const productsByGmv = sortByGmvDescending(overviewReport?.byProduct || [])
   const trendData = (selectedMonth && monthlyReport?.byDay?.length > 0)
     ? monthlyReport.byDay
     : (monthlyReport?.byMonth || [])
@@ -343,7 +349,7 @@ export function ReportsClient({
       </Card>
 
       {/* KPI Cards */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center">
@@ -353,7 +359,9 @@ export function ReportsClient({
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(totalGmv)}</div>
+            <div className="text-2xl font-bold leading-tight tracking-tight tabular-nums break-words">
+              {formatCurrency(totalGmv)}
+            </div>
             <p className="text-xs text-muted-foreground mt-1">Before channel fees</p>
           </CardContent>
         </Card>
@@ -369,10 +377,28 @@ export function ReportsClient({
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(totalRevenue)}</div>
+            <div className="text-2xl font-bold leading-tight tracking-tight tabular-nums break-words">
+              {formatCurrency(totalRevenue)}
+            </div>
             <p className="text-xs text-muted-foreground mt-1">
               {totalOrders} orders
             </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center">
+              Total Cost
+              <InfoTooltip content="Cost calculation (COGS)" formula="Historical unit cost × physical units" />
+            </CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold leading-tight tracking-tight tabular-nums break-words text-[#b96816]">
+              {formatCurrency(totalCost)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Cost of goods sold</p>
           </CardContent>
         </Card>
 
@@ -388,7 +414,7 @@ export function ReportsClient({
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${totalProfit >= 0 ? 'text-success' : 'text-destructive'}`}>
+            <div className={`text-2xl font-bold leading-tight tracking-tight tabular-nums break-words ${totalProfit >= 0 ? 'text-success' : 'text-destructive'}`}>
               {formatCurrency(totalProfit)}
             </div>
             <p className="text-xs text-muted-foreground mt-1 flex items-center">
@@ -415,7 +441,7 @@ export function ReportsClient({
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalUnitsSold}</div>
+            <div className="text-2xl font-bold tabular-nums">{totalUnitsSold}</div>
             <p className="text-xs text-muted-foreground mt-1">
               Total products
             </p>
@@ -430,7 +456,9 @@ export function ReportsClient({
             <ShoppingBag className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(avgOrderValue)}</div>
+            <div className="text-2xl font-bold leading-tight tracking-tight tabular-nums break-words">
+              {formatCurrency(avgOrderValue)}
+            </div>
             <p className="text-xs text-muted-foreground mt-1">
               Per order
             </p>
@@ -658,23 +686,12 @@ export function ReportsClient({
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={350}>
-                    <LineChart data={trendData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" tickFormatter={trendXAxisTickFormatter} />
-                      <YAxis />
-                      <Tooltip
-                        formatter={(value) => formatCurrency(Number(value))}
-                        labelFormatter={trendTooltipLabelFormatter}
-                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
-                      />
-                      <Legend />
-                      <Line type="monotone" dataKey="gmv" stroke="#8b5cf6" strokeWidth={2} name="GMV" />
-                      <Line type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={2} name="Revenue" />
-                      <Line type="monotone" dataKey="profit" stroke="#10b981" strokeWidth={2} name="Profit" />
-                      <Line type="monotone" dataKey="cost" stroke="#ef4444" strokeWidth={2} name="Cost" />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <FinancialTrendChart
+                    data={trendData}
+                    xKey="month"
+                    xTickFormatter={trendXAxisTickFormatter}
+                    labelFormatter={trendTooltipLabelFormatter}
+                  />
                 </CardContent>
               </Card>
 
@@ -686,11 +703,11 @@ export function ReportsClient({
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={trendData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="month" tickFormatter={trendXAxisTickFormatter} />
-                      <YAxis />
+                  <ResponsiveContainer width="100%" height={320}>
+                    <BarChart data={trendData} margin={{ top: 8, right: 20, left: 8, bottom: 8 }}>
+                      <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 5" vertical={false} />
+                      <XAxis dataKey="month" tickFormatter={trendXAxisTickFormatter} axisLine={false} tickLine={false} />
+                      <YAxis width={48} axisLine={false} tickLine={false} />
                       <Tooltip
                         labelFormatter={trendTooltipLabelFormatter}
                         contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
@@ -713,28 +730,20 @@ export function ReportsClient({
 
         {/* Channels Tab */}
         <TabsContent value="channels" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
             <Card>
               <CardHeader>
-                <CardTitle>GMV & Revenue by Channel</CardTitle>
-                <CardDescription>Channel performance comparison</CardDescription>
+                <CardTitle>Financial Performance by Channel</CardTitle>
+                <CardDescription>Ranked by GMV with Revenue, Cost, and Profit</CardDescription>
               </CardHeader>
               <CardContent>
-                {overviewReport?.byChannel && overviewReport.byChannel.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={overviewReport.byChannel}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="channel" tickFormatter={(value) => channelLabels[value]} />
-                      <YAxis />
-                      <Tooltip
-                        formatter={(value) => formatCurrency(Number(value))}
-                        labelFormatter={(label) => channelLabels[label as string]}
-                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
-                      />
-                      <Bar dataKey="gmv" fill="#8b5cf6" name="GMV" />
-                      <Bar dataKey="revenue" fill="#3b82f6" name="Revenue" />
-                    </BarChart>
-                  </ResponsiveContainer>
+                {channelsByGmv.length > 0 ? (
+                  <FinancialComparisonChart
+                    data={channelsByGmv}
+                    categoryKey="channel"
+                    categoryFormatter={(value) => channelLabels[value] || value}
+                    height={340}
+                  />
                 ) : (
                   <div className="h-[300px] flex items-center justify-center text-muted-foreground">
                     No channel data
@@ -749,28 +758,45 @@ export function ReportsClient({
                 <CardDescription>Order distribution</CardDescription>
               </CardHeader>
               <CardContent>
-                {overviewReport?.byChannel && overviewReport.byChannel.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <PieChart>
+                {channelsByGmv.length > 0 ? (
+                  <>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
                       <Pie
-                        data={overviewReport.byChannel}
+                        data={channelsByGmv}
                         cx="50%"
-                        cy="50%"
+                        cy="45%"
                         labelLine={false}
-                        label={(entry: any) => `${channelLabels[entry.channel]}: ${entry.orders}`}
-                        outerRadius={100}
+                        label={false}
+                        outerRadius={88}
                         fill="#8884d8"
                         dataKey="orders"
                       >
-                        {overviewReport.byChannel.map((entry: any, index: number) => (
+                        {channelsByGmv.map((entry: any, index: number) => (
                           <Cell key={`cell-${index}`} fill={channelColors[entry.channel] || COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>
                       <Tooltip
+                        formatter={(value, _name, item) => [
+                          `${Number(value).toLocaleString()} orders`,
+                          channelLabels[String(item.payload.channel)] || String(item.payload.channel),
+                        ]}
                         contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
                       />
-                    </PieChart>
-                  </ResponsiveContainer>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                      {channelsByGmv.map((entry: any, index: number) => (
+                        <div key={entry.channel} className="flex items-center gap-1.5">
+                          <span
+                            className="h-2.5 w-2.5 rounded-full"
+                            style={{ backgroundColor: channelColors[entry.channel] || COLORS[index % COLORS.length] }}
+                          />
+                          <span>{channelLabels[entry.channel] || entry.channel}: {entry.orders}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 ) : (
                   <div className="h-[300px] flex items-center justify-center text-muted-foreground">
                     No channel data
@@ -792,7 +818,6 @@ export function ReportsClient({
                     <TableRow>
                       <TableHead>Channel</TableHead>
                       <TableHead className="text-right">Orders</TableHead>
-                      <TableHead className="text-right">Fees</TableHead>
                       <TableHead className="text-right">GMV</TableHead>
                       <TableHead className="text-right">
                         <span className="inline-flex items-center">
@@ -805,6 +830,12 @@ export function ReportsClient({
                       </TableHead>
                       <TableHead className="text-right">
                         <span className="inline-flex items-center">
+                          Cost
+                          <InfoTooltip content="Cost calculation (COGS)" formula="Historical unit cost × physical units" />
+                        </span>
+                      </TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center">
                           Profit
                           <InfoTooltip
                             content="Profit calculation"
@@ -812,6 +843,7 @@ export function ReportsClient({
                           />
                         </span>
                       </TableHead>
+                      <TableHead className="text-right">Fees</TableHead>
                       <TableHead className="text-right">
                         <span className="inline-flex items-center">
                           Avg Order
@@ -824,23 +856,26 @@ export function ReportsClient({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {overviewReport.byChannel.map((channel: any) => (
+                    {channelsByGmv.map((channel: any) => (
                       <TableRow key={channel.channel}>
                         <TableCell className="font-medium">
                           {channelLabels[channel.channel]}
                         </TableCell>
                         <TableCell className="text-right">{channel.orders}</TableCell>
-                        <TableCell className="text-right text-destructive">
-                          {formatCurrency(channel.fees)}
-                        </TableCell>
                         <TableCell className="text-right">{formatCurrency(channel.gmv)}</TableCell>
                         <TableCell className="text-right">
                           {formatCurrency(channel.revenue)}
+                        </TableCell>
+                        <TableCell className="text-right text-[#b96816]">
+                          {formatCurrency(channel.cost)}
                         </TableCell>
                         <TableCell className="text-right font-semibold">
                           <span className={channel.profit >= 0 ? 'text-success' : 'text-destructive'}>
                             {formatCurrency(channel.profit)}
                           </span>
+                        </TableCell>
+                        <TableCell className="text-right text-destructive">
+                          {formatCurrency(channel.fees)}
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground">
                           {formatCurrency(channel.gmv / channel.orders)}
@@ -860,62 +895,25 @@ export function ReportsClient({
 
         {/* Products Tab */}
         <TabsContent value="products" className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>GMV & Revenue by Product</CardTitle>
-                <CardDescription>Product revenue comparison</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {overviewReport?.byProduct && overviewReport.byProduct.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={overviewReport.byProduct} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" />
-                      <YAxis dataKey="name" type="category" width={120} />
-                      <Tooltip
-                        formatter={(value) => formatCurrency(Number(value))}
-                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
-                      />
-                      <Bar dataKey="gmv" fill="#8b5cf6" name="GMV" />
-                      <Bar dataKey="revenue" fill="#10b981" name="Revenue" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                    No product data
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Profit by Product</CardTitle>
-                <CardDescription>Product profitability</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {overviewReport?.byProduct && overviewReport.byProduct.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={overviewReport.byProduct} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" />
-                      <YAxis dataKey="name" type="category" width={120} />
-                      <Tooltip
-                        formatter={(value) => formatCurrency(Number(value))}
-                        contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
-                      />
-                      <Bar dataKey="profit" fill="#3b82f6" name="Profit" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-                    No product data
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Financial Performance by Product</CardTitle>
+              <CardDescription>Ranked by GMV with Revenue, Cost, and Profit</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {productsByGmv.length > 0 ? (
+                <FinancialComparisonChart
+                  data={productsByGmv}
+                  categoryKey="name"
+                  height={Math.min(620, Math.max(360, productsByGmv.length * 76))}
+                />
+              ) : (
+                <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+                  No product data
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>
@@ -929,7 +927,6 @@ export function ReportsClient({
                     <TableRow>
                       <TableHead>SKU</TableHead>
                       <TableHead>Product</TableHead>
-                      <TableHead className="text-right">Units Sold</TableHead>
                       <TableHead className="text-right">GMV</TableHead>
                       <TableHead className="text-right">
                         <span className="inline-flex items-center">
@@ -958,6 +955,7 @@ export function ReportsClient({
                           />
                         </span>
                       </TableHead>
+                      <TableHead className="text-right">Units Sold</TableHead>
                       <TableHead className="text-right">
                         <span className="inline-flex items-center">
                           Margin %
@@ -970,7 +968,7 @@ export function ReportsClient({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {overviewReport.byProduct.map((product: any) => {
+                    {productsByGmv.map((product: any) => {
                       const returnedForSku = returnedBySku.get(product.sku) || 0
                       const margin = product.revenue > 0
                         ? ((product.profit / product.revenue) * 100)
@@ -980,17 +978,6 @@ export function ReportsClient({
                         <TableRow key={product.sku}>
                           <TableCell className="font-mono text-sm">{product.sku}</TableCell>
                           <TableCell className="font-medium">{product.name}</TableCell>
-                          <TableCell className="text-right font-medium">
-                            <span className="inline-flex items-center justify-end gap-1">
-                              {product.units_sold}
-                              {returnedForSku > 0 ? (
-                                <InfoTooltip
-                                  content="Net units exclude returns. Gross includes returns."
-                                  formula={`Net: ${product.units_sold} · Returned: ${returnedForSku} · Gross: ${product.units_sold + returnedForSku}`}
-                                />
-                              ) : null}
-                            </span>
-                          </TableCell>
                           <TableCell className="text-right">{formatCurrency(product.gmv)}</TableCell>
                           <TableCell className="text-right">
                             {formatCurrency(product.revenue)}
@@ -1001,6 +988,17 @@ export function ReportsClient({
                           <TableCell className="text-right font-semibold">
                             <span className={product.profit >= 0 ? 'text-success' : 'text-destructive'}>
                               {formatCurrency(product.profit)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right font-medium">
+                            <span className="inline-flex items-center justify-end gap-1">
+                              {product.units_sold}
+                              {returnedForSku > 0 ? (
+                                <InfoTooltip
+                                  content="Net units exclude returns. Gross includes returns."
+                                  formula={`Net: ${product.units_sold} · Returned: ${returnedForSku} · Gross: ${product.units_sold + returnedForSku}`}
+                                />
+                              ) : null}
                             </span>
                           </TableCell>
                           <TableCell className="text-right">
