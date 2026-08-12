@@ -14,9 +14,10 @@ export function isValidPackSize(value: string): value is PackSize {
 }
 
 export function getPackMultiplier(packSize: PackSize): number {
-  return PACK_SIZE_OPTIONS.find((item) => item.value === packSize)?.multiplier ?? 1
+  return getSalesPackMultiplier(packSize)
 }
 
 export function getPackSizeLabel(packSize: PackSize): string {
   return PACK_SIZE_OPTIONS.find((item) => item.value === packSize)?.label ?? "Single"
 }
+import { getSalesPackMultiplier } from "@/supabase/functions/_shared/sales-metrics"

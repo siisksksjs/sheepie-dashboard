@@ -1,4 +1,5 @@
 import { DEFAULT_PACK_SIZE, getPackMultiplier } from "@/lib/products/pack-sizes"
+import { resolveSalesUnitCost } from "@/supabase/functions/_shared/sales-metrics"
 
 type CostedProduct = {
   cost_per_unit: number
@@ -14,7 +15,7 @@ export function getLineItemCostPerUnit(
   lineItem: CostedLineItem,
   product?: CostedProduct | null
 ) {
-  return lineItem.cost_per_unit_snapshot ?? product?.cost_per_unit ?? 0
+  return resolveSalesUnitCost(lineItem.cost_per_unit_snapshot, product?.cost_per_unit) ?? 0
 }
 
 export function getLineItemTotalCost(
