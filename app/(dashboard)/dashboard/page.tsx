@@ -38,10 +38,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     getAllBundlesWithAvailability(),
     getProjectedRevenue(),
   ])
+  const physicalStockData = stockData.filter((item) => !item.is_bundle)
   const stats = {
-    totalProducts: stockData.length,
-    lowStockItems: stockData.filter((item) => item.is_low_stock).length,
-    totalStock: stockData.reduce((sum, item) => sum + item.current_stock, 0),
+    totalProducts: physicalStockData.length,
+    lowStockItems: physicalStockData.filter((item) => item.is_low_stock).length,
+    totalStock: physicalStockData.reduce((sum, item) => sum + item.current_stock, 0),
   }
   const paidOrdersCount = salesReport.byChannel.reduce((sum, channel) => sum + channel.orders, 0)
   const totalGmv = salesReport.byChannel.reduce((sum, channel) => sum + channel.gmv, 0)
@@ -115,7 +116,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
       </p>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6 mb-8">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 mb-8">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -171,7 +172,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">
+            <div className="text-2xl font-bold leading-tight tracking-tight tabular-nums break-words 2xl:text-3xl">
               {formatCurrency(totalGmv)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
@@ -185,7 +186,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{formatCurrency(totalRevenue)}</div>
+            <div className="text-2xl font-bold leading-tight tracking-tight tabular-nums break-words 2xl:text-3xl">
+              {formatCurrency(totalRevenue)}
+            </div>
             <p className="text-xs text-muted-foreground mt-1">GMV minus channel fees</p>
           </CardContent>
         </Card>
@@ -195,7 +198,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">{formatCurrency(totalProfit)}</div>
+            <div className="text-2xl font-bold leading-tight tracking-tight tabular-nums break-words 2xl:text-3xl">
+              {formatCurrency(totalProfit)}
+            </div>
             <p className="text-xs text-muted-foreground mt-1">Revenue minus COGS</p>
           </CardContent>
         </Card>
@@ -484,11 +489,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         <CardHeader>
           <CardTitle>Stock Overview</CardTitle>
           <CardDescription>
-            Current inventory levels (bundles calculated from components)
+            Current inventory levels for main SKUs
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {stockData.length === 0 ? (
+          {physicalStockData.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               No products in inventory. Add products to get started.
             </div>
@@ -503,7 +508,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {stockData.filter(item => !item.is_bundle).map((item) => (
+                {physicalStockData.map((item) => (
                   <TableRow key={item.id}>
                     <TableCell className="font-mono text-sm">{item.sku}</TableCell>
                     <TableCell>
@@ -529,24 +534,6 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
                       ) : (
                         <Badge variant="outline">Discontinued</Badge>
                       )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {/* Bundles with calculated availability */}
-                {bundles.map((bundle) => (
-                  <TableRow key={bundle.id} className="bg-muted/30">
-                    <TableCell className="font-mono text-sm">{bundle.sku}</TableCell>
-                    <TableCell>
-                      <div className="font-medium">{bundle.name}</div>
-                      <div className="text-xs text-muted-foreground">Bundle ({bundle.compositions?.length || 0} components)</div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span className={bundle.is_low_stock ? "font-semibold text-warning" : "text-muted-foreground"}>
-                        {bundle.available_stock}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">Bundle</Badge>
                     </TableCell>
                   </TableRow>
                 ))}
