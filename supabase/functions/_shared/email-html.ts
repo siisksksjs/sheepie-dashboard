@@ -38,20 +38,22 @@ type DailyKpiProductRow = {
   name: string
   targetUnits: number
   actualUnits: number
-  targetRevenue: number
+  targetGmv: number
+  actualGmv: number
   actualRevenue: number
   remainingUnits: number
-  remainingRevenue: number
+  remainingGmv: number
   todayUnitPace: number
-  todayRevenuePace: number
+  todayGmvPace: number
   unitProgress: number
-  revenueProgress: number
+  gmvProgress: number
 }
 
 type DailySalesEmailRow = {
   label: string
   channel: string
   units: number
+  gmv: number
   revenue: number
 }
 
@@ -270,14 +272,15 @@ export function renderDailyKpiReportEmailHtml(input: {
   totals: {
     targetUnits: number
     actualUnits: number
-    targetRevenue: number
+    targetGmv: number
+    actualGmv: number
     actualRevenue: number
     remainingUnits: number
-    remainingRevenue: number
+    remainingGmv: number
     todayUnitPace: number
-    todayRevenuePace: number
+    todayGmvPace: number
     unitProgress: number
-    revenueProgress: number
+    gmvProgress: number
     gmvProgress: number
   }
   rows: DailyKpiProductRow[]
@@ -285,6 +288,7 @@ export function renderDailyKpiReportEmailHtml(input: {
     dateLabel: string
     totalOrders: number
     totalUnits: number
+    totalGmv: number
     totalRevenue: number
     items: DailySalesEmailRow[]
   }
@@ -302,34 +306,34 @@ export function renderDailyKpiReportEmailHtml(input: {
         </tr>
         <tr>
           <td style="padding:10px 8px 0 0;color:#64748b;font-size:12px;">GMV</td>
-          <td style="padding:10px 0 0;text-align:right;color:#213368;font-weight:700;">${formatCurrency(row.actualRevenue)} / ${formatCurrency(row.targetRevenue)}</td>
+          <td style="padding:10px 0 0;text-align:right;color:#213368;font-weight:700;">${formatCurrency(row.actualGmv)} / ${formatCurrency(row.targetGmv)}</td>
         </tr>
         <tr>
-          <td colspan="2">${progressBar(row.revenueProgress, "GMV progress")}</td>
+          <td colspan="2">${progressBar(row.gmvProgress, "GMV progress")}</td>
         </tr>
         <tr>
           <td style="padding:10px 8px 0 0;color:#64748b;font-size:12px;">Today pace</td>
-          <td style="padding:10px 0 0;text-align:right;color:#213368;font-weight:700;">${row.todayUnitPace} units · ${formatCurrency(row.todayRevenuePace)}</td>
+          <td style="padding:10px 0 0;text-align:right;color:#213368;font-weight:700;">${row.todayUnitPace} units · ${formatCurrency(row.todayGmvPace)}</td>
         </tr>
       </table>
     </div>
   `).join("")
 
-  const maxDailyRevenue = Math.max(...input.dailySales.items.map((item) => item.revenue), 0)
+  const maxDailyGmv = Math.max(...input.dailySales.items.map((item) => item.gmv), 0)
   const dailySalesBars = input.dailySales.items.length > 0
     ? input.dailySales.items.map((item) => `
       <div style="margin:0 0 12px;">
         <table style="width:100%;border-collapse:collapse;margin-bottom:5px;">
           <tr>
             <td style="font-size:13px;font-weight:700;color:#213368;">${escapeHtml(item.label)}</td>
-            <td style="font-size:13px;text-align:right;color:#213368;font-weight:700;">${formatCurrency(item.revenue)}</td>
+            <td style="font-size:13px;text-align:right;color:#213368;font-weight:700;">GMV ${formatCurrency(item.gmv)}</td>
           </tr>
           <tr>
             <td style="font-size:12px;color:#64748b;">${escapeHtml(item.channel)}</td>
-            <td style="font-size:12px;text-align:right;color:#64748b;">${item.units} units</td>
+            <td style="font-size:12px;text-align:right;color:#64748b;">Revenue ${formatCurrency(item.revenue)} · ${item.units} units</td>
           </tr>
         </table>
-        ${horizontalBar(item.revenue, maxDailyRevenue)}
+        ${horizontalBar(item.gmv, maxDailyGmv)}
       </div>
     `).join("")
     : `<div style="padding:14px;background:#f4f8fb;border:1px dashed #dbe8f5;border-radius:14px;color:#64748b;">No paid or shipped sales recorded today.</div>`
@@ -341,12 +345,13 @@ export function renderDailyKpiReportEmailHtml(input: {
     <table style="width:100%;border-collapse:collapse;margin:0 -6px 18px;">
       <tbody>
         <tr>
-          ${metricCard("Current GMV", formatCurrency(input.totals.actualRevenue), `${formatPercent(input.totals.gmvProgress)} of target`)}
-          ${metricCard("Target GMV", formatCurrency(input.totals.targetRevenue))}
+          ${metricCard("Current GMV", formatCurrency(input.totals.actualGmv), `${formatPercent(input.totals.gmvProgress)} of target`)}
+          ${metricCard("Target GMV", formatCurrency(input.totals.targetGmv))}
         </tr>
         <tr>
-          ${metricCard("Yesterday sales", formatCurrency(input.dailySales.totalRevenue), `${input.dailySales.totalOrders} orders · ${input.dailySales.totalUnits} units`)}
-          ${metricCard("Today pace needed", formatCurrency(input.totals.todayRevenuePace), `${input.totals.todayUnitPace} units`)}
+          ${metricCard("Yesterday GMV", formatCurrency(input.dailySales.totalGmv), `${input.dailySales.totalOrders} orders · ${input.dailySales.totalUnits} units`)}
+          ${metricCard("Yesterday Revenue", formatCurrency(input.dailySales.totalRevenue))}
+          ${metricCard("Today pace needed", formatCurrency(input.totals.todayGmvPace), `${input.totals.todayUnitPace} units`)}
         </tr>
       </tbody>
     </table>

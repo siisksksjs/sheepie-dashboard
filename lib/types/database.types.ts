@@ -120,7 +120,7 @@ export type MonthlyKpiTarget = {
   month: string
   sku: string
   target_units: number
-  target_revenue: number
+  target_gmv: number
   created_at: string
   updated_at: string
 }

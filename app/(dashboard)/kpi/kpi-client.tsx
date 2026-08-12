@@ -29,26 +29,27 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
     const base = rows.reduce(
       (acc, row) => ({
         target_units: acc.target_units + row.target_units,
-        target_revenue: acc.target_revenue + row.target_revenue,
+        target_gmv: acc.target_gmv + row.target_gmv,
         actual_units: acc.actual_units + row.actual_units,
+        actual_gmv: acc.actual_gmv + row.actual_gmv,
         actual_revenue: acc.actual_revenue + row.actual_revenue,
       }),
-      { target_units: 0, target_revenue: 0, actual_units: 0, actual_revenue: 0 },
+      { target_units: 0, target_gmv: 0, actual_units: 0, actual_gmv: 0, actual_revenue: 0 },
     )
     const unitsProgress = getProgress(base.actual_units, base.target_units)
-    const revenueProgress = getProgress(base.actual_revenue, base.target_revenue)
+    const gmvProgress = getProgress(base.actual_gmv, base.target_gmv)
 
     return {
       ...base,
       units_progress: unitsProgress,
-      revenue_progress: revenueProgress,
-      overall_progress: (unitsProgress + revenueProgress) / 2,
+      gmv_progress: gmvProgress,
+      overall_progress: (unitsProgress + gmvProgress) / 2,
     }
   }, [rows])
 
   const monthPacing = getMonthPacing(month)
 
-  const updateRow = (sku: string, field: "target_units" | "target_revenue", value: string) => {
+  const updateRow = (sku: string, field: "target_units" | "target_gmv", value: string) => {
     const parsed = Number(value)
     const nextValue = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
 
@@ -74,7 +75,7 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
         rows: rows.map((row) => ({
           sku: row.sku,
           target_units: row.target_units,
-          target_revenue: row.target_revenue,
+          target_gmv: row.target_gmv,
         })),
       })
 
@@ -95,6 +96,9 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
           <h1 className="text-3xl font-display font-bold mb-2">KPI</h1>
           <p className="text-muted-foreground">
             Monthly product targets compared with actual sales performance.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            GMV is customer sales before channel fees. Existing saved money targets were preserved—please review them once as GMV targets.
           </p>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
@@ -128,11 +132,11 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
             </CardTitle>
           </CardHeader>
           <CardContent className="flex min-h-[330px] flex-col items-center justify-center pt-2">
-            <CircularGauge value={totals.revenue_progress} size={228} strokeWidth={24} />
+            <CircularGauge value={totals.gmv_progress} size={228} strokeWidth={24} />
             <div className="mt-5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-2xl font-semibold leading-tight">
-              <span className="text-primary">Current {formatCompactNumber(totals.actual_revenue)}</span>
+              <span className="text-primary">Current {formatCompactNumber(totals.actual_gmv)}</span>
               <span className="text-muted-foreground">|</span>
-              <span className="text-[#5d626b]">Target {formatCompactNumber(totals.target_revenue)}</span>
+              <span className="text-[#5d626b]">Target {formatCompactNumber(totals.target_gmv)}</span>
             </div>
           </CardContent>
         </Card>
@@ -161,7 +165,8 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard title="Target Units" value={totals.target_units.toLocaleString()} />
         <MetricCard title="Actual Units" value={totals.actual_units.toLocaleString()} />
-        <MetricCard title="Target Revenue" value={formatCurrency(totals.target_revenue)} />
+        <MetricCard title="Target GMV" value={formatCurrency(totals.target_gmv)} />
+        <MetricCard title="Actual GMV" value={formatCurrency(totals.actual_gmv)} />
         <MetricCard title="Actual Revenue" value={formatCurrency(totals.actual_revenue)} />
       </div>
 
@@ -197,11 +202,11 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
                     valueLabel={`${row.actual_units.toLocaleString()} / ${row.target_units.toLocaleString()} units`}
                   />
                   <ProgressRow
-                    label="Revenue"
-                    actual={row.actual_revenue}
-                    target={row.target_revenue}
-                    value={getProgress(row.actual_revenue, row.target_revenue)}
-                    valueLabel={`${formatCurrency(row.actual_revenue)} / ${formatCurrency(row.target_revenue)}`}
+                    label="GMV"
+                    actual={row.actual_gmv}
+                    target={row.target_gmv}
+                    value={getProgress(row.actual_gmv, row.target_gmv)}
+                    valueLabel={`${formatCurrency(row.actual_gmv)} / ${formatCurrency(row.target_gmv)}`}
                   />
                 </div>
 
@@ -226,7 +231,7 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
         <CardHeader>
           <CardTitle>Product KPI Targets</CardTitle>
           <CardDescription>
-            Input target units sold and target revenue for each active product.
+            Input target units sold and Target GMV for each active product. Revenue is shown after channel fees.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -237,14 +242,17 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
                   <TableHead>Product</TableHead>
                   <TableHead className="text-right">Target Units</TableHead>
                   <TableHead className="text-right">Actual Units</TableHead>
-                  <TableHead className="text-right">Target Revenue</TableHead>
+                  <TableHead className="text-right">Target GMV</TableHead>
+                  <TableHead className="text-right">Actual GMV</TableHead>
                   <TableHead className="text-right">Actual Revenue</TableHead>
                   <TableHead className="text-right">Progress</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map((row) => {
-                  const rowProgress = (getProgress(row.actual_units, row.target_units) + getProgress(row.actual_revenue, row.target_revenue)) / 2
+                  const rowProgress = row.is_targetable
+                    ? (getProgress(row.actual_units, row.target_units) + getProgress(row.actual_gmv, row.target_gmv)) / 2
+                    : 0
 
                   return (
                     <TableRow key={row.sku}>
@@ -258,6 +266,7 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
                           min={0}
                           value={row.target_units}
                           onChange={(event) => updateRow(row.sku, "target_units", event.target.value)}
+                          disabled={!row.is_targetable}
                           className="text-right"
                         />
                       </TableCell>
@@ -267,13 +276,15 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
                           type="number"
                           min={0}
                           step="1000"
-                          value={row.target_revenue}
-                          onChange={(event) => updateRow(row.sku, "target_revenue", event.target.value)}
+                          value={row.target_gmv}
+                          onChange={(event) => updateRow(row.sku, "target_gmv", event.target.value)}
+                          disabled={!row.is_targetable}
                           className="text-right"
                         />
                       </TableCell>
+                      <TableCell className="text-right font-medium">{formatCurrency(row.actual_gmv)}</TableCell>
                       <TableCell className="text-right font-medium">{formatCurrency(row.actual_revenue)}</TableCell>
-                      <TableCell className="text-right font-semibold">{rowProgress.toFixed(0)}%</TableCell>
+                      <TableCell className="text-right font-semibold">{row.is_targetable ? `${rowProgress.toFixed(0)}%` : "—"}</TableCell>
                     </TableRow>
                   )
                 })}

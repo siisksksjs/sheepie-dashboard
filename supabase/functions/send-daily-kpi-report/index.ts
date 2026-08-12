@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.2"
 import { assertAuthorizedRequest, jsonResponse } from "../_shared/auth.ts"
 import { renderDailyKpiReportEmailHtml } from "../_shared/email-html.ts"
 import { sendEmail } from "../_shared/resend.ts"
+import { calculateSalesOrder, getSalesPackMultiplier } from "../_shared/sales-metrics.ts"
 
 const JAKARTA_TIME_ZONE = "Asia/Jakarta"
 const KPI_BASE_SKUS = ["Cervi-001", "Lumi-001", "Calmi-001"]
@@ -23,13 +24,6 @@ type OrderRow = {
 
 function uniqueEmails(users: Array<{ email?: string | null }>) {
   return Array.from(new Set(users.map((user) => user.email).filter((email): email is string => Boolean(email))))
-}
-
-function getPackMultiplier(packSize: string | null) {
-  if (packSize === "bundle_2") return 2
-  if (packSize === "bundle_3") return 3
-  if (packSize === "bundle_4") return 4
-  return 1
 }
 
 function getJakartaDateParts(date: Date) {
@@ -170,41 +164,46 @@ async function buildDailyKpiReport(supabase: ReturnType<typeof createClient>, no
     compositionsByBundle.set(composition.bundle_sku, existing)
   }
 
-  const actualsBySku = new Map<string, { units: number; revenue: number }>()
+  const actualsBySku = new Map<string, { units: number; gmv: number; revenue: number }>()
   const dailySalesByProductChannel = new Map<string, {
     label: string
     channel: string
     units: number
+    gmv: number
     revenue: number
   }>()
   let dailySalesOrders = 0
   let dailySalesUnits = 0
+  let dailySalesGmv = 0
   let dailySalesRevenue = 0
-  const addActual = (sku: string, units: number, revenue: number) => {
+  const addActual = (sku: string, units: number, gmv: number, revenue: number) => {
     if (!KPI_BASE_SKU_SET.has(sku)) return
-    const existing = actualsBySku.get(sku) || { units: 0, revenue: 0 }
+    const existing = actualsBySku.get(sku) || { units: 0, gmv: 0, revenue: 0 }
     actualsBySku.set(sku, {
       units: existing.units + units,
+      gmv: existing.gmv + gmv,
       revenue: existing.revenue + revenue,
     })
   }
 
   for (const order of ordersResult.data as OrderRow[]) {
     const lineItems = order.order_line_items || []
-    const totalOrderValue = lineItems.reduce((sum, item) => sum + item.selling_price * item.quantity, 0)
+    const calculatedOrder = calculateSalesOrder({
+      channelFees: order.channel_fees,
+      lines: lineItems.map((item, index) => ({
+        key: String(index), sellingPrice: item.selling_price, quantity: item.quantity,
+        packSize: item.pack_size, unitCost: null,
+      })),
+    })
     const orderDateKey = order.order_date
       ? dateKeyFromParts(getJakartaDateParts(new Date(order.order_date)))
       : ""
     let orderHasTodaySales = false
 
-    for (const item of lineItems) {
-      const unitCount = item.quantity * getPackMultiplier(item.pack_size)
-      const itemTotalPrice = item.selling_price * item.quantity
-      const allocatedFee = totalOrderValue > 0 && order.channel_fees
-        ? (order.channel_fees * itemTotalPrice) / totalOrderValue
-        : 0
-      const itemRevenue = itemTotalPrice - allocatedFee
-      const recordDailySales = (sku: string, label: string, units: number, revenue: number) => {
+    for (const [itemIndex, item] of lineItems.entries()) {
+      const lineMetrics = calculatedOrder.lines[itemIndex]
+      const unitCount = item.quantity * getSalesPackMultiplier(item.pack_size)
+      const recordDailySales = (sku: string, label: string, units: number, gmv: number, revenue: number) => {
         if (orderDateKey !== completedSalesDateKey) {
           return
         }
@@ -214,22 +213,25 @@ async function buildDailyKpiReport(supabase: ReturnType<typeof createClient>, no
           label,
           channel: formatChannel(order.channel),
           units: 0,
+          gmv: 0,
           revenue: 0,
         }
 
         dailySalesByProductChannel.set(key, {
           ...existing,
           units: existing.units + units,
+          gmv: existing.gmv + gmv,
           revenue: existing.revenue + revenue,
         })
         dailySalesUnits += units
+        dailySalesGmv += gmv
         dailySalesRevenue += revenue
         orderHasTodaySales = true
       }
 
       if (KPI_BASE_SKU_SET.has(item.sku)) {
-        addActual(item.sku, unitCount, itemRevenue)
-        recordDailySales(item.sku, formatProductName(catalogBySku.get(item.sku) || { sku: item.sku, name: item.sku }), unitCount, itemRevenue)
+        addActual(item.sku, unitCount, lineMetrics.gmv, lineMetrics.revenue)
+        recordDailySales(item.sku, formatProductName(catalogBySku.get(item.sku) || { sku: item.sku, name: item.sku }), unitCount, lineMetrics.gmv, lineMetrics.revenue)
         continue
       }
 
@@ -242,13 +244,15 @@ async function buildDailyKpiReport(supabase: ReturnType<typeof createClient>, no
 
       for (const component of componentRows) {
         const componentUnits = component.quantity * unitCount
-        const revenueShare = totalComponentUnits > 0 ? (itemRevenue * componentUnits) / totalComponentUnits : 0
+        const gmvShare = totalComponentUnits > 0 ? (lineMetrics.gmv * componentUnits) / totalComponentUnits : 0
+        const revenueShare = totalComponentUnits > 0 ? (lineMetrics.revenue * componentUnits) / totalComponentUnits : 0
         const componentProduct = catalogBySku.get(component.component_sku)
-        addActual(component.component_sku, componentUnits, revenueShare)
+        addActual(component.component_sku, componentUnits, gmvShare, revenueShare)
         recordDailySales(
           component.component_sku,
           formatProductName(componentProduct || { sku: component.component_sku, name: component.component_sku }),
           componentUnits,
+          gmvShare,
           revenueShare,
         )
       }
@@ -262,25 +266,26 @@ async function buildDailyKpiReport(supabase: ReturnType<typeof createClient>, no
   const rows = products
     .map((product) => {
       const target = targetsBySku.get(product.sku)
-      const actual = actualsBySku.get(product.sku) || { units: 0, revenue: 0 }
+      const actual = actualsBySku.get(product.sku) || { units: 0, gmv: 0, revenue: 0 }
       const targetUnits = Number(target?.target_units || 0)
-      const targetRevenue = Number(target?.target_revenue || 0)
+      const targetGmv = Number(target?.target_gmv || 0)
       const remainingUnits = Math.max(0, targetUnits - actual.units)
-      const remainingRevenue = Math.max(0, targetRevenue - actual.revenue)
+      const remainingGmv = Math.max(0, targetGmv - actual.gmv)
 
       return {
         sku: product.sku,
         name: formatProductName(product),
         targetUnits,
         actualUnits: actual.units,
-        targetRevenue,
+        targetGmv,
+        actualGmv: actual.gmv,
         actualRevenue: actual.revenue,
         remainingUnits,
-        remainingRevenue,
+        remainingGmv,
         todayUnitPace: Math.ceil(remainingUnits / daysRemaining),
-        todayRevenuePace: remainingRevenue / daysRemaining,
+        todayGmvPace: remainingGmv / daysRemaining,
         unitProgress: progressPercent(actual.units, targetUnits),
-        revenueProgress: progressPercent(actual.revenue, targetRevenue),
+        gmvProgress: progressPercent(actual.gmv, targetGmv),
       }
     })
     .sort((a, b) => (KPI_BASE_SKU_ORDER.get(a.sku) ?? 999) - (KPI_BASE_SKU_ORDER.get(b.sku) ?? 999))
@@ -289,12 +294,13 @@ async function buildDailyKpiReport(supabase: ReturnType<typeof createClient>, no
     (acc, row) => ({
       targetUnits: acc.targetUnits + row.targetUnits,
       actualUnits: acc.actualUnits + row.actualUnits,
-      targetRevenue: acc.targetRevenue + row.targetRevenue,
+      targetGmv: acc.targetGmv + row.targetGmv,
+      actualGmv: acc.actualGmv + row.actualGmv,
       actualRevenue: acc.actualRevenue + row.actualRevenue,
       remainingUnits: acc.remainingUnits + row.remainingUnits,
-      remainingRevenue: acc.remainingRevenue + row.remainingRevenue,
+      remainingGmv: acc.remainingGmv + row.remainingGmv,
     }),
-    { targetUnits: 0, actualUnits: 0, targetRevenue: 0, actualRevenue: 0, remainingUnits: 0, remainingRevenue: 0 },
+    { targetUnits: 0, actualUnits: 0, targetGmv: 0, actualGmv: 0, actualRevenue: 0, remainingUnits: 0, remainingGmv: 0 },
   )
 
   const monthLabel = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(
@@ -324,16 +330,16 @@ async function buildDailyKpiReport(supabase: ReturnType<typeof createClient>, no
       }).format(new Date(`${completedSalesDateKey}T00:00:00.000+07:00`)),
       totalOrders: dailySalesOrders,
       totalUnits: dailySalesUnits,
+      totalGmv: dailySalesGmv,
       totalRevenue: dailySalesRevenue,
       items: Array.from(dailySalesByProductChannel.values()).sort((a, b) => b.revenue - a.revenue),
     },
     totals: {
       ...totalsBase,
       todayUnitPace: Math.ceil(totalsBase.remainingUnits / daysRemaining),
-      todayRevenuePace: totalsBase.remainingRevenue / daysRemaining,
+      todayGmvPace: totalsBase.remainingGmv / daysRemaining,
       unitProgress: progressPercent(totalsBase.actualUnits, totalsBase.targetUnits),
-      revenueProgress: progressPercent(totalsBase.actualRevenue, totalsBase.targetRevenue),
-      gmvProgress: progressPercent(totalsBase.actualRevenue, totalsBase.targetRevenue),
+      gmvProgress: progressPercent(totalsBase.actualGmv, totalsBase.targetGmv),
     },
   }
 }

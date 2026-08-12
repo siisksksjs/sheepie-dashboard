@@ -3,9 +3,8 @@
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import type { BundleComposition, MonthlyKpiTarget, OrderLineItem, Product } from "@/lib/types/database.types"
-import { DEFAULT_PACK_SIZE, getPackMultiplier } from "@/lib/products/pack-sizes"
+import { buildKpiActuals, KPI_BASE_SKUS } from "@/lib/kpi/workspace"
 
-const KPI_BASE_SKUS = ["Cervi-001", "Lumi-001", "Calmi-001"] as const
 const KPI_BASE_SKU_SET = new Set<string>(KPI_BASE_SKUS)
 const KPI_BASE_SKU_ORDER = new Map<string, number>(
   KPI_BASE_SKUS.map((sku, index) => [sku, index]),
@@ -15,9 +14,11 @@ export type KpiProductRow = {
   sku: string
   name: string
   variant: string | null
+  is_targetable: boolean
   target_units: number
-  target_revenue: number
+  target_gmv: number
   actual_units: number
+  actual_gmv: number
   actual_revenue: number
 }
 
@@ -26,11 +27,12 @@ export type KpiWorkspace = {
   rows: KpiProductRow[]
   totals: {
     target_units: number
-    target_revenue: number
+    target_gmv: number
     actual_units: number
+    actual_gmv: number
     actual_revenue: number
     units_progress: number
-    revenue_progress: number
+    gmv_progress: number
     overall_progress: number
   }
 }
@@ -40,7 +42,7 @@ type SaveKpiInput = {
   rows: Array<{
     sku: string
     target_units: number
-    target_revenue: number
+    target_gmv: number
   }>
 }
 
@@ -149,103 +151,49 @@ export async function getKpiWorkspace(monthValue: string): Promise<KpiWorkspace>
   const targets = (targetsResult.data || []) as MonthlyKpiTarget[]
   const orders = (ordersResult.data || []) as KpiOrder[]
   const targetsBySku = new Map(targets.map((target) => [target.sku, target]))
-  const productsBySku = new Map(productCatalog.map((product) => [product.sku, product]))
-  const bundleCompositionsBySku = ((bundleCompositionsResult.data || []) as Pick<
+  const bundleCompositions = (bundleCompositionsResult.data || []) as Pick<
     BundleComposition,
     "bundle_sku" | "component_sku" | "quantity"
-  >[]).reduce((groups, composition) => {
-    const existing = groups.get(composition.bundle_sku) || []
-    existing.push(composition)
-    groups.set(composition.bundle_sku, existing)
-    return groups
-  }, new Map<string, Pick<BundleComposition, "bundle_sku" | "component_sku" | "quantity">[]>())
-  const actualsBySku = new Map<string, { actual_units: number; actual_revenue: number }>()
-
-  const addActual = (sku: string, units: number, revenue: number) => {
-    if (!KPI_BASE_SKU_SET.has(sku)) {
-      return
-    }
-
-    const existing = actualsBySku.get(sku) || { actual_units: 0, actual_revenue: 0 }
-
-    actualsBySku.set(sku, {
-      actual_units: existing.actual_units + units,
-      actual_revenue: existing.actual_revenue + revenue,
-    })
-  }
-
-  for (const order of orders) {
-    const lineItems = order.order_line_items || []
-    const totalOrderValue = lineItems.reduce(
-      (sum, item) => sum + ((item.selling_price || 0) * (item.quantity || 0)),
-      0,
-    )
-
-    for (const item of lineItems) {
-      const unitCount = (item.quantity || 0) * getPackMultiplier(item.pack_size ?? DEFAULT_PACK_SIZE)
-      const itemTotalPrice = (item.selling_price || 0) * (item.quantity || 0)
-      const allocatedChannelFee = totalOrderValue > 0 && order.channel_fees
-        ? (order.channel_fees * itemTotalPrice) / totalOrderValue
-        : 0
-      const itemRevenue = itemTotalPrice - allocatedChannelFee
-      const product = productsBySku.get(item.sku)
-
-      if (KPI_BASE_SKU_SET.has(item.sku)) {
-        addActual(item.sku, unitCount, itemRevenue)
-        continue
-      }
-
-      if (!product?.is_bundle) {
-        continue
-      }
-
-      const componentRows = (bundleCompositionsBySku.get(item.sku) || [])
-        .filter((component) => KPI_BASE_SKU_SET.has(component.component_sku))
-      const totalComponentUnits = componentRows.reduce(
-        (sum, component) => sum + (component.quantity * unitCount),
-        0,
-      )
-
-      for (const component of componentRows) {
-        const componentUnits = component.quantity * unitCount
-        const revenueShare = totalComponentUnits > 0
-          ? (itemRevenue * componentUnits) / totalComponentUnits
-          : 0
-
-        addActual(component.component_sku, componentUnits, revenueShare)
-      }
-    }
-  }
+  >[]
+  const actuals = buildKpiActuals({ orders, products: productCatalog, bundleCompositions })
 
   const rows = products
     .map((product) => {
       const target = targetsBySku.get(product.sku)
-      const actual = actualsBySku.get(product.sku) || { actual_units: 0, actual_revenue: 0 }
+      const actual = actuals.bySku.get(product.sku) || { actual_units: 0, actual_gmv: 0, actual_revenue: 0 }
 
       return {
         sku: product.sku,
         name: product.name,
         variant: product.variant,
+        is_targetable: true,
         target_units: target?.target_units || 0,
-        target_revenue: Number(target?.target_revenue || 0),
-        actual_units: actual.actual_units,
-        actual_revenue: actual.actual_revenue,
+        target_gmv: Number(target?.target_gmv || 0),
+        ...actual,
       }
     })
     .sort((a, b) => (KPI_BASE_SKU_ORDER.get(a.sku) ?? 999) - (KPI_BASE_SKU_ORDER.get(b.sku) ?? 999))
 
+  if (actuals.other.actual_units || actuals.other.actual_gmv || actuals.other.actual_revenue) {
+    rows.push({
+      sku: "__other__", name: "Other products and bundles", variant: null,
+      is_targetable: false, target_units: 0, target_gmv: 0, ...actuals.other,
+    })
+  }
+
   const totals = rows.reduce(
     (acc, row) => ({
       target_units: acc.target_units + row.target_units,
-      target_revenue: acc.target_revenue + row.target_revenue,
+      target_gmv: acc.target_gmv + row.target_gmv,
       actual_units: acc.actual_units + row.actual_units,
+      actual_gmv: acc.actual_gmv + row.actual_gmv,
       actual_revenue: acc.actual_revenue + row.actual_revenue,
     }),
-    { target_units: 0, target_revenue: 0, actual_units: 0, actual_revenue: 0 },
+    { target_units: 0, target_gmv: 0, actual_units: 0, actual_gmv: 0, actual_revenue: 0 },
   )
 
   const unitsProgress = progressPercent(totals.actual_units, totals.target_units)
-  const revenueProgress = progressPercent(totals.actual_revenue, totals.target_revenue)
+  const gmvProgress = progressPercent(totals.actual_gmv, totals.target_gmv)
 
   return {
     month: monthKey,
@@ -253,8 +201,8 @@ export async function getKpiWorkspace(monthValue: string): Promise<KpiWorkspace>
     totals: {
       ...totals,
       units_progress: unitsProgress,
-      revenue_progress: revenueProgress,
-      overall_progress: (unitsProgress + revenueProgress) / 2,
+      gmv_progress: gmvProgress,
+      overall_progress: (unitsProgress + gmvProgress) / 2,
     },
   }
 }
@@ -272,7 +220,7 @@ export async function saveMonthlyKpiTargets(input: SaveKpiInput): Promise<SaveKp
       month,
       sku: row.sku,
       target_units: Math.round(clampNumber(row.target_units)),
-      target_revenue: clampNumber(row.target_revenue),
+      target_gmv: clampNumber(row.target_gmv),
     }))
 
   const supabase = await createClient()
