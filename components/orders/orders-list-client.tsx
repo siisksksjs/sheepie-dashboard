@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Eye, Search } from "lucide-react"
+import { Eye } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -115,13 +115,16 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
 
       <div className="rounded-xl border bg-card p-4 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="relative w-full sm:max-w-xl">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <div className="w-full sm:max-w-xl">
             <Input
+              type="search"
+              name="order-search"
+              autoComplete="off"
+              data-1p-ignore="true"
+              data-lpignore="true"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search by product name or exact GMV, revenue, or profit"
-              className="pl-10"
+              placeholder="Search by product name, GMV, revenue, or profit"
               aria-label="Search orders"
             />
           </div>
@@ -130,16 +133,15 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
           </p>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          Amounts are exact matches. Example: Rp500.000
+          Amounts can be partial. Example: 500000
         </p>
       </div>
 
       {filteredOrders.length === 0 ? (
         <div className="rounded-xl border bg-card px-6 py-12 text-center">
-          <Search className="mx-auto mb-3 h-9 w-9 text-muted-foreground" />
           <h2 className="font-semibold text-foreground">No orders match your search</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Try another product name or enter the full GMV, revenue, or profit amount.
+            Try another product name or enter part of the GMV, revenue, or profit amount.
           </p>
           <Button className="mt-4" variant="outline" onClick={() => setSearchQuery("")}>
             Clear Search

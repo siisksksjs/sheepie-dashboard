@@ -16,6 +16,13 @@ const orders = [
     profit: 500_000,
     order_line_items: [{ product_name: "CerviCloud Pillow" }],
   },
+  {
+    id: "order-calmi",
+    gmv: 1_500_000,
+    revenue: 1_250_000,
+    profit: 820_000,
+    order_line_items: [{ product_name: "CalmiCloud Ear Plug" }],
+  },
 ]
 
 describe("order smart search", () => {
@@ -28,14 +35,19 @@ describe("order smart search", () => {
     expect(filterOrdersForSearch(orders, "PILLOW").map((order) => order.id)).toEqual(["order-cervi"])
   })
 
-  it.each(["Rp500.000", "500.000", "500000"])("matches exact amounts entered as %s", (query) => {
+  it.each(["Rp500.000", "500.000", "500000"])("matches amounts containing %s", (query) => {
     expect(filterOrdersForSearch(orders, query).map((order) => order.id)).toEqual([
       "order-lumi",
       "order-cervi",
+      "order-calmi",
     ])
   })
 
-  it("does not partially match a nearby amount", () => {
-    expect(filterOrdersForSearch(orders, "50000")).toEqual([])
+  it("matches partial amount digits", () => {
+    expect(filterOrdersForSearch(orders, "50000").map((order) => order.id)).toEqual([
+      "order-lumi",
+      "order-cervi",
+      "order-calmi",
+    ])
   })
 })

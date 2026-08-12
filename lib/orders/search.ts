@@ -5,20 +5,16 @@ export type SearchableOrder = {
   order_line_items: Array<{ product_name: string }>
 }
 
-function parseExactRupiahQuery(query: string) {
+function parseRupiahQuery(query: string) {
   const normalized = query.trim()
 
-  if (!/^(?:rp\s*)?-?[\d.,]+$/i.test(normalized)) {
+  if (!/^(?:rp\s*)?[\d.,]+$/i.test(normalized)) {
     return null
   }
 
-  const isNegative = normalized.replace(/^rp\s*/i, "").startsWith("-")
   const digits = normalized.replace(/\D/g, "")
 
-  if (!digits) return null
-
-  const amount = Number(digits)
-  return isNegative ? -amount : amount
+  return digits || null
 }
 
 export function filterOrdersForSearch<Order extends SearchableOrder>(orders: Order[], query: string) {
@@ -26,10 +22,10 @@ export function filterOrdersForSearch<Order extends SearchableOrder>(orders: Ord
 
   if (!normalizedQuery) return orders
 
-  const exactAmount = parseExactRupiahQuery(normalizedQuery)
-  if (exactAmount !== null) {
+  const amountQuery = parseRupiahQuery(normalizedQuery)
+  if (amountQuery !== null) {
     return orders.filter((order) => [order.gmv, order.revenue, order.profit]
-      .some((value) => Math.round(Number(value || 0)) === exactAmount))
+      .some((value) => String(Math.round(Number(value || 0))).includes(amountQuery)))
   }
 
   const productQuery = normalizedQuery.toLocaleLowerCase("id-ID")
