@@ -2,6 +2,7 @@ import { cache } from "react"
 import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import type { Channel, FinanceCategory, OrderLineItem, OrderStatus } from "@/lib/types/database.types"
+import { calculateSalesOrder, isQualifyingSalesStatus } from "@/supabase/functions/_shared/sales-metrics"
 
 const MARKETPLACE_CHANNELS: Channel[] = ["shopee", "tokopedia", "tiktok"]
 const SETTLED_ORDER_STATUSES: OrderStatus[] = ["paid", "shipped"]
@@ -16,15 +17,20 @@ export function isMarketplaceChannel(channel: Channel) {
 }
 
 export function isSettledOrderStatus(status: OrderStatus) {
-  return SETTLED_ORDER_STATUSES.includes(status)
+  return SETTLED_ORDER_STATUSES.includes(status) && isQualifyingSalesStatus(status)
 }
 
 export function calculateOrderSettlementAmount(
   lineItems: Array<Pick<OrderLineItem, "quantity" | "selling_price">>,
   channelFees: number | null
 ) {
-  const grossAmount = lineItems.reduce((sum, item) => sum + (item.quantity * item.selling_price), 0)
-  return grossAmount - (channelFees || 0)
+  return calculateSalesOrder({
+    channelFees,
+    lines: lineItems.map((item, index) => ({
+      key: String(index), sellingPrice: item.selling_price, quantity: item.quantity,
+      packSize: "single", unitCost: null,
+    })),
+  }).totals.revenue
 }
 
 const getMarketplaceSettlementCategory = cache(async () => {

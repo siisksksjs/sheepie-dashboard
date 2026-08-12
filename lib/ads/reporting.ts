@@ -654,21 +654,6 @@ function sortMonthlyAdSpendRows(rows: MonthlyAdSpend[]) {
   })
 }
 
-function calculateLineItemRevenue(input: {
-  quantity: number
-  selling_price: number
-  orderChannelFees: number | null
-  totalOrderValue: number
-}) {
-  const grossRevenue = (input.selling_price || 0) * (input.quantity || 0)
-
-  if (!input.orderChannelFees || input.totalOrderValue <= 0) {
-    return grossRevenue
-  }
-
-  return grossRevenue - (input.orderChannelFees * grossRevenue) / input.totalOrderValue
-}
-
 function buildSkuScopeMonthKey(
   month: string,
   sku: string,

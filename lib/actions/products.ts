@@ -17,6 +17,7 @@ import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
 import type { ProductCogsHistoryEntry } from "@/lib/products/cogs-history"
 import { buildProductCogsHistory } from "@/lib/products/cogs-history"
+import { calculateSalesOrder } from "@/supabase/functions/_shared/sales-metrics"
 import { PACK_SIZE_OPTIONS } from "@/lib/products/pack-sizes"
 
 type ProductEditWorkspace = {
@@ -500,26 +501,18 @@ async function _getProjectedRevenueInternal() {
     for (const order of allOrders || []) {
       const lineItems = (order as any).order_line_items || []
 
-      // Calculate total order value for proportional fee allocation
-      const totalOrderValue = lineItems.reduce((sum: number, item: any) => {
-        return sum + (item.selling_price * item.quantity)
-      }, 0)
+      const metrics = calculateSalesOrder({
+        channelFees: order.channel_fees,
+        lines: lineItems.map((item: any, index: number) => ({
+          key: String(index), sellingPrice: item.selling_price, quantity: item.quantity,
+          packSize: "single", unitCost: null,
+        })),
+      })
 
-      for (const item of lineItems) {
+      for (const [itemIndex, item] of lineItems.entries()) {
         const stats = skuStats.get(item.sku)
         if (!stats) continue // Skip if not an active product
-
-        const itemTotalPrice = item.selling_price * item.quantity
-
-        // Allocate channel fees proportionally
-        let allocatedChannelFee = 0
-        if (totalOrderValue > 0 && order.channel_fees) {
-          const proportion = itemTotalPrice / totalOrderValue
-          allocatedChannelFee = order.channel_fees * proportion
-        }
-
-        const itemRevenue = itemTotalPrice - allocatedChannelFee
-        stats.totalRevenue += itemRevenue
+        stats.totalRevenue += metrics.lines[itemIndex].revenue
         stats.totalUnitsSold += item.quantity
       }
     }

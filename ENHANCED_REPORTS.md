@@ -185,14 +185,16 @@ Then switch to **"Channel × Product"** with same filters to see:
 
 ## Report Metrics Explained
 
-### Revenue
-Gross revenue = Sum of (selling_price × quantity) for all orders
+### GMV and Revenue
+GMV = Sum of (selling_price × purchased quantity) for paid and shipped orders
+
+Revenue = GMV - Channel Fees
 
 ### Cost (COGS)
 Total cost = Sum of (cost_per_unit × quantity) from products table
 
 ### Profit
-Gross profit = Revenue - Cost
+Profit = Revenue - Cost
 (Does NOT include channel fees in this calculation)
 
 ### Margin %
@@ -204,8 +206,8 @@ Profit Margin = (Profit / Revenue) × 100%
 - Profit: Rp 380,000
 - Margin: (380,000 / 880,000) × 100% = **43.2%**
 
-### Net Revenue (Channel Report Only)
-Net Revenue = Gross Revenue - Channel Fees
+### Profit After Ads
+Profit After Ads = Profit - Ad Spend
 
 ---
 

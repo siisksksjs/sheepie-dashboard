@@ -108,6 +108,14 @@ If no funding account is selected:
 
 ## P&L Logic
 
+Sales metric names are consistent across the dashboard:
+
+- `GMV` = customer-paid sales before channel fees
+- `Revenue` = GMV minus channel fees
+- `COGS` = historical product cost of physical units sold
+- `Profit` = Revenue minus COGS
+- `Profit After Ads` = Profit minus ad spend
+
 P&L is calculated from a mix of automatic and manual data.
 
 Included in P&L:
@@ -127,11 +135,11 @@ Not included in P&L:
 
 Formula:
 
-1. Gross Revenue
+1. GMV
 2. Less Channel Fees
-3. Net Sales
+3. Revenue
 4. Less COGS
-5. Gross Profit
+5. Profit
 6. Less Ad Spend
 7. Less Operating Expenses
 8. Plus Other Income

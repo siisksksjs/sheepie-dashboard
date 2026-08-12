@@ -395,7 +395,7 @@ export const getFinanceProfitAndLoss = cache(async (year?: number, month?: numbe
   }
 
   const channelRows = reports.overview.byChannel || []
-  const grossRevenue = channelRows.reduce((sum, channel) => sum + channel.revenue + channel.fees, 0)
+  const grossRevenue = channelRows.reduce((sum, channel) => sum + channel.gmv, 0)
   const channelFees = channelRows.reduce((sum, channel) => sum + channel.fees, 0)
   const netSales = channelRows.reduce((sum, channel) => sum + channel.revenue, 0)
   const cogs = reports.overview.byProduct.reduce((sum, product) => sum + product.cost, 0)

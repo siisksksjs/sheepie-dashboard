@@ -60,8 +60,9 @@ type HeatmapMetric = "units" | "orders" | "revenue"
 type CalendarDaySummary = {
   orders: number
   units: number
+  gmv: number
   revenue: number
-  items: { sku: string; name: string; quantity: number; revenue: number }[]
+  items: { sku: string; name: string; quantity: number; gmv: number; revenue: number }[]
 }
 type ChannelProductRow = {
   channel: string
@@ -256,6 +257,7 @@ export function ReportsClient({
   }
   const selectedCalendarDetails = selectedCalendarDate ? detailedByDate[selectedCalendarDate] : null
   const selectedCalendarItems = selectedCalendarDetails?.items || []
+  const selectedCalendarTotalGmv = selectedCalendarItems.reduce((sum: number, item: any) => sum + item.gmv, 0)
   const selectedCalendarTotalRevenue = selectedCalendarItems.reduce((sum: number, item: any) => sum + item.revenue, 0)
   const groupedChannelProductData = ((channelProductReport?.data || []) as ChannelProductRow[]).reduce((groups: Array<{
     sku: string
@@ -652,7 +654,7 @@ export function ReportsClient({
             <>
               <Card>
                 <CardHeader>
-                  <CardTitle>Revenue & Profit Trends</CardTitle>
+                  <CardTitle>GMV, Revenue & Profit Trends</CardTitle>
                   <CardDescription>
                     {isDailyTrend ? "Daily performance through selected month" : "Monthly performance over time"}
                   </CardDescription>
@@ -669,6 +671,7 @@ export function ReportsClient({
                         contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
                       />
                       <Legend />
+                      <Line type="monotone" dataKey="gmv" stroke="#8b5cf6" strokeWidth={2} name="GMV" />
                       <Line type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={2} name="Revenue" />
                       <Line type="monotone" dataKey="profit" stroke="#10b981" strokeWidth={2} name="Profit" />
                       <Line type="monotone" dataKey="cost" stroke="#ef4444" strokeWidth={2} name="Cost" />
@@ -715,7 +718,7 @@ export function ReportsClient({
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle>Revenue by Channel</CardTitle>
+                <CardTitle>GMV & Revenue by Channel</CardTitle>
                 <CardDescription>Channel performance comparison</CardDescription>
               </CardHeader>
               <CardContent>
@@ -730,6 +733,7 @@ export function ReportsClient({
                         labelFormatter={(label) => channelLabels[label as string]}
                         contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
                       />
+                      <Bar dataKey="gmv" fill="#8b5cf6" name="GMV" />
                       <Bar dataKey="revenue" fill="#3b82f6" name="Revenue" />
                     </BarChart>
                   </ResponsiveContainer>
@@ -791,12 +795,13 @@ export function ReportsClient({
                       <TableHead>Channel</TableHead>
                       <TableHead className="text-right">Orders</TableHead>
                       <TableHead className="text-right">Fees</TableHead>
+                      <TableHead className="text-right">GMV</TableHead>
                       <TableHead className="text-right">
                         <span className="inline-flex items-center">
                           Revenue
                           <InfoTooltip
                             content="Revenue calculation"
-                            formula="Selling Price - Allocated Channel Fees"
+                            formula="GMV - Allocated Channel Fees"
                           />
                         </span>
                       </TableHead>
@@ -814,7 +819,7 @@ export function ReportsClient({
                           Avg Order
                           <InfoTooltip
                             content="Average Order Value"
-                            formula="Total Revenue ÷ Number of Orders"
+                            formula="Total GMV ÷ Number of Orders"
                           />
                         </span>
                       </TableHead>
@@ -830,6 +835,7 @@ export function ReportsClient({
                         <TableCell className="text-right text-destructive">
                           {formatCurrency(channel.fees)}
                         </TableCell>
+                        <TableCell className="text-right">{formatCurrency(channel.gmv)}</TableCell>
                         <TableCell className="text-right">
                           {formatCurrency(channel.revenue)}
                         </TableCell>
@@ -839,7 +845,7 @@ export function ReportsClient({
                           </span>
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground">
-                          {formatCurrency(channel.revenue / channel.orders)}
+                          {formatCurrency(channel.gmv / channel.orders)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -859,7 +865,7 @@ export function ReportsClient({
           <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle>Revenue by Product</CardTitle>
+                <CardTitle>GMV & Revenue by Product</CardTitle>
                 <CardDescription>Product revenue comparison</CardDescription>
               </CardHeader>
               <CardContent>
@@ -873,6 +879,7 @@ export function ReportsClient({
                         formatter={(value) => formatCurrency(Number(value))}
                         contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
                       />
+                      <Bar dataKey="gmv" fill="#8b5cf6" name="GMV" />
                       <Bar dataKey="revenue" fill="#10b981" name="Revenue" />
                     </BarChart>
                   </ResponsiveContainer>
@@ -925,12 +932,13 @@ export function ReportsClient({
                       <TableHead>SKU</TableHead>
                       <TableHead>Product</TableHead>
                       <TableHead className="text-right">Units Sold</TableHead>
+                      <TableHead className="text-right">GMV</TableHead>
                       <TableHead className="text-right">
                         <span className="inline-flex items-center">
                           Revenue
                           <InfoTooltip
                             content="Revenue calculation"
-                            formula="Selling Price - Allocated Channel Fees"
+                            formula="GMV - Allocated Channel Fees"
                           />
                         </span>
                       </TableHead>
@@ -985,6 +993,7 @@ export function ReportsClient({
                               ) : null}
                             </span>
                           </TableCell>
+                          <TableCell className="text-right">{formatCurrency(product.gmv)}</TableCell>
                           <TableCell className="text-right">
                             {formatCurrency(product.revenue)}
                           </TableCell>
@@ -1032,12 +1041,13 @@ export function ReportsClient({
                         <TableHead>Product</TableHead>
                         <TableHead>Pack</TableHead>
                         <TableHead className="text-right">Units</TableHead>
+                        <TableHead className="text-right">GMV</TableHead>
                         <TableHead className="text-right">
                           <span className="inline-flex items-center">
                             Revenue
                             <InfoTooltip
                               content="Revenue calculation"
-                              formula="Selling Price - Allocated Channel Fees"
+                              formula="GMV - Allocated Channel Fees"
                             />
                           </span>
                         </TableHead>
@@ -1065,7 +1075,7 @@ export function ReportsClient({
                       {groupedChannelProductData.map((group) => (
                         <Fragment key={`${group.sku}-group`}>
                           <TableRow key={`${group.sku}-group`} className="bg-muted/40 hover:bg-muted/40">
-                            <TableCell colSpan={7} className="py-3">
+                            <TableCell colSpan={8} className="py-3">
                               <div className="flex items-center justify-between gap-4">
                                 <div className="font-semibold">{group.name}</div>
                                 <div className="text-xs text-muted-foreground">
@@ -1089,6 +1099,7 @@ export function ReportsClient({
                                   {getPackSizeLabel(item.pack_size)}
                                 </TableCell>
                                 <TableCell className="text-right">{item.units_sold}</TableCell>
+                                <TableCell className="text-right">{formatCurrency(item.gmv)}</TableCell>
                                 <TableCell className="text-right">
                                   {formatCurrency(item.revenue)}
                                 </TableCell>
@@ -1131,12 +1142,13 @@ export function ReportsClient({
                       <TableHead>Month</TableHead>
                       <TableHead className="text-right">Orders</TableHead>
                       <TableHead className="text-right">Units</TableHead>
+                      <TableHead className="text-right">GMV</TableHead>
                       <TableHead className="text-right">
                         <span className="inline-flex items-center">
                           Revenue
                           <InfoTooltip
                             content="Revenue calculation"
-                            formula="Selling Price - Allocated Channel Fees"
+                            formula="GMV - Allocated Channel Fees"
                           />
                         </span>
                       </TableHead>
@@ -1180,6 +1192,7 @@ export function ReportsClient({
                           <TableCell className="font-medium">{month.month}</TableCell>
                           <TableCell className="text-right">{month.orders}</TableCell>
                           <TableCell className="text-right">{month.units_sold}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(month.gmv)}</TableCell>
                           <TableCell className="text-right">
                             {formatCurrency(month.revenue)}
                           </TableCell>
@@ -1525,6 +1538,8 @@ export function ReportsClient({
           </DialogHeader>
 
           <div className="text-sm text-muted-foreground">
+            Total GMV: <span className="font-semibold text-foreground">{formatCurrency(selectedCalendarTotalGmv)}</span>
+            <span className="mx-2">·</span>
             Total Revenue: <span className="font-semibold text-foreground">{formatCurrency(selectedCalendarTotalRevenue)}</span>
           </div>
 
@@ -1538,6 +1553,7 @@ export function ReportsClient({
                 <TableRow>
                   <TableHead>Item Sold</TableHead>
                   <TableHead className="text-right">Quantity</TableHead>
+                  <TableHead className="text-right">GMV</TableHead>
                   <TableHead className="text-right">Revenue</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1546,6 +1562,7 @@ export function ReportsClient({
                   <TableRow key={item.sku}>
                     <TableCell className="font-medium">{item.name}</TableCell>
                     <TableCell className="text-right">{item.quantity}</TableCell>
+                    <TableCell className="text-right font-semibold">{formatCurrency(item.gmv)}</TableCell>
                     <TableCell className="text-right font-semibold">{formatCurrency(item.revenue)}</TableCell>
                   </TableRow>
                 ))}
@@ -1636,7 +1653,7 @@ export function ReportsClient({
                   <div className="mb-3">
                     <h3 className="font-semibold">{selectedYearlyCalendarDate}</h3>
                     <p className="text-sm text-muted-foreground">
-                      {selectedYearlyDayDetails.orders} orders • {selectedYearlyDayDetails.units} units • {formatCurrency(selectedYearlyDayDetails.revenue)}
+                      {selectedYearlyDayDetails.orders} orders • {selectedYearlyDayDetails.units} units • GMV {formatCurrency(selectedYearlyDayDetails.gmv)} • Revenue {formatCurrency(selectedYearlyDayDetails.revenue)}
                     </p>
                   </div>
 
@@ -1650,7 +1667,7 @@ export function ReportsClient({
                           </div>
                           <div className="text-right">
                             <div>{item.quantity} units</div>
-                            <div className="text-xs text-muted-foreground">{formatCurrency(item.revenue)}</div>
+                            <div className="text-xs text-muted-foreground">GMV {formatCurrency(item.gmv)} · Revenue {formatCurrency(item.revenue)}</div>
                           </div>
                         </div>
                       ))}
