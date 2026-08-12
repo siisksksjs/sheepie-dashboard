@@ -28,6 +28,10 @@ import {
   buildDailySalesSummary,
   type DailyProductSalesItem,
 } from "@/lib/orders/daily-sales"
+import {
+  calculateSalesOrder,
+  resolveSalesUnitCost,
+} from "@/supabase/functions/_shared/sales-metrics"
 
 export async function getOrders(filters?: {
   status?: OrderStatus
@@ -89,30 +93,25 @@ export async function getOrders(filters?: {
       }
     }) || []
 
-    // Total selling price
-    const totalSellingPrice = lineItemsWithDetails.reduce((sum: number, item: any) =>
-      sum + (item.selling_price * item.quantity), 0
-    )
-
-    const channelFees = order.channel_fees || 0
-
-    // Revenue = Total Selling Price - Channel Fees
-    const revenue = totalSellingPrice - channelFees
-
-    // Total COGS
-    const totalCogs = lineItemsWithDetails.reduce((sum: number, item: any) =>
-      sum + getLineItemTotalCost(item), 0
-    )
-
-    // Net Profit = Revenue - COGS = (Total Selling Price - Channel Fees) - COGS
-    const netProfit = revenue - totalCogs
+    const metrics = calculateSalesOrder({
+      channelFees: order.channel_fees,
+      lines: lineItemsWithDetails.map((item: any, index: number) => ({
+        key: String(index),
+        sellingPrice: item.selling_price,
+        quantity: item.quantity,
+        packSize: item.pack_size,
+        unitCost: item.cost_per_unit,
+      })),
+    })
 
     return {
       ...order,
       order_line_items: lineItemsWithDetails,
-      revenue,
-      net_profit: netProfit,
-      total_cogs: totalCogs,
+      gmv: metrics.totals.gmv,
+      revenue: metrics.totals.revenue,
+      profit: metrics.totals.profit,
+      total_cogs: metrics.totals.cogs,
+      has_complete_cost_data: metrics.totals.hasCompleteCostData,
     }
   })
 
@@ -878,39 +877,47 @@ type ProductSalesRow = {
   name: string
   variant: string | null
   units_sold: number
+  gmv: number
   revenue: number
   cost: number
   profit: number
+  has_complete_cost_data: boolean
 }
 
 type ChannelSalesRow = {
   channel: Channel
   orders: number
+  gmv: number
   revenue: number
   fees: number
   cost: number
   profit: number
+  has_complete_cost_data: boolean
 }
 
 type MonthlySalesRow = {
   month: string
   orders: number
   units_sold: number
+  gmv: number
   revenue: number
   cost: number
   profit: number
+  has_complete_cost_data: boolean
 }
 
 type CalendarItemRow = {
   sku: string
   name: string
   quantity: number
+  gmv: number
   revenue: number
 }
 
 type CalendarDayRow = {
   orders: number
   units: number
+  gmv: number
   revenue: number
   items: CalendarItemRow[]
 }
@@ -921,9 +928,11 @@ type ChannelProductRow = {
   name: string
   pack_size: OrderLineItem["pack_size"]
   units_sold: number
+  gmv: number
   revenue: number
   cost: number
   profit: number
+  has_complete_cost_data: boolean
 }
 
 type ReturnSummary = {
@@ -1056,6 +1065,7 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
   const calendarSales = new Map<string, {
     orders: number
     units: number
+    gmv: number
     revenue: number
     itemsBySku: Map<string, CalendarItemRow>
   }>()
@@ -1069,11 +1079,6 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
 
   for (const order of orders) {
     const lineItems = order.order_line_items || []
-    const totalOrderValue = lineItems.reduce(
-      (sum, item) => sum + ((item.selling_price || 0) * (item.quantity || 0)),
-      0
-    )
-
     if (order.status === "returned") {
       returnedOrders += 1
 
@@ -1094,37 +1099,56 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
 
     const orderMonth = order.order_date.substring(0, 7)
     const orderDay = order.order_date.substring(0, 10)
-    const orderRevenue = totalOrderValue - (order.channel_fees || 0)
+    const calculatedOrder = calculateSalesOrder({
+      channelFees: order.channel_fees,
+      lines: lineItems.map((item, index) => {
+        const product = productMap.get(item.sku)
+        return {
+          key: String(index),
+          sellingPrice: item.selling_price || 0,
+          quantity: item.quantity || 0,
+          packSize: item.pack_size,
+          unitCost: resolveSalesUnitCost(item.cost_per_unit_snapshot, product?.cost_per_unit),
+        }
+      }),
+    })
 
     const channelExisting = channelSales.get(order.channel) || {
       channel: order.channel,
       orders: 0,
+      gmv: 0,
       revenue: 0,
       fees: 0,
       cost: 0,
       profit: 0,
+      has_complete_cost_data: true,
     }
     const monthlyExisting = monthlySales.get(orderMonth) || {
       month: orderMonth,
       orders: 0,
       units_sold: 0,
+      gmv: 0,
       revenue: 0,
       cost: 0,
       profit: 0,
+      has_complete_cost_data: true,
     }
     const dailyExisting = dailySales.get(orderDay) || {
       month: orderDay,
       orders: 0,
       units_sold: 0,
+      gmv: 0,
       revenue: 0,
       cost: 0,
       profit: 0,
+      has_complete_cost_data: true,
     }
 
     if (!calendarSales.has(orderDay)) {
       calendarSales.set(orderDay, {
         orders: 0,
         units: 0,
+        gmv: 0,
         revenue: 0,
         itemsBySku: new Map(),
       })
@@ -1142,45 +1166,45 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
     let orderCost = 0
     let orderUnits = 0
 
-    for (const item of lineItems) {
+    for (const [itemIndex, item] of lineItems.entries()) {
       const product = productMap.get(item.sku)
-      const unitCount = getOrderLineUnits(item)
-      const itemTotalPrice = (item.selling_price || 0) * item.quantity
-      const allocatedChannelFee = totalOrderValue > 0 && order.channel_fees
-        ? (order.channel_fees * itemTotalPrice) / totalOrderValue
-        : 0
-      const itemRevenue = itemTotalPrice - allocatedChannelFee
+      const itemMetrics = calculatedOrder.lines[itemIndex]
+      const unitCount = itemMetrics.units
 
       orderUnits += unitCount
       calendarExisting.units += unitCount
-      calendarExisting.revenue += itemRevenue
+      calendarExisting.gmv += itemMetrics.gmv
+      calendarExisting.revenue += itemMetrics.revenue
 
       const calendarItemExisting = calendarExisting.itemsBySku.get(item.sku) || {
         sku: item.sku,
         name: productLabelBySku.get(item.sku) || item.sku,
         quantity: 0,
+        gmv: 0,
         revenue: 0,
       }
 
       calendarExisting.itemsBySku.set(item.sku, {
         ...calendarItemExisting,
         quantity: calendarItemExisting.quantity + unitCount,
-        revenue: calendarItemExisting.revenue + itemRevenue,
+        gmv: calendarItemExisting.gmv + itemMetrics.gmv,
+        revenue: calendarItemExisting.revenue + itemMetrics.revenue,
       })
 
       if (!product) continue
 
-      const itemCost = getLineItemTotalCost(item, product)
-      orderCost += itemCost
+      orderCost += itemMetrics.cogs
 
       const productExisting = productSales.get(item.sku) || {
         sku: item.sku,
         name: product.name,
         variant: product.variant,
         units_sold: 0,
+        gmv: 0,
         revenue: 0,
         cost: 0,
         profit: 0,
+        has_complete_cost_data: true,
       }
 
       productSales.set(item.sku, {
@@ -1188,9 +1212,11 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
         name: product.name,
         variant: product.variant,
         units_sold: productExisting.units_sold + unitCount,
-        revenue: productExisting.revenue + itemRevenue,
-        cost: productExisting.cost + itemCost,
-        profit: productExisting.profit + (itemRevenue - itemCost),
+        gmv: productExisting.gmv + itemMetrics.gmv,
+        revenue: productExisting.revenue + itemMetrics.revenue,
+        cost: productExisting.cost + itemMetrics.cogs,
+        profit: productExisting.profit + itemMetrics.profit,
+        has_complete_cost_data: productExisting.has_complete_cost_data && itemMetrics.hasCompleteCostData,
       })
 
       const packSize = item.pack_size ?? DEFAULT_PACK_SIZE
@@ -1200,9 +1226,11 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
         name: product.name,
         pack_size: packSize,
         units_sold: 0,
+        gmv: 0,
         revenue: 0,
         cost: 0,
         profit: 0,
+        has_complete_cost_data: true,
       }
 
       channelProductMap.set(channelProductKey, {
@@ -1210,28 +1238,34 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
         name: product.name,
         pack_size: packSize,
         units_sold: channelProductExisting.units_sold + unitCount,
-        revenue: channelProductExisting.revenue + itemRevenue,
-        cost: channelProductExisting.cost + itemCost,
-        profit: channelProductExisting.profit + (itemRevenue - itemCost),
+        gmv: channelProductExisting.gmv + itemMetrics.gmv,
+        revenue: channelProductExisting.revenue + itemMetrics.revenue,
+        cost: channelProductExisting.cost + itemMetrics.cogs,
+        profit: channelProductExisting.profit + itemMetrics.profit,
+        has_complete_cost_data: channelProductExisting.has_complete_cost_data && itemMetrics.hasCompleteCostData,
       })
     }
 
     channelSales.set(order.channel, {
       channel: order.channel,
       orders: channelExisting.orders + 1,
-      revenue: channelExisting.revenue + orderRevenue,
-      fees: channelExisting.fees + (order.channel_fees || 0),
+      gmv: channelExisting.gmv + calculatedOrder.totals.gmv,
+      revenue: channelExisting.revenue + calculatedOrder.totals.revenue,
+      fees: channelExisting.fees + calculatedOrder.totals.channelFees,
       cost: channelExisting.cost + orderCost,
-      profit: channelExisting.profit + (orderRevenue - orderCost),
+      profit: channelExisting.profit + calculatedOrder.totals.profit,
+      has_complete_cost_data: channelExisting.has_complete_cost_data && calculatedOrder.totals.hasCompleteCostData,
     })
 
     monthlySales.set(orderMonth, {
       month: orderMonth,
       orders: monthlyExisting.orders + 1,
       units_sold: monthlyExisting.units_sold + orderUnits,
-      revenue: monthlyExisting.revenue + orderRevenue,
+      gmv: monthlyExisting.gmv + calculatedOrder.totals.gmv,
+      revenue: monthlyExisting.revenue + calculatedOrder.totals.revenue,
       cost: monthlyExisting.cost + orderCost,
-      profit: monthlyExisting.profit + (orderRevenue - orderCost),
+      profit: monthlyExisting.profit + calculatedOrder.totals.profit,
+      has_complete_cost_data: monthlyExisting.has_complete_cost_data && calculatedOrder.totals.hasCompleteCostData,
     })
 
     if (year && month) {
@@ -1239,9 +1273,11 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
         month: orderDay,
         orders: dailyExisting.orders + 1,
         units_sold: dailyExisting.units_sold + orderUnits,
-        revenue: dailyExisting.revenue + orderRevenue,
+        gmv: dailyExisting.gmv + calculatedOrder.totals.gmv,
+        revenue: dailyExisting.revenue + calculatedOrder.totals.revenue,
         cost: dailyExisting.cost + orderCost,
-        profit: dailyExisting.profit + (orderRevenue - orderCost),
+        profit: dailyExisting.profit + calculatedOrder.totals.profit,
+        has_complete_cost_data: dailyExisting.has_complete_cost_data && calculatedOrder.totals.hasCompleteCostData,
       })
     }
   }
@@ -1258,9 +1294,11 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
         month: dateKey,
         orders: 0,
         units_sold: 0,
+        gmv: 0,
         revenue: 0,
         cost: 0,
         profit: 0,
+        has_complete_cost_data: true,
       }
     })
   }
@@ -1281,6 +1319,7 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
       {
         orders: summary.orders,
         units: summary.units,
+        gmv: summary.gmv,
         revenue: summary.revenue,
         items: Array.from(summary.itemsBySku.values()).sort((a, b) => b.revenue - a.revenue),
       },

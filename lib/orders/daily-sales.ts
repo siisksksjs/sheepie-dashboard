@@ -3,6 +3,7 @@ import {
   getPackMultiplier,
   type PackSize,
 } from "@/lib/products/pack-sizes"
+import { calculateSalesOrder } from "@/supabase/functions/_shared/sales-metrics"
 
 type DailySalesLineItem = {
   sku: string
@@ -57,6 +58,7 @@ export function buildDailySalesSummary(input: BuildDailySalesSummaryInput) {
   }
 
   const quantitiesBySku = new Map<string, number>()
+  let totalGmv = 0
   let totalRevenue = 0
 
   const addQuantity = (sku: string, quantity: number) => {
@@ -65,14 +67,18 @@ export function buildDailySalesSummary(input: BuildDailySalesSummaryInput) {
 
   for (const order of input.orders) {
     const lineItems = order.order_line_items || []
-    const orderGross = lineItems.reduce(
-      (sum, item) => sum + (Number(item.selling_price || 0) * Number(item.quantity || 0)),
-      0,
-    )
-
-    if (orderGross > 0) {
-      totalRevenue += orderGross - Number(order.channel_fees || 0)
-    }
+    const metrics = calculateSalesOrder({
+      channelFees: order.channel_fees,
+      lines: lineItems.map((item, index) => ({
+        key: String(index),
+        sellingPrice: item.selling_price,
+        quantity: item.quantity,
+        packSize: item.pack_size,
+        unitCost: null,
+      })),
+    })
+    totalGmv += metrics.totals.gmv
+    totalRevenue += metrics.totals.revenue
 
     for (const item of lineItems) {
       const lineUnits = Number(item.quantity || 0)
@@ -103,6 +109,7 @@ export function buildDailySalesSummary(input: BuildDailySalesSummaryInput) {
     date: input.date,
     totalOrders: input.orders.length,
     totalUnits: items.reduce((sum, item) => sum + item.quantity, 0),
+    totalGmv,
     totalRevenue,
     items,
   }

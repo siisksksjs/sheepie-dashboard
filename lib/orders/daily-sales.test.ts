@@ -41,6 +41,7 @@ describe("buildDailySalesSummary", () => {
       date: "2026-08-01",
       totalOrders: 3,
       totalUnits: 5,
+      totalGmv: 530000,
       totalRevenue: 500000,
       items: [
         { sku: "Lumi-001", productName: "LumiCloud Eye Mask - Standard", quantity: 4 },
