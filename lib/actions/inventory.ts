@@ -6,6 +6,7 @@ import type { InventoryLedger, StockOnHand, MovementType } from "@/lib/types/dat
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
 import { triggerNotificationSender } from "@/lib/notifications/trigger-sender"
+import { buildInventoryLedgerRows } from "@/lib/inventory/ledger-entries"
 
 function formatProductName(name: string, variant?: string | null) {
   return variant ? `${name} - ${variant}` : name
@@ -88,31 +89,68 @@ export async function createLedgerEntry(formData: {
 
   // Get current user
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: stockBefore } = await supabase
-    .from("stock_on_hand")
-    .select("sku, name, variant, current_stock")
+  const { data: product, error: productError } = await supabase
+    .from("products")
+    .select("sku, name, variant, is_bundle")
     .eq("sku", formData.sku)
     .maybeSingle()
 
-  // Use provided date or default to now
-  const entryData = {
-    sku: formData.sku,
-    movement_type: formData.movement_type,
-    quantity: formData.quantity,
-    reference: formData.reference,
-    created_by: user?.id || null,
-    ...(formData.entry_date && { entry_date: formData.entry_date }),
+  if (productError) {
+    console.error("Error loading ledger product:", productError)
+    return { success: false, error: productError.message }
   }
 
-  const { data, error } = await supabase
+  if (!product) {
+    return { success: false, error: `Product ${formData.sku} was not found` }
+  }
+
+  let compositions: { component_sku: string; quantity: number }[] = []
+
+  if (product.is_bundle) {
+    const { data, error } = await supabase
+      .from("bundle_compositions")
+      .select("component_sku, quantity")
+      .eq("bundle_sku", product.sku)
+
+    if (error) {
+      console.error("Error loading bundle composition:", error)
+      return { success: false, error: error.message }
+    }
+
+    compositions = data || []
+  }
+
+  const ledgerRows = buildInventoryLedgerRows({
+    formData,
+    createdBy: user?.id || null,
+    isBundle: product.is_bundle,
+    compositions,
+  })
+
+  if (ledgerRows.error) {
+    return { success: false, error: ledgerRows.error }
+  }
+
+  const affectedSkus = ledgerRows.rows.map((row) => row.sku)
+  const { data: stockBeforeRows } = await supabase
+    .from("stock_on_hand")
+    .select("sku, name, variant, current_stock")
+    .in("sku", affectedSkus)
+
+  const { data: insertedRows, error } = await supabase
     .from("inventory_ledger")
-    .insert([entryData])
+    .insert(ledgerRows.rows)
     .select()
-    .single()
 
   if (error) {
     console.error("Error creating ledger entry:", error)
     return { success: false, error: error.message }
+  }
+
+  const entries = (insertedRows || []) as InventoryLedger[]
+
+  if (entries.length !== ledgerRows.rows.length) {
+    return { success: false, error: "Ledger insert did not return every created entry" }
   }
 
   revalidatePath("/ledger")
@@ -124,88 +162,90 @@ export async function createLedgerEntry(formData: {
     console.error("Error triggering notification sender:", notificationResult.error)
   }
 
-  const { data: stockAfter } = await supabase
+  const { data: stockAfterRows } = await supabase
     .from("stock_on_hand")
     .select("sku, name, variant, current_stock")
-    .eq("sku", data.sku)
-    .maybeSingle()
+    .in("sku", affectedSkus)
 
-  if (!options?.skipMilestoneChangelog && stockAfter) {
-    const previousStock = stockBefore?.current_stock ?? 0
-    const currentStock = stockAfter.current_stock
-    const productLabel = `${stockAfter.name}${stockAfter.variant ? ` - ${stockAfter.variant}` : ""} (${stockAfter.sku})`
+  if (!options?.skipMilestoneChangelog) {
+    const stockBeforeBySku = new Map(
+      (stockBeforeRows || []).map((row) => [row.sku, row.current_stock]),
+    )
     const loggedAt = formData.entry_date
       ? new Date(`${formData.entry_date}T00:00:00.000Z`).toISOString()
       : new Date().toISOString()
 
-    if (previousStock > 0 && currentStock <= 0) {
-      await safeRecordAutomaticChangelogEntry({
-        logged_at: loggedAt,
-        area: "inventory",
-        action_summary: "Product went out of stock",
-        entity_type: "product",
-        entity_id: stockAfter.sku,
-        entity_label: productLabel,
-        notes: formData.reference,
-        items: [
-          buildChangeItem("Stock on hand", previousStock, currentStock),
-          buildChangeItem("Movement type", null, data.movement_type),
-          buildChangeItem("Quantity change", null, data.quantity),
-          buildChangeItem("Entry date", null, data.entry_date),
-        ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
-      })
-    }
+    for (const stockAfter of stockAfterRows || []) {
+      const insertedEntry = entries.find((entry) => entry.sku === stockAfter.sku)
+      if (!insertedEntry) continue
 
-    if (previousStock <= 0 && currentStock > 0) {
-      await safeRecordAutomaticChangelogEntry({
-        logged_at: loggedAt,
-        area: "inventory",
-        action_summary: "Product restocked",
-        entity_type: "product",
-        entity_id: stockAfter.sku,
-        entity_label: productLabel,
-        notes: formData.reference,
-        items: [
-          buildChangeItem("Stock on hand", previousStock, currentStock),
-          buildChangeItem("Movement type", null, data.movement_type),
-          buildChangeItem("Quantity change", null, data.quantity),
-          buildChangeItem("Entry date", null, data.entry_date),
-        ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
-      })
+      const previousStock = stockBeforeBySku.get(stockAfter.sku) ?? 0
+      const currentStock = stockAfter.current_stock
+      const productLabel = `${stockAfter.name}${stockAfter.variant ? ` - ${stockAfter.variant}` : ""} (${stockAfter.sku})`
+
+      if (previousStock > 0 && currentStock <= 0) {
+        await safeRecordAutomaticChangelogEntry({
+          logged_at: loggedAt,
+          area: "inventory",
+          action_summary: "Product went out of stock",
+          entity_type: "product",
+          entity_id: stockAfter.sku,
+          entity_label: productLabel,
+          notes: formData.reference,
+          items: [
+            buildChangeItem("Stock on hand", previousStock, currentStock),
+            buildChangeItem("Movement type", null, insertedEntry.movement_type),
+            buildChangeItem("Quantity change", null, insertedEntry.quantity),
+            buildChangeItem("Entry date", null, insertedEntry.entry_date),
+          ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+        })
+      }
+
+      if (previousStock <= 0 && currentStock > 0) {
+        await safeRecordAutomaticChangelogEntry({
+          logged_at: loggedAt,
+          area: "inventory",
+          action_summary: "Product restocked",
+          entity_type: "product",
+          entity_id: stockAfter.sku,
+          entity_label: productLabel,
+          notes: formData.reference,
+          items: [
+            buildChangeItem("Stock on hand", previousStock, currentStock),
+            buildChangeItem("Movement type", null, insertedEntry.movement_type),
+            buildChangeItem("Quantity change", null, insertedEntry.quantity),
+            buildChangeItem("Entry date", null, insertedEntry.entry_date),
+          ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+        })
+      }
     }
   }
 
   if (!options?.skipChangelog) {
-    const { data: product } = await supabase
-      .from("products")
-      .select("sku, name, variant")
-      .eq("sku", data.sku)
-      .single()
-
-    const productName = product
-      ? formatProductName(product.name, product.variant)
-      : data.sku
-    const productLabel = product
-      ? `${productName} (${product.sku})`
-      : data.sku
+    const productName = formatProductName(product.name, product.variant)
+    const productLabel = `${productName} (${product.sku})`
+    const componentDeductions = entries.length > 1 || entries[0]?.sku !== formData.sku
+      ? entries.map((entry) => `${entry.sku} ${entry.quantity}`).join("; ")
+      : null
 
     await safeRecordAutomaticChangelogEntry({
       area: "inventory",
-      action_summary: options?.actionSummary || getInventoryActionSummary(data.movement_type, productName),
+      action_summary: options?.actionSummary || getInventoryActionSummary(formData.movement_type, productName),
       entity_type: "product",
-      entity_id: data.sku,
+      entity_id: product.sku,
       entity_label: productLabel,
       notes: options?.notes || null,
       items: [
-        buildChangeItem("Movement type", null, data.movement_type),
-        buildChangeItem("Quantity", null, data.quantity),
-        buildChangeItem("Entry date", null, data.entry_date),
-        buildChangeItem("Reference", null, data.reference),
+        buildChangeItem("Movement type", null, formData.movement_type),
+        buildChangeItem("Quantity", null, formData.quantity),
+        buildChangeItem("Entry date", null, entries[0]?.entry_date),
+        buildChangeItem("Reference", null, formData.reference),
+        buildChangeItem("Component deductions", null, componentDeductions),
       ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
     })
   }
 
-  return { success: true, data }
+  return { success: true, data: entries[0], entries }
 }
 
 export async function getDashboardStats() {
