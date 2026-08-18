@@ -24,7 +24,7 @@ CREATE TABLE bio_events (
   cta_id TEXT CHECK (cta_id IS NULL OR char_length(cta_id) <= 100),
   cta_position TEXT CHECK (cta_position IS NULL OR char_length(cta_position) <= 100),
   destination TEXT CHECK (destination IS NULL OR destination IN (
-    'shopee', 'tokopedia', 'website', 'whatsapp', 'instagram', 'tiktok', 'share'
+    'shopee', 'tokopedia', 'website', 'whatsapp', 'instagram', 'tiktok', 'email', 'share'
   )),
   landing_path TEXT NOT NULL DEFAULT '/bio' CHECK (landing_path = '/bio'),
   referrer_category TEXT CHECK (referrer_category IS NULL OR char_length(referrer_category) <= 100),

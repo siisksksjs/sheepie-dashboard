@@ -17,6 +17,7 @@ export type BioDestination =
   | 'whatsapp'
   | 'instagram'
   | 'tiktok'
+  | 'email'
   | 'share'
 
 export type BioEvent = {

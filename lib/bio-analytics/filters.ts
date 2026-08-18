@@ -59,6 +59,7 @@ export function parseBioFilters(params: BioSearchParams): BioAnalyticsFilters {
       "whatsapp",
       "instagram",
       "tiktok",
+      "email",
       "share",
     ]),
     utmSources: readList(params.source),

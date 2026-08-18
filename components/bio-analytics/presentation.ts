@@ -20,17 +20,20 @@ export const DESTINATION_LABELS: Record<BioDestination, string> = {
   whatsapp: "WhatsApp",
   instagram: "Instagram",
   tiktok: "TikTok",
+  email: "Email",
   share: "Share",
 }
 
 export const SECTION_LABELS: Record<string, string> = {
   "bio-header": "Header",
+  "bio-banner": "Banner",
   "bio-hero": "Hero",
   "bio-system-intro": "System intro",
   "bio-product-alignment": "CerviCloud",
   "bio-product-darkness": "LumiCloud",
   "bio-product-silence": "CalmiCloud",
   "bio-hub": "Link hub",
+  "bio-testimonials": "Shopee reviews",
   "bio-trust": "Trust",
   "bio-final": "Final CTA",
   "bio-footer": "Footer",
