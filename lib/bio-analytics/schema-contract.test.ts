@@ -75,7 +75,7 @@ describe("bio analytics TypeScript contracts", () => {
     >()
     expectTypeOf(event.product_slug).toEqualTypeOf<ProductSlug | null>()
     expectTypeOf(event.destination).toEqualTypeOf<BioDestination | null>()
-    expectTypeOf(event.landing_path).toEqualTypeOf<"/bio">()
+    expectTypeOf(event.landing_path).toEqualTypeOf<"/bio" | "/go">()
     expectTypeOf(event.screen_category).toEqualTypeOf<
       "mobile" | "tablet" | "desktop" | null
     >()
@@ -104,7 +104,7 @@ describe("bio analytics migration contract", () => {
       expect(source).toContain(`'${eventName}'`)
     }
     expect(source).toMatch(/sequence_no integer[^,]*check\s*\(sequence_no\s*>\s*0\)/i)
-    expect(source).toMatch(/landing_path text[^,]*check\s*\(landing_path\s*=\s*'\/bio'\)/i)
+    expect(source).toMatch(/landing_path text[^,]*check\s*\(landing_path in\s*\('\/bio', '\/go'\)\)/i)
     expect(source).toMatch(
       /product_slug text check\s*\(product_slug is null or product_slug in\s*\(\s*'cervicloud',\s*'lumicloud',\s*'calmicloud'\s*\)\s*\)/i,
     )

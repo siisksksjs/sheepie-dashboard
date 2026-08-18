@@ -35,7 +35,7 @@ export type BioEvent = {
   cta_id: string | null
   cta_position: string | null
   destination: BioDestination | null
-  landing_path: '/bio'
+  landing_path: '/bio' | '/go'
   referrer_category: string | null
   utm_source: string | null
   utm_medium: string | null
