@@ -134,6 +134,57 @@ Matching the main Sheepie website (sheepiesleep.com):
 - `npm run typecheck` - Run TypeScript type checking
 - `npm run test:bio-integration` - Apply the bio analytics migration and run behavior tests against the dedicated PostgreSQL database in `TEST_DATABASE_URL`. The database must be empty and disposable, support `pg_cron`, and use a superuser-equivalent test connection with permission to create extensions and roles and to `SET ROLE`. The test cleans up its analytics objects and roles afterward.
 
+## Bio Analytics
+
+`/bio-analytics` combines two independent sources for the `sheepiesleep.com/bio` page.
+
+- **Umami Cloud** supplies traffic: visitors, page views, referrers, and the device,
+  browser, OS, country, and region breakdowns.
+- **Supabase** supplies behavior: sessions, engaged sessions, section and product views,
+  scroll depth, outbound clicks, journeys, and the raw event stream.
+
+The two are counted separately and always labeled. Outbound clicks are clicks toward a
+marketplace — they are never reported as purchases or revenue.
+
+### Configuration
+
+Copy `.env.example` to `.env.local` and fill in:
+
+| Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Shared Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Anonymous key; reads run under the signed-in user's RLS policies |
+| `UMAMI_API_KEY` | Umami Cloud API key, sent as the `x-umami-api-key` header (never a bearer token) |
+| `UMAMI_WEBSITE_ID` | Umami website id for sheepiesleep.com |
+| `UMAMI_API_BASE_URL` | Optional; defaults to `https://api.umami.is/v1` |
+
+Umami is queried **server-side only**. Its key has no `NEXT_PUBLIC_` prefix, so importing
+the client module from a browser bundle simply reports the source as `unconfigured`.
+
+### Rate limits and caching
+
+The Umami Cloud API key is limited to **50 calls per 15 seconds**. One dashboard load
+issues nine requests in a single `Promise.allSettled` batch, and every response is cached
+for **five minutes** via `next.revalidate`.
+
+### Degraded sources
+
+Each source reports `healthy`, `unavailable`, or `unconfigured` independently:
+
+- Missing `UMAMI_API_KEY` or `UMAMI_WEBSITE_ID` → `unconfigured`; a banner explains the
+  setup and all Supabase panels stay fully usable.
+- A failing Umami endpoint → `unavailable`; the successful panels still render, the failed
+  ones show an empty state, and the banner lists which calls failed.
+- A failing event-detail query degrades only the event table; the aggregate RPCs failing
+  raises a single opaque dashboard error rather than leaking database messages.
+
+"No matching events" and "data source unavailable" are always shown as distinct states.
+
+### Retention
+
+Raw events are retained for 13 months. `delete_expired_bio_events(retain_months)` performs
+the deletion and is safe to invoke repeatedly.
+
 ## License
 
 Private - Internal use only
