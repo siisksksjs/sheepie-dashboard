@@ -25,7 +25,7 @@ import type { BioAnalyticsBundle, SourceStatus } from "@/lib/bio-analytics/types
 type KpiCard = {
   label: string
   value: string
-  source: "Umami" | "Supabase"
+  source: "PostHog" | "Supabase"
   info: string
   unavailable?: boolean
 }
@@ -48,12 +48,12 @@ function SourceBanner({ status, errors }: { status: SourceStatus; errors: string
       <div>
         <p className="font-medium">
           {isUnconfigured
-            ? "Umami traffic data is not configured."
-            : "Umami traffic data is unavailable."}
+            ? "PostHog traffic data is not configured."
+            : "PostHog traffic data is unavailable."}
         </p>
         <p className="text-muted-foreground">
           {isUnconfigured
-            ? "Set UMAMI_API_KEY and UMAMI_WEBSITE_ID to show visitors and audience breakdowns. The Supabase behavior data below is unaffected."
+            ? "Set POSTHOG_API_KEY and POSTHOG_PROJECT_ID to show visitors and audience breakdowns. The Supabase behavior data below is unaffected."
             : "Visitor and audience panels may be empty. The Supabase behavior data below is unaffected."}
         </p>
         {errors.length > 0 ? (
@@ -65,26 +65,26 @@ function SourceBanner({ status, errors }: { status: SourceStatus; errors: string
 }
 
 export function BioAnalyticsClient({ bundle }: { bundle: BioAnalyticsBundle }) {
-  const { filters, range, supabase, umami } = bundle
+  const { filters, range, supabase, traffic } = bundle
   const { kpis } = supabase.summary
-  const umamiReady = umami.status === "healthy" && umami.stats !== null
-  const trafficPoints = mergeTrafficSeries(umami.series, supabase.summary.time_series)
+  const trafficReady = traffic.status === "healthy" && traffic.stats !== null
+  const trafficPoints = mergeTrafficSeries(traffic.series, supabase.summary.time_series)
   const query = serializeBioFilters(filters)
 
   const cards: KpiCard[] = [
     {
       label: "Visitors",
-      value: umamiReady ? formatCount(umami.stats!.visitors) : "—",
-      source: "Umami",
-      info: "Unique visitors to /bio according to Umami. Counted separately from bio sessions.",
-      unavailable: !umamiReady,
+      value: trafficReady ? formatCount(traffic.stats!.visitors) : "—",
+      source: "PostHog",
+      info: "Unique visitors to /bio according to PostHog. Counted separately from bio sessions.",
+      unavailable: !trafficReady,
     },
     {
       label: "Page views",
-      value: umamiReady ? formatCount(umami.stats!.pageviews) : "—",
-      source: "Umami",
-      info: "Total /bio page views according to Umami.",
-      unavailable: !umamiReady,
+      value: trafficReady ? formatCount(traffic.stats!.pageviews) : "—",
+      source: "PostHog",
+      info: "Total /bio page views according to PostHog.",
+      unavailable: !trafficReady,
     },
     {
       label: "Bio sessions",
@@ -142,7 +142,7 @@ export function BioAnalyticsClient({ bundle }: { bundle: BioAnalyticsBundle }) {
         </a>
       </header>
 
-      <SourceBanner status={umami.status} errors={umami.errors} />
+      <SourceBanner status={traffic.status} errors={traffic.errors} />
       {supabase.status !== "healthy" && supabase.errors.length > 0 ? (
         <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm" role="status">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -185,9 +185,9 @@ export function BioAnalyticsClient({ bundle }: { bundle: BioAnalyticsBundle }) {
         <BreakdownChart
           title="Referrers"
           description="Where visitors to /bio came from."
-          source="Umami"
+          source="PostHog"
           labelHeader="Referrer"
-          rows={umami.metrics.referrer}
+          rows={traffic.breakdowns.referrer}
         />
       </div>
 
@@ -196,38 +196,38 @@ export function BioAnalyticsClient({ bundle }: { bundle: BioAnalyticsBundle }) {
       <div className="grid gap-4 lg:grid-cols-2">
         <BreakdownChart
           title="Devices"
-          description="Device categories according to Umami."
-          source="Umami"
+          description="Device categories according to PostHog."
+          source="PostHog"
           labelHeader="Device"
-          rows={umami.metrics.device}
+          rows={traffic.breakdowns.device}
         />
         <BreakdownChart
           title="Browsers"
           description="Browsers visitors used."
-          source="Umami"
+          source="PostHog"
           labelHeader="Browser"
-          rows={umami.metrics.browser}
+          rows={traffic.breakdowns.browser}
         />
         <BreakdownChart
           title="Operating systems"
           description="Visitor operating systems."
-          source="Umami"
+          source="PostHog"
           labelHeader="Operating system"
-          rows={umami.metrics.os}
+          rows={traffic.breakdowns.os}
         />
         <BreakdownChart
           title="Countries"
-          description="Visitor countries according to Umami."
-          source="Umami"
+          description="Visitor countries according to PostHog."
+          source="PostHog"
           labelHeader="Country"
-          rows={umami.metrics.country}
+          rows={traffic.breakdowns.country}
         />
         <BreakdownChart
           title="Regions"
-          description="Visitor regions according to Umami."
-          source="Umami"
+          description="Visitor regions according to PostHog."
+          source="PostHog"
           labelHeader="Region"
-          rows={umami.metrics.region}
+          rows={traffic.breakdowns.region}
         />
       </div>
 

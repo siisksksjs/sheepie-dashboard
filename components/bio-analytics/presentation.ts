@@ -2,7 +2,7 @@ import { CHART_COLORS } from "@/lib/charts/theme"
 import type { BioDestination, ProductSlug } from "@/lib/bio-analytics/types"
 
 export const TRAFFIC_SERIES = [
-  { key: "visitors", label: "Visitors (Umami)", color: CHART_COLORS.blue },
+  { key: "visitors", label: "Visitors (PostHog)", color: CHART_COLORS.blue },
   { key: "sessions", label: "Bio sessions (Supabase)", color: CHART_COLORS.violet },
   { key: "clicks", label: "Outbound clicks (Supabase)", color: CHART_COLORS.green },
 ] as const

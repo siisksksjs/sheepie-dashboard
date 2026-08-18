@@ -1,5 +1,5 @@
 import { parseRange } from "@/lib/bio-analytics/range"
-import { loadUmamiBundle } from "@/lib/bio-analytics/umami"
+import { loadTrafficBundle } from "@/lib/bio-analytics/posthog"
 import {
   BIO_EVENT_PAGE_SIZE,
   EMPTY_BIO_SUMMARY,
@@ -12,7 +12,7 @@ import {
   type BioRange,
   type BioRpcFilters,
   type BioSupabaseBundle,
-  type UmamiBundle,
+  type TrafficBundle,
 } from "@/lib/bio-analytics/types"
 import { createClient } from "@/lib/supabase/server"
 
@@ -69,13 +69,13 @@ export type BioSupabaseClient = {
 
 export type BioAnalyticsDependencies = {
   createClient: () => Promise<BioSupabaseClient>
-  loadUmami: (range: BioRange, filters: BioAnalyticsFilters) => Promise<UmamiBundle>
+  loadTraffic: (range: BioRange, filters: BioAnalyticsFilters) => Promise<TrafficBundle>
   now?: () => Date
 }
 
 const productionDependencies: BioAnalyticsDependencies = {
   createClient: async () => (await createClient()) as unknown as BioSupabaseClient,
-  loadUmami: (range, filters) => loadUmamiBundle(range, filters),
+  loadTraffic: (range, filters) => loadTrafficBundle(range, filters),
 }
 
 /** Maps UI selections onto the JSONB contract the RPCs expect, omitting empty ones. */
@@ -137,7 +137,7 @@ export async function getBioAnalyticsBundle(
       .range(offset, offset + BIO_EVENT_PAGE_SIZE - 1)
   }
 
-  const [summaryResult, optionsResult, journeysResult, eventsResult, umami] = await Promise.all([
+  const [summaryResult, optionsResult, journeysResult, eventsResult, traffic] = await Promise.all([
     client.rpc("get_bio_analytics_summary", { start_at: startAt, end_at: endAt, filters: rpcFilters }),
     client.rpc("get_bio_filter_options", { start_at: startAt, end_at: endAt }),
     client.rpc("get_bio_journeys", {
@@ -147,7 +147,7 @@ export async function getBioAnalyticsBundle(
       row_limit: 20,
     }),
     Promise.resolve(eventQuery()),
-    dependencies.loadUmami(range, filters),
+    dependencies.loadTraffic(range, filters),
   ])
 
   if (summaryResult.error || optionsResult.error || journeysResult.error) {
@@ -176,5 +176,5 @@ export async function getBioAnalyticsBundle(
     }
   }
 
-  return { range, filters, supabase, umami }
+  return { range, filters, supabase, traffic }
 }

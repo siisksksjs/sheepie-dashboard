@@ -6,7 +6,7 @@ import type {
   FunnelStepKey,
   MergedTrafficPoint,
   ScrollDepthSummary,
-  UmamiSeries,
+  TrafficSeries,
 } from "./types"
 
 const SCROLL_MILESTONES = [25, 50, 75, 100] as const
@@ -30,7 +30,7 @@ function normalizeTimestamp(value: string): string {
  * outbound clicks). The two sources are counted independently and never conflated.
  */
 export function mergeTrafficSeries(
-  umami: UmamiSeries | null,
+  umami: TrafficSeries | null,
   behavior: BioTimeSeriesPoint[],
 ): MergedTrafficPoint[] {
   const points = new Map<string, MergedTrafficPoint>()

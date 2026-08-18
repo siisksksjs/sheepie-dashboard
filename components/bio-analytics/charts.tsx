@@ -26,7 +26,7 @@ import type {
   BioScrollRow,
   BioSectionRow,
   MergedTrafficPoint,
-  UmamiMetricRow,
+  TrafficBreakdownRow,
 } from "@/lib/bio-analytics/types"
 import {
   CHART_AXIS,
@@ -48,7 +48,7 @@ import {
   labelFor,
 } from "./presentation"
 
-type SourceLabel = "Umami" | "Supabase" | "Umami + Supabase"
+type SourceLabel = "PostHog" | "Supabase" | "PostHog + Supabase"
 
 type TooltipPayloadEntry = {
   name?: string
@@ -197,8 +197,8 @@ export function TrafficChart({ points }: { points: MergedTrafficPoint[] }) {
   return (
     <ChartCard
       title="Traffic and behavior over time"
-      description="Visitors are counted by Umami; sessions and outbound clicks come from bio events."
-      source="Umami + Supabase"
+      description="Visitors are counted by PostHog; sessions and outbound clicks come from bio events."
+      source="PostHog + Supabase"
       info="The two sources are counted separately and never merged into a single number. An outbound click is not a purchase."
       isEmpty={points.length === 0}
     >
@@ -256,7 +256,7 @@ export function BreakdownChart({
   title: string
   description: string
   source: SourceLabel
-  rows: UmamiMetricRow[]
+  rows: TrafficBreakdownRow[]
   labelHeader: string
   info?: string
 }) {

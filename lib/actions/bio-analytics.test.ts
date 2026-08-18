@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 import { getBioAnalyticsBundle, toRpcFilters } from "./bio-analytics"
-import { EMPTY_UMAMI_METRICS, type BioAnalyticsFilters, type UmamiBundle } from "@/lib/bio-analytics/types"
+import { EMPTY_TRAFFIC_BREAKDOWNS, type BioAnalyticsFilters, type TrafficBundle } from "@/lib/bio-analytics/types"
 
 const FILTERS: BioAnalyticsFilters = {
   preset: "custom",
@@ -51,14 +51,13 @@ const EVENT_ROW = {
   destination: "shopee",
 }
 
-function umamiBundle(overrides: Partial<UmamiBundle> = {}): UmamiBundle {
+function umamiBundle(overrides: Partial<TrafficBundle> = {}): TrafficBundle {
   return {
     status: "healthy",
-    stats: { pageviews: 200, visitors: 90, visits: 110, bounces: 20, totaltime: 5000 },
+    stats: { pageviews: 200, visitors: 90, sessions: 110 },
     series: { pageviews: [], sessions: [{ x: "2026-08-17", y: 55 }] },
-    metrics: { ...EMPTY_UMAMI_METRICS },
-    weekly: null,
-    errors: [],
+    breakdowns: { ...EMPTY_TRAFFIC_BREAKDOWNS },
+        errors: [],
     ...overrides,
   }
 }
@@ -116,7 +115,7 @@ function stubClient(options: { eventsError?: string; rpcError?: string } = {}) {
 function dependencies(client: unknown, umami = umamiBundle()) {
   return {
     createClient: async () => client as never,
-    loadUmami: vi.fn(async () => umami),
+    loadTraffic: vi.fn(async () => umami),
     now: () => new Date("2026-08-17T12:00:00+07:00"),
   }
 }
@@ -190,7 +189,7 @@ describe("getBioAnalyticsBundle", () => {
       dependencies(client, umamiBundle({ status: "unavailable", stats: null, series: null, errors: ["stats: HTTP 502"] })),
     )
 
-    expect(bundle.umami.status).toBe("unavailable")
+    expect(bundle.traffic.status).toBe("unavailable")
     expect(bundle.supabase.status).toBe("healthy")
     expect(bundle.supabase.summary.kpis.sessions).toBe(40)
   })

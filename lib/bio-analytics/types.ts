@@ -108,7 +108,8 @@ export type BioSupabaseBundle = {
   errors: string[]
 }
 
-export const UMAMI_METRIC_TYPES = [
+/** Audience dimensions the traffic source breaks visitors down by. */
+export const TRAFFIC_BREAKDOWNS = [
   "referrer",
   "country",
   "region",
@@ -116,27 +117,24 @@ export const UMAMI_METRIC_TYPES = [
   "browser",
   "os",
 ] as const
-export type UmamiMetricType = (typeof UMAMI_METRIC_TYPES)[number]
+export type TrafficBreakdown = (typeof TRAFFIC_BREAKDOWNS)[number]
 
-export type UmamiPoint = { x: string; y: number }
-export type UmamiMetricRow = { x: string | null; y: number }
+export type TrafficPoint = { x: string; y: number }
+export type TrafficBreakdownRow = { x: string | null; y: number }
 
-export type UmamiStats = {
+export type TrafficStats = {
   pageviews: number
   visitors: number
-  visits: number
-  bounces: number
-  totaltime: number
+  sessions: number
 }
 
-export type UmamiSeries = { pageviews: UmamiPoint[]; sessions: UmamiPoint[] }
+export type TrafficSeries = { pageviews: TrafficPoint[]; sessions: TrafficPoint[] }
 
-export type UmamiBundle = {
+export type TrafficBundle = {
   status: SourceStatus
-  stats: UmamiStats | null
-  series: UmamiSeries | null
-  metrics: Record<UmamiMetricType, UmamiMetricRow[]>
-  weekly: number[][] | null
+  stats: TrafficStats | null
+  series: TrafficSeries | null
+  breakdowns: Record<TrafficBreakdown, TrafficBreakdownRow[]>
   errors: string[]
 }
 
@@ -144,7 +142,7 @@ export type BioAnalyticsBundle = {
   range: BioRange
   filters: BioAnalyticsFilters
   supabase: BioSupabaseBundle
-  umami: UmamiBundle
+  traffic: TrafficBundle
 }
 
 export type MergedTrafficPoint = {
@@ -186,7 +184,7 @@ export const EMPTY_BIO_SUMMARY: BioAnalyticsSummary = {
   heatmap: [],
 }
 
-export const EMPTY_UMAMI_METRICS: Record<UmamiMetricType, UmamiMetricRow[]> = {
+export const EMPTY_TRAFFIC_BREAKDOWNS: Record<TrafficBreakdown, TrafficBreakdownRow[]> = {
   referrer: [],
   country: [],
   region: [],

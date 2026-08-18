@@ -138,7 +138,7 @@ Matching the main Sheepie website (sheepiesleep.com):
 
 `/bio-analytics` combines two independent sources for the `sheepiesleep.com/bio` page.
 
-- **Umami Cloud** supplies traffic: visitors, page views, referrers, and the device,
+- **PostHog** supplies traffic: visitors, page views, referrers, and the device,
   browser, OS, country, and region breakdowns.
 - **Supabase** supplies behavior: sessions, engaged sessions, section and product views,
   scroll depth, outbound clicks, journeys, and the raw event stream.
@@ -154,27 +154,32 @@ Copy `.env.example` to `.env.local` and fill in:
 | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Shared Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Anonymous key; reads run under the signed-in user's RLS policies |
-| `UMAMI_API_KEY` | Umami Cloud API key, sent as the `x-umami-api-key` header (never a bearer token) |
-| `UMAMI_WEBSITE_ID` | Umami website id for sheepiesleep.com |
-| `UMAMI_API_BASE_URL` | Optional; defaults to `https://api.umami.is/v1` |
+| `POSTHOG_API_KEY` | PostHog **personal** API key with project read scope, sent as `Authorization: Bearer` |
+| `POSTHOG_PROJECT_ID` | Numeric PostHog project id |
+| `POSTHOG_HOST` | `https://us.posthog.com` or `https://eu.posthog.com` |
 
-Umami is queried **server-side only**. Its key has no `NEXT_PUBLIC_` prefix, so importing
-the client module from a browser bundle simply reports the source as `unconfigured`.
+PostHog is queried **server-side only** through the Query API (`POST
+/api/projects/:id/query/`) using HogQL. The personal API key has no `NEXT_PUBLIC_`
+prefix, so importing the client module from a browser bundle simply reports the source
+as `unconfigured`.
 
-### Rate limits and caching
+The site side collects the traffic with `posthog-js` on `/bio`, configured through
+`NEXT_PUBLIC_POSTHOG_KEY` and `NEXT_PUBLIC_POSTHOG_HOST` in the `sheepie` repo. The
+project API key there is public by design and can only write events.
 
-The Umami Cloud API key is limited to **50 calls per 15 seconds**. One dashboard load
-issues nine requests in a single `Promise.allSettled` batch, and every response is cached
-for **five minutes** via `next.revalidate`.
+### Caching
+
+One dashboard load issues eight HogQL queries in a single `Promise.allSettled` batch,
+and every response is cached for **five minutes** via `next.revalidate`.
 
 ### Degraded sources
 
 Each source reports `healthy`, `unavailable`, or `unconfigured` independently:
 
-- Missing `UMAMI_API_KEY` or `UMAMI_WEBSITE_ID` → `unconfigured`; a banner explains the
-  setup and all Supabase panels stay fully usable.
-- A failing Umami endpoint → `unavailable`; the successful panels still render, the failed
-  ones show an empty state, and the banner lists which calls failed.
+- Missing `POSTHOG_API_KEY` or `POSTHOG_PROJECT_ID` → `unconfigured`; a banner explains
+  the setup and all Supabase panels stay fully usable.
+- A failing PostHog query → `unavailable`; the successful panels still render, the failed
+  ones show an empty state, and the banner lists which queries failed.
 - A failing event-detail query degrades only the event table; the aggregate RPCs failing
   raises a single opaque dashboard error rather than leaking database messages.
 
