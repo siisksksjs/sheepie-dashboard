@@ -70,6 +70,7 @@ describe("bio analytics TypeScript contracts", () => {
       | "whatsapp"
       | "instagram"
       | "tiktok"
+      | "email"
       | "share"
     >()
     expectTypeOf(event.product_slug).toEqualTypeOf<ProductSlug | null>()
@@ -108,7 +109,7 @@ describe("bio analytics migration contract", () => {
       /product_slug text check\s*\(product_slug is null or product_slug in\s*\(\s*'cervicloud',\s*'lumicloud',\s*'calmicloud'\s*\)\s*\)/i,
     )
     expect(source).toMatch(
-      /destination text check\s*\(destination is null or destination in\s*\(\s*'shopee',\s*'tokopedia',\s*'website',\s*'whatsapp',\s*'instagram',\s*'tiktok',\s*'share'\s*\)\s*\)/i,
+      /destination text check\s*\(destination is null or destination in\s*\(\s*'shopee',\s*'tokopedia',\s*'website',\s*'whatsapp',\s*'instagram',\s*'tiktok',\s*'email',\s*'share'\s*\)\s*\)/i,
     )
     expect(source).toMatch(
       /elapsed_ms integer not null default 0 check\s*\(elapsed_ms\s*>=\s*0\)/i,
