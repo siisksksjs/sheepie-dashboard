@@ -549,57 +549,95 @@ export function EngagementHeatmap({ cells }: { cells: BioHeatmapCell[] }) {
   const lookup = new Map(cells.map((cell) => [`${cell.day_of_week}:${cell.hour_of_day}`, cell]))
   const peak = Math.max(0, ...cells.map((cell) => cell.sessions))
   const hours = Array.from({ length: 24 }, (_, hour) => hour)
+  const days = WEEKDAY_LABELS.map((label, index) => ({ label, isoDay: index + 1 }))
+
+  const sessionsAt = (isoDay: number, hour: number) => lookup.get(`${isoDay}:${hour}`)?.sessions ?? 0
+  const dayTotal = (isoDay: number) =>
+    hours.reduce((sum, hour) => sum + sessionsAt(isoDay, hour), 0)
+  const hourTotal = (hour: number) =>
+    days.reduce((sum, day) => sum + sessionsAt(day.isoDay, hour), 0)
+  const grandTotal = days.reduce((sum, day) => sum + dayTotal(day.isoDay), 0)
+
+  // Every cell carries its own figure, so the colour is a scan aid rather than
+  // the only way to read the grid.
+  const tint = (sessions: number) =>
+    sessions === 0
+      ? "var(--muted)"
+      : `color-mix(in srgb, ${CHART_COLORS.violet} ${Math.max(
+          10,
+          Math.round(percent(sessions, peak)),
+        )}%, transparent)`
+
+  const cellClass = "h-7 min-w-8 rounded-sm text-center tabular-nums"
 
   return (
     <ChartCard
       title="Engagement by time of day"
-      description="Sessions per hour in Jakarta time, Monday through Sunday."
+      description="Sessions for every hour of the day in Jakarta time, Monday through Sunday."
       source="Supabase"
-      info="A deeper color means more sessions started in that hour."
+      info="A deeper colour means more sessions started in that hour. The All row and column are totals."
       isEmpty={cells.length === 0}
     >
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] border-separate border-spacing-[2px] text-[10px]">
+        <table className="w-full min-w-[880px] border-separate border-spacing-[2px] text-[10px]">
           <caption className="sr-only">Sessions by day and hour in Jakarta time</caption>
           <thead>
             <tr>
               <th scope="col" className="w-10" />
               {hours.map((hour) => (
-                <th key={hour} scope="col" className="font-normal text-muted-foreground">
-                  {hour % 3 === 0 ? hour : ""}
+                <th
+                  key={hour}
+                  scope="col"
+                  className="min-w-8 pb-1 font-medium tabular-nums text-muted-foreground"
+                >
+                  {hour}
                 </th>
               ))}
+              <th scope="col" className="min-w-9 pb-1 pl-1 font-semibold text-muted-foreground">
+                All
+              </th>
             </tr>
           </thead>
           <tbody>
-            {WEEKDAY_LABELS.map((day, index) => (
-              <tr key={day}>
-                <th scope="row" className="pr-1 text-right font-normal text-muted-foreground">
-                  {day}
+            {days.map((day) => (
+              <tr key={day.label}>
+                <th scope="row" className="pr-1 text-right font-medium text-muted-foreground">
+                  {day.label}
                 </th>
                 {hours.map((hour) => {
-                  const sessions = lookup.get(`${index + 1}:${hour}`)?.sessions ?? 0
+                  const sessions = sessionsAt(day.isoDay, hour)
                   return (
                     <td
                       key={hour}
-                      title={`${day} ${String(hour).padStart(2, "0")}:00 — ${formatCount(sessions)} sessions`}
-                      className="h-5 rounded-sm"
+                      title={`${day.label} ${String(hour).padStart(2, "0")}:00 — ${formatCount(
+                        sessions,
+                      )} sesi`}
+                      className={cellClass}
                       style={{
-                        backgroundColor:
-                          sessions === 0
-                            ? "var(--muted)"
-                            : `color-mix(in srgb, ${CHART_COLORS.violet} ${Math.max(
-                                12,
-                                Math.round(percent(sessions, peak)),
-                              )}%, transparent)`,
+                        backgroundColor: tint(sessions),
+                        color: sessions === 0 ? "var(--muted-foreground)" : "var(--foreground)",
                       }}
                     >
-                      <span className="sr-only">{`${day} hour ${hour}: ${sessions} sessions`}</span>
+                      {sessions}
                     </td>
                   )
                 })}
+                <td className={`${cellClass} bg-muted font-semibold`}>{dayTotal(day.isoDay)}</td>
               </tr>
             ))}
+            <tr>
+              <th scope="row" className="pr-1 text-right font-semibold text-muted-foreground">
+                All
+              </th>
+              {hours.map((hour) => (
+                <td key={hour} className={`${cellClass} bg-muted font-semibold`}>
+                  {hourTotal(hour)}
+                </td>
+              ))}
+              <td className={`${cellClass} bg-primary font-semibold text-primary-foreground`}>
+                {grandTotal}
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
