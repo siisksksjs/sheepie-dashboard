@@ -539,6 +539,18 @@ REVOKE ALL ON FUNCTION get_bio_filter_options(TIMESTAMPTZ, TIMESTAMPTZ) FROM PUB
 REVOKE ALL ON FUNCTION get_bio_journeys(TIMESTAMPTZ, TIMESTAMPTZ, JSONB, INTEGER) FROM PUBLIC;
 REVOKE ALL ON FUNCTION delete_expired_bio_events(INTEGER) FROM PUBLIC;
 
+-- Supabase grants EXECUTE on new functions in schema public directly to anon,
+-- authenticated, and service_role via ALTER DEFAULT PRIVILEGES. That is a direct
+-- grant, so REVOKE ... FROM PUBLIC above does not remove it and each role must be
+-- named explicitly. Without these lines anon can call the SECURITY DEFINER
+-- ingestion and retention functions.
+REVOKE ALL ON FUNCTION prevent_bio_event_mutation() FROM anon, authenticated;
+REVOKE ALL ON FUNCTION ingest_bio_event(JSONB, TEXT) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION delete_expired_bio_events(INTEGER) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION get_bio_analytics_summary(TIMESTAMPTZ, TIMESTAMPTZ, JSONB) FROM anon;
+REVOKE ALL ON FUNCTION get_bio_filter_options(TIMESTAMPTZ, TIMESTAMPTZ) FROM anon;
+REVOKE ALL ON FUNCTION get_bio_journeys(TIMESTAMPTZ, TIMESTAMPTZ, JSONB, INTEGER) FROM anon;
+
 GRANT EXECUTE ON FUNCTION ingest_bio_event(JSONB, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION delete_expired_bio_events(INTEGER) TO service_role;
 GRANT EXECUTE ON FUNCTION get_bio_analytics_summary(TIMESTAMPTZ, TIMESTAMPTZ, JSONB) TO authenticated, service_role;

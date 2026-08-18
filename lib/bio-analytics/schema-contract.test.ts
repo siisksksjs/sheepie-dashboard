@@ -180,6 +180,24 @@ describe("bio analytics migration contract", () => {
       expect(source).toMatch(new RegExp(`revoke all on function ${functionName}\\([^;]+from public`, "i"))
     }
 
+    // Supabase's default privileges grant EXECUTE to anon directly, so revoking
+    // from PUBLIC alone leaves the SECURITY DEFINER functions reachable by anon.
+    for (const definerFunction of ["ingest_bio_event", "delete_expired_bio_events"]) {
+      expect(source).toMatch(
+        new RegExp(`revoke all on function ${definerFunction}\\([^;]+from anon, authenticated`, "i"),
+      )
+    }
+    for (const reportFunction of [
+      "get_bio_analytics_summary",
+      "get_bio_filter_options",
+      "get_bio_journeys",
+    ]) {
+      expect(source).toMatch(
+        new RegExp(`revoke all on function ${reportFunction}\\([^;]+from anon`, "i"),
+      )
+    }
+    expect(source).not.toMatch(/grant execute on function [^;]+to anon/i)
+
     expect(source).toMatch(/grant execute on function ingest_bio_event\([^;]+to service_role/i)
     expect(source).toMatch(/grant execute on function delete_expired_bio_events\([^;]+to service_role/i)
     expect(source).not.toMatch(/grant execute on function (ingest_bio_event|delete_expired_bio_events)\([^;]+to authenticated/i)
