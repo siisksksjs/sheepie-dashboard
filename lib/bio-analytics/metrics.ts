@@ -57,10 +57,10 @@ export function mergeTrafficSeries(
 }
 
 const FUNNEL_LABELS: Array<{ key: FunnelStepKey; label: string }> = [
-  { key: "page_view", label: "Membuka halaman" },
-  { key: "section_view", label: "Melihat bagian" },
-  { key: "product_view", label: "Melihat produk" },
-  { key: "outbound_click", label: "Klik ke marketplace" },
+  { key: "page_view", label: "Page view" },
+  { key: "section_view", label: "Section view" },
+  { key: "product_view", label: "Product view" },
+  { key: "outbound_click", label: "Outbound click" },
 ]
 
 export function buildFunnelSteps(counts: BioFunnelCounts): FunnelStep[] {
@@ -89,9 +89,9 @@ export function summarizeScrollDepth(rows: BioScrollRow[]): ScrollDepthSummary[]
 }
 
 export function formatDuration(milliseconds: number): string {
-  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0d"
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return "0s"
   const totalSeconds = Math.round(milliseconds / 1000)
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
-  return minutes > 0 ? `${minutes}m ${seconds}d` : `${seconds}d`
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
 }

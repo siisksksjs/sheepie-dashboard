@@ -6,16 +6,16 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Line,
   ComposedChart,
+  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { InfoTooltip } from "@/components/ui/info-tooltip"
 import { buildFunnelSteps, percent, summarizeScrollDepth } from "@/lib/bio-analytics/metrics"
 import type {
@@ -29,7 +29,15 @@ import type {
   UmamiMetricRow,
 } from "@/lib/bio-analytics/types"
 import {
+  CHART_AXIS,
+  CHART_BAR_CURSOR,
+  CHART_CATEGORY_AXIS,
+  CHART_COLORS,
+  CHART_GRID,
+  CHART_LINE_CURSOR,
   CHART_PALETTE,
+} from "@/lib/charts/theme"
+import {
   DESTINATION_LABELS,
   PRODUCT_LABELS,
   SECTION_LABELS,
@@ -42,6 +50,13 @@ import {
 
 type SourceLabel = "Umami" | "Supabase" | "Umami + Supabase"
 
+type TooltipPayloadEntry = {
+  name?: string
+  dataKey?: string | number
+  value?: number
+  color?: string
+}
+
 type ChartCardProps = {
   title: string
   description: string
@@ -50,7 +65,6 @@ type ChartCardProps = {
   isEmpty: boolean
   emptyMessage?: string
   children: ReactNode
-  footer?: ReactNode
 }
 
 export function ChartCard({
@@ -59,9 +73,8 @@ export function ChartCard({
   source,
   info,
   isEmpty,
-  emptyMessage = "Belum ada data pada rentang dan filter ini.",
+  emptyMessage = "No data for this range and filter set.",
   children,
-  footer,
 }: ChartCardProps) {
   return (
     <Card>
@@ -75,7 +88,7 @@ export function ChartCard({
             <CardDescription>{description}</CardDescription>
           </div>
           <Badge variant="outline" className="shrink-0">
-            Sumber: {source}
+            Source: {source}
           </Badge>
         </div>
       </CardHeader>
@@ -83,17 +96,18 @@ export function ChartCard({
         {isEmpty ? (
           <p className="py-10 text-center text-sm text-muted-foreground">{emptyMessage}</p>
         ) : (
-          <>
-            {children}
-            {footer}
-          </>
+          children
         )}
       </CardContent>
     </Card>
   )
 }
 
-function Legend({ series }: { series: ReadonlyArray<{ key: string; label: string; color: string }> }) {
+function ChartLegend({
+  series,
+}: {
+  series: ReadonlyArray<{ key: string; label: string; color: string }>
+}) {
   return (
     <div className="mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs font-medium text-muted-foreground">
       {series.map((entry) => (
@@ -106,7 +120,40 @@ function Legend({ series }: { series: ReadonlyArray<{ key: string; label: string
   )
 }
 
-/** Screen-reader and print fallback for every chart, per the accessibility contract. */
+function BioTooltip({
+  active,
+  payload,
+  label,
+  valueFormatter = formatCount,
+}: {
+  active?: boolean
+  payload?: TooltipPayloadEntry[]
+  label?: string | number
+  valueFormatter?: (value: number) => string
+}) {
+  if (!active || !payload?.length) return null
+
+  return (
+    <div className="min-w-48 rounded-xl border bg-card p-3 text-sm shadow-xl">
+      <div className="mb-2 font-semibold text-foreground">{String(label ?? "")}</div>
+      <div className="space-y-1.5">
+        {payload.map((entry, index) => (
+          <div key={index} className="flex items-center justify-between gap-6">
+            <span className="flex items-center gap-2" style={{ color: entry.color }}>
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
+              {entry.name}
+            </span>
+            <span className="font-semibold tabular-nums text-foreground">
+              {valueFormatter(Number(entry.value ?? 0))}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Screen-reader and print fallback for every chart. */
 function DataTableFallback({
   caption,
   headers,
@@ -118,7 +165,7 @@ function DataTableFallback({
 }) {
   return (
     <details className="mt-4">
-      <summary className="cursor-pointer text-xs text-muted-foreground">Lihat data sebagai tabel</summary>
+      <summary className="cursor-pointer text-xs text-muted-foreground">View as table</summary>
       <table className="mt-2 w-full text-xs">
         <caption className="sr-only">{caption}</caption>
         <thead>
@@ -146,59 +193,34 @@ function DataTableFallback({
   )
 }
 
-const AXIS_PROPS = {
-  stroke: "hsl(var(--muted-foreground))",
-  fontSize: 11,
-  tickLine: false,
-  axisLine: false,
-} as const
-
-function ChartTooltip({
-  active,
-  payload,
-  label,
-  valueFormatter = formatCount,
-}: {
-  active?: boolean
-  payload?: Array<{ name?: string; dataKey?: string | number; value?: number; color?: string }>
-  label?: string | number
-  valueFormatter?: (value: number) => string
-}) {
-  if (!active || !payload?.length) return null
-
-  return (
-    <div className="min-w-48 rounded-xl border bg-card p-3 text-sm shadow-xl">
-      <div className="mb-2 font-semibold">{String(label ?? "")}</div>
-      <div className="space-y-1.5">
-        {payload.map((entry, index) => (
-          <div key={index} className="flex items-center justify-between gap-6">
-            <span className="flex items-center gap-2 text-muted-foreground">
-              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
-              {entry.name}
-            </span>
-            <span className="font-semibold tabular-nums">{valueFormatter(Number(entry.value ?? 0))}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 export function TrafficChart({ points }: { points: MergedTrafficPoint[] }) {
   return (
     <ChartCard
-      title="Lalu lintas dan perilaku dari waktu ke waktu"
-      description="Pengunjung dihitung Umami; sesi dan klik keluar dihitung dari peristiwa bio."
+      title="Traffic and behavior over time"
+      description="Visitors are counted by Umami; sessions and outbound clicks come from bio events."
       source="Umami + Supabase"
-      info="Kedua sumber dihitung terpisah dan tidak digabung menjadi satu angka. Klik keluar bukan pembelian."
+      info="The two sources are counted separately and never merged into a single number. An outbound click is not a purchase."
       isEmpty={points.length === 0}
     >
-      <ResponsiveContainer width="100%" height={280}>
-        <ComposedChart data={points} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
-          <XAxis dataKey="timestamp" {...AXIS_PROPS} />
-          <YAxis {...AXIS_PROPS} allowDecimals={false} />
-          <Tooltip content={<ChartTooltip />} />
+      <ResponsiveContainer width="100%" height={320}>
+        <ComposedChart data={points} margin={{ top: 12, right: 24, left: 8, bottom: 8 }}>
+          <CartesianGrid {...CHART_GRID} vertical={false} />
+          <XAxis dataKey="timestamp" {...CHART_AXIS} tickMargin={12} />
+          <YAxis width={56} allowDecimals={false} {...CHART_AXIS} />
+          <Tooltip cursor={CHART_LINE_CURSOR} content={(props) => (
+            <BioTooltip
+              active={props.active}
+              label={props.label}
+              payload={props.payload as TooltipPayloadEntry[] | undefined}
+            />
+          )} />
+          <Bar
+            dataKey="clicks"
+            name={TRAFFIC_SERIES[2].label}
+            fill={TRAFFIC_SERIES[2].color}
+            radius={[4, 4, 0, 0]}
+            barSize={18}
+          />
           {TRAFFIC_SERIES.slice(0, 2).map((series) => (
             <Line
               key={series.key}
@@ -206,17 +228,17 @@ export function TrafficChart({ points }: { points: MergedTrafficPoint[] }) {
               dataKey={series.key}
               name={series.label}
               stroke={series.color}
-              strokeWidth={2}
-              dot={false}
+              strokeWidth={3}
+              dot={{ r: 3, fill: "var(--card)", strokeWidth: 2 }}
+              activeDot={{ r: 6, strokeWidth: 2 }}
             />
           ))}
-          <Bar dataKey="clicks" name={TRAFFIC_SERIES[2].label} fill={TRAFFIC_SERIES[2].color} radius={[4, 4, 0, 0]} />
         </ComposedChart>
       </ResponsiveContainer>
-      <Legend series={TRAFFIC_SERIES} />
+      <ChartLegend series={TRAFFIC_SERIES} />
       <DataTableFallback
-        caption="Lalu lintas dan perilaku per periode"
-        headers={["Periode", "Pengunjung", "Sesi", "Klik keluar"]}
+        caption="Traffic and behavior per period"
+        headers={["Period", "Visitors", "Sessions", "Outbound clicks"]}
         rows={points.map((point) => [point.timestamp, point.visitors, point.sessions, point.clicks])}
       />
     </ChartCard>
@@ -238,9 +260,7 @@ export function BreakdownChart({
   labelHeader: string
   info?: string
 }) {
-  const data = rows
-    .slice(0, 10)
-    .map((row) => ({ label: row.x ?? "Tidak diketahui", value: row.y }))
+  const data = rows.slice(0, 10).map((row) => ({ label: row.x ?? "Unknown", value: row.y }))
   const total = data.reduce((sum, row) => sum + row.value, 0)
 
   return (
@@ -251,12 +271,23 @@ export function BreakdownChart({
       info={info}
       isEmpty={data.length === 0}
     >
-      <ResponsiveContainer width="100%" height={Math.max(160, data.length * 32)}>
-        <BarChart data={data} layout="vertical" margin={{ top: 0, right: 16, left: 8, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.3} />
-          <XAxis type="number" {...AXIS_PROPS} allowDecimals={false} />
-          <YAxis type="category" dataKey="label" width={120} {...AXIS_PROPS} />
-          <Tooltip content={<ChartTooltip />} />
+      <ResponsiveContainer width="100%" height={Math.max(180, data.length * 38)}>
+        <BarChart
+          data={data}
+          layout="vertical"
+          margin={{ top: 8, right: 24, left: 16, bottom: 8 }}
+          barCategoryGap="20%"
+        >
+          <CartesianGrid {...CHART_GRID} horizontal={false} />
+          <XAxis type="number" allowDecimals={false} tickMargin={10} {...CHART_AXIS} />
+          <YAxis type="category" dataKey="label" width={130} {...CHART_CATEGORY_AXIS} />
+          <Tooltip cursor={CHART_BAR_CURSOR} content={(props) => (
+            <BioTooltip
+              active={props.active}
+              label={props.label}
+              payload={props.payload as TooltipPayloadEntry[] | undefined}
+            />
+          )} />
           <Bar dataKey="value" name={labelHeader} radius={[0, 4, 4, 0]}>
             {data.map((row, index) => (
               <Cell key={row.label} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
@@ -266,12 +297,21 @@ export function BreakdownChart({
       </ResponsiveContainer>
       <DataTableFallback
         caption={title}
-        headers={[labelHeader, "Jumlah", "Bagian"]}
-        rows={data.map((row) => [row.label, formatCount(row.value), formatPercent(percent(row.value, total))])}
+        headers={[labelHeader, "Count", "Share"]}
+        rows={data.map((row) => [
+          row.label,
+          formatCount(row.value),
+          formatPercent(percent(row.value, total)),
+        ])}
       />
     </ChartCard>
   )
 }
+
+const PRODUCT_SERIES = [
+  { key: "views", label: "Sessions that viewed", color: CHART_COLORS.violet },
+  { key: "clicks", label: "Sessions that clicked out", color: CHART_COLORS.green },
+] as const
 
 export function ProductPerformanceChart({ rows }: { rows: BioProductRow[] }) {
   const data = rows.map((row) => ({
@@ -283,32 +323,45 @@ export function ProductPerformanceChart({ rows }: { rows: BioProductRow[] }) {
 
   return (
     <ChartCard
-      title="Performa produk"
-      description="Sesi yang melihat setiap produk dan sesi yang lanjut klik ke marketplace."
+      title="Product performance"
+      description="Sessions that viewed each product and went on to click through to a marketplace."
       source="Supabase"
-      info="CTR adalah bagian sesi yang melihat produk lalu mengklik tautan keluar. Ini bukan konversi pembelian."
+      info="CTR is the share of sessions that viewed a product and then clicked an outbound link. It is not a purchase conversion rate."
       isEmpty={data.length === 0}
     >
-      <ResponsiveContainer width="100%" height={240}>
-        <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
-          <XAxis dataKey="label" {...AXIS_PROPS} />
-          <YAxis {...AXIS_PROPS} allowDecimals={false} />
-          <Tooltip content={<ChartTooltip />} />
-          <Bar dataKey="views" name="Sesi melihat" fill={CHART_PALETTE[0]} radius={[4, 4, 0, 0]} />
-          <Bar dataKey="clicks" name="Sesi klik keluar" fill={CHART_PALETTE[2]} radius={[4, 4, 0, 0]} />
+      <ResponsiveContainer width="100%" height={280}>
+        <BarChart data={data} margin={{ top: 12, right: 24, left: 8, bottom: 8 }} barCategoryGap="22%">
+          <CartesianGrid {...CHART_GRID} vertical={false} />
+          <XAxis dataKey="label" tickMargin={12} {...CHART_CATEGORY_AXIS} />
+          <YAxis width={48} allowDecimals={false} {...CHART_AXIS} />
+          <Tooltip cursor={CHART_BAR_CURSOR} content={(props) => (
+            <BioTooltip
+              active={props.active}
+              label={props.label}
+              payload={props.payload as TooltipPayloadEntry[] | undefined}
+            />
+          )} />
+          {PRODUCT_SERIES.map((series) => (
+            <Bar
+              key={series.key}
+              dataKey={series.key}
+              name={series.label}
+              fill={series.color}
+              radius={[4, 4, 0, 0]}
+            />
+          ))}
         </BarChart>
       </ResponsiveContainer>
-      <Legend
-        series={[
-          { key: "views", label: "Sesi melihat", color: CHART_PALETTE[0] },
-          { key: "clicks", label: "Sesi klik keluar", color: CHART_PALETTE[2] },
-        ]}
-      />
+      <ChartLegend series={PRODUCT_SERIES} />
       <DataTableFallback
-        caption="Performa produk"
-        headers={["Produk", "Sesi melihat", "Sesi klik keluar", "CTR keluar"]}
-        rows={data.map((row) => [row.label, formatCount(row.views), formatCount(row.clicks), formatPercent(row.ctr)])}
+        caption="Product performance"
+        headers={["Product", "Sessions that viewed", "Sessions that clicked out", "Outbound CTR"]}
+        rows={data.map((row) => [
+          row.label,
+          formatCount(row.views),
+          formatCount(row.clicks),
+          formatPercent(row.ctr),
+        ])}
       />
     </ChartCard>
   )
@@ -323,19 +376,30 @@ export function MarketplaceChart({ rows }: { rows: BioMarketplaceRow[] }) {
 
   return (
     <ChartCard
-      title="Tujuan klik keluar"
-      description="Perbandingan Shopee, Tokopedia, dan tujuan lain."
+      title="Outbound click destinations"
+      description="Shopee versus Tokopedia and every other destination."
       source="Supabase"
-      info="Menghitung klik menuju tujuan, bukan pesanan atau pendapatan."
+      info="Counts clicks toward a destination, not orders or revenue."
       isEmpty={data.length === 0}
     >
-      <ResponsiveContainer width="100%" height={Math.max(160, data.length * 40)}>
-        <BarChart data={data} layout="vertical" margin={{ top: 0, right: 16, left: 8, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.3} />
-          <XAxis type="number" {...AXIS_PROPS} allowDecimals={false} />
-          <YAxis type="category" dataKey="label" width={100} {...AXIS_PROPS} />
-          <Tooltip content={<ChartTooltip />} />
-          <Bar dataKey="clicks" name="Klik keluar" radius={[0, 4, 4, 0]}>
+      <ResponsiveContainer width="100%" height={Math.max(180, data.length * 44)}>
+        <BarChart
+          data={data}
+          layout="vertical"
+          margin={{ top: 8, right: 24, left: 16, bottom: 8 }}
+          barCategoryGap="20%"
+        >
+          <CartesianGrid {...CHART_GRID} horizontal={false} />
+          <XAxis type="number" allowDecimals={false} tickMargin={10} {...CHART_AXIS} />
+          <YAxis type="category" dataKey="label" width={110} {...CHART_CATEGORY_AXIS} />
+          <Tooltip cursor={CHART_BAR_CURSOR} content={(props) => (
+            <BioTooltip
+              active={props.active}
+              label={props.label}
+              payload={props.payload as TooltipPayloadEntry[] | undefined}
+            />
+          )} />
+          <Bar dataKey="clicks" name="Outbound clicks" radius={[0, 4, 4, 0]}>
             {data.map((row, index) => (
               <Cell key={row.label} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
             ))}
@@ -343,9 +407,13 @@ export function MarketplaceChart({ rows }: { rows: BioMarketplaceRow[] }) {
         </BarChart>
       </ResponsiveContainer>
       <DataTableFallback
-        caption="Tujuan klik keluar"
-        headers={["Tujuan", "Klik", "Bagian"]}
-        rows={data.map((row) => [row.label, formatCount(row.clicks), formatPercent(percent(row.clicks, total))])}
+        caption="Outbound click destinations"
+        headers={["Destination", "Clicks", "Share"]}
+        rows={data.map((row) => [
+          row.label,
+          formatCount(row.clicks),
+          formatPercent(percent(row.clicks, total)),
+        ])}
       />
     </ChartCard>
   )
@@ -357,10 +425,10 @@ export function FunnelChart({ counts }: { counts: BioFunnelCounts }) {
 
   return (
     <ChartCard
-      title="Alur kunjungan"
-      description="Buka halaman → lihat bagian → lihat produk → klik ke marketplace."
+      title="Visit funnel"
+      description="Page view → section view → product view → outbound click."
       source="Supabase"
-      info="Setiap tahap menghitung sesi unik. Tahap terakhir adalah klik keluar, bukan pembelian."
+      info="Each stage counts unique sessions. The last stage is an outbound click, not a purchase."
       isEmpty={first === 0}
     >
       <ol className="space-y-3">
@@ -369,27 +437,30 @@ export function FunnelChart({ counts }: { counts: BioFunnelCounts }) {
             <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
               <span className="font-medium">{step.label}</span>
               <span className="tabular-nums text-muted-foreground">
-                {formatCount(step.sessions)} sesi · {formatPercent(step.conversionFromFirst)} dari awal
+                {formatCount(step.sessions)} sessions · {formatPercent(step.conversionFromFirst)} of first
               </span>
             </div>
             <div
               className="h-3 w-full overflow-hidden rounded-full bg-muted"
               role="img"
-              aria-label={`${step.label}: ${formatCount(step.sessions)} sesi, ${formatPercent(
+              aria-label={`${step.label}: ${formatCount(step.sessions)} sessions, ${formatPercent(
                 step.conversionFromFirst,
-              )} dari tahap pertama`}
+              )} of the first stage`}
             >
               <div
-                className="h-full rounded-full bg-primary"
-                style={{ width: `${Math.max(0, Math.min(100, step.conversionFromFirst))}%` }}
+                className="h-full rounded-full"
+                style={{
+                  width: `${Math.max(0, Math.min(100, step.conversionFromFirst))}%`,
+                  backgroundColor: CHART_COLORS.violet,
+                }}
               />
             </div>
           </li>
         ))}
       </ol>
       <DataTableFallback
-        caption="Alur kunjungan"
-        headers={["Tahap", "Sesi", "Dari awal", "Dari tahap sebelumnya"]}
+        caption="Visit funnel"
+        headers={["Stage", "Sessions", "Of first", "Of previous"]}
         rows={steps.map((step) => [
           step.label,
           formatCount(step.sessions),
@@ -406,8 +477,8 @@ export function SectionReachChart({ rows }: { rows: BioSectionRow[] }) {
 
   return (
     <ChartCard
-      title="Jangkauan bagian halaman"
-      description="Sesi unik yang benar-benar melihat setiap bagian."
+      title="Section reach"
+      description="Unique sessions that actually saw each section of the page."
       source="Supabase"
       isEmpty={rows.length === 0}
     >
@@ -417,8 +488,11 @@ export function SectionReachChart({ rows }: { rows: BioSectionRow[] }) {
             <span className="w-40 shrink-0 truncate">{labelFor(SECTION_LABELS, row.section_id)}</span>
             <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
               <span
-                className="block h-full rounded-full bg-primary/70"
-                style={{ width: `${percent(row.sessions, widest)}%` }}
+                className="block h-full rounded-full"
+                style={{
+                  width: `${percent(row.sessions, widest)}%`,
+                  backgroundColor: CHART_COLORS.blue,
+                }}
               />
             </span>
             <span className="w-16 shrink-0 text-right tabular-nums">{formatCount(row.sessions)}</span>
@@ -426,8 +500,8 @@ export function SectionReachChart({ rows }: { rows: BioSectionRow[] }) {
         ))}
       </ul>
       <DataTableFallback
-        caption="Jangkauan bagian halaman"
-        headers={["Bagian", "Sesi"]}
+        caption="Section reach"
+        headers={["Section", "Sessions"]}
         rows={rows.map((row) => [labelFor(SECTION_LABELS, row.section_id), formatCount(row.sessions)])}
       />
     </ChartCard>
@@ -439,8 +513,8 @@ export function ScrollDepthChart({ rows }: { rows: BioScrollRow[] }) {
 
   return (
     <ChartCard
-      title="Kedalaman gulir"
-      description="Seberapa jauh pengunjung menggulir halaman bio."
+      title="Scroll depth"
+      description="How far down the bio page visitors actually get."
       source="Supabase"
       isEmpty={rows.length === 0}
     >
@@ -450,8 +524,8 @@ export function ScrollDepthChart({ rows }: { rows: BioScrollRow[] }) {
             <span className="w-14 shrink-0 tabular-nums">{row.depth}%</span>
             <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
               <span
-                className="block h-full rounded-full bg-primary/70"
-                style={{ width: `${row.share}%` }}
+                className="block h-full rounded-full"
+                style={{ width: `${row.share}%`, backgroundColor: CHART_COLORS.green }}
               />
             </span>
             <span className="w-16 shrink-0 text-right tabular-nums">{formatCount(row.sessions)}</span>
@@ -459,9 +533,13 @@ export function ScrollDepthChart({ rows }: { rows: BioScrollRow[] }) {
         ))}
       </ul>
       <DataTableFallback
-        caption="Kedalaman gulir"
-        headers={["Kedalaman", "Sesi", "Bagian dari terluas"]}
-        rows={summary.map((row) => [`${row.depth}%`, formatCount(row.sessions), formatPercent(row.share)])}
+        caption="Scroll depth"
+        headers={["Depth", "Sessions", "Share of widest"]}
+        rows={summary.map((row) => [
+          `${row.depth}%`,
+          formatCount(row.sessions),
+          formatPercent(row.share),
+        ])}
       />
     </ChartCard>
   )
@@ -474,15 +552,15 @@ export function EngagementHeatmap({ cells }: { cells: BioHeatmapCell[] }) {
 
   return (
     <ChartCard
-      title="Peta waktu keterlibatan"
-      description="Sesi per jam dalam waktu Jakarta, Senin sampai Minggu."
+      title="Engagement by time of day"
+      description="Sessions per hour in Jakarta time, Monday through Sunday."
       source="Supabase"
-      info="Warna lebih pekat berarti lebih banyak sesi pada jam tersebut."
+      info="A deeper color means more sessions started in that hour."
       isEmpty={cells.length === 0}
     >
       <div className="overflow-x-auto">
         <table className="w-full min-w-[640px] border-separate border-spacing-[2px] text-[10px]">
-          <caption className="sr-only">Sesi per hari dan jam dalam waktu Jakarta</caption>
+          <caption className="sr-only">Sessions by day and hour in Jakarta time</caption>
           <thead>
             <tr>
               <th scope="col" className="w-10" />
@@ -500,24 +578,23 @@ export function EngagementHeatmap({ cells }: { cells: BioHeatmapCell[] }) {
                   {day}
                 </th>
                 {hours.map((hour) => {
-                  const cell = lookup.get(`${index + 1}:${hour}`)
-                  const sessions = cell?.sessions ?? 0
+                  const sessions = lookup.get(`${index + 1}:${hour}`)?.sessions ?? 0
                   return (
                     <td
                       key={hour}
-                      title={`${day} ${String(hour).padStart(2, "0")}:00 — ${formatCount(sessions)} sesi`}
+                      title={`${day} ${String(hour).padStart(2, "0")}:00 — ${formatCount(sessions)} sessions`}
                       className="h-5 rounded-sm"
                       style={{
                         backgroundColor:
                           sessions === 0
-                            ? "hsl(var(--muted))"
-                            : `color-mix(in srgb, ${CHART_PALETTE[0]} ${Math.max(
+                            ? "var(--muted)"
+                            : `color-mix(in srgb, ${CHART_COLORS.violet} ${Math.max(
                                 12,
                                 Math.round(percent(sessions, peak)),
                               )}%, transparent)`,
                       }}
                     >
-                      <span className="sr-only">{`${day} jam ${hour}: ${sessions} sesi`}</span>
+                      <span className="sr-only">{`${day} hour ${hour}: ${sessions} sessions`}</span>
                     </td>
                   )
                 })}

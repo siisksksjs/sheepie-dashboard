@@ -48,16 +48,16 @@ function SourceBanner({ status, errors }: { status: SourceStatus; errors: string
       <div>
         <p className="font-medium">
           {isUnconfigured
-            ? "Data lalu lintas Umami belum dikonfigurasi."
-            : "Data lalu lintas Umami sedang tidak tersedia."}
+            ? "Umami traffic data is not configured."
+            : "Umami traffic data is unavailable."}
         </p>
         <p className="text-muted-foreground">
           {isUnconfigured
-            ? "Setel UMAMI_API_KEY dan UMAMI_WEBSITE_ID untuk menampilkan pengunjung dan rincian audiens. Data perilaku Supabase di bawah tetap lengkap."
-            : "Bagian pengunjung dan audiens mungkin kosong. Data perilaku Supabase di bawah tetap lengkap."}
+            ? "Set UMAMI_API_KEY and UMAMI_WEBSITE_ID to show visitors and audience breakdowns. The Supabase behavior data below is unaffected."
+            : "Visitor and audience panels may be empty. The Supabase behavior data below is unaffected."}
         </p>
         {errors.length > 0 ? (
-          <p className="mt-1 text-xs text-muted-foreground">Detail: {errors.join("; ")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Details: {errors.join("; ")}</p>
         ) : null}
       </div>
     </div>
@@ -73,54 +73,54 @@ export function BioAnalyticsClient({ bundle }: { bundle: BioAnalyticsBundle }) {
 
   const cards: KpiCard[] = [
     {
-      label: "Pengunjung",
+      label: "Visitors",
       value: umamiReady ? formatCount(umami.stats!.visitors) : "—",
       source: "Umami",
-      info: "Pengunjung unik halaman /bio menurut Umami. Dihitung terpisah dari sesi bio.",
+      info: "Unique visitors to /bio according to Umami. Counted separately from bio sessions.",
       unavailable: !umamiReady,
     },
     {
-      label: "Kunjungan halaman",
+      label: "Page views",
       value: umamiReady ? formatCount(umami.stats!.pageviews) : "—",
       source: "Umami",
-      info: "Total tampilan halaman /bio menurut Umami.",
+      info: "Total /bio page views according to Umami.",
       unavailable: !umamiReady,
     },
     {
-      label: "Sesi bio",
+      label: "Bio sessions",
       value: formatCount(kpis.sessions),
       source: "Supabase",
-      info: "Sesi anonim yang mengirim setidaknya satu peristiwa bio. Sesi berakhir setelah 30 menit tanpa aktivitas.",
+      info: "Anonymous sessions that sent at least one bio event. A session ends after 30 minutes of inactivity.",
     },
     {
-      label: "Sesi terlibat",
+      label: "Engaged sessions",
       value: formatCount(kpis.engaged_sessions),
       source: "Supabase",
-      info: "Sesi yang melihat produk, mengklik, melihat dua bagian atau lebih, bertahan 10 detik, atau menggulir 50%.",
+      info: "Sessions that viewed a product, clicked out, saw two or more sections, lasted 10 seconds, or scrolled 50%.",
     },
     {
-      label: "Klik keluar",
+      label: "Outbound clicks",
       value: formatCount(kpis.outbound_clicks),
       source: "Supabase",
-      info: "Klik menuju marketplace atau kanal lain. Ini bukan pembelian dan bukan pendapatan.",
+      info: "Clicks toward a marketplace or another channel. These are not purchases and not revenue.",
     },
     {
-      label: "CTR keluar",
+      label: "Outbound CTR",
       value: formatPercent(kpis.outbound_ctr),
       source: "Supabase",
-      info: "Bagian sesi bio yang menghasilkan setidaknya satu klik keluar.",
+      info: "Share of bio sessions that produced at least one outbound click.",
     },
     {
-      label: "Rata-rata keterlibatan",
+      label: "Avg. engagement time",
       value: formatDuration(kpis.avg_engagement_ms),
       source: "Supabase",
-      info: "Rata-rata waktu tercatat sampai peristiwa terakhir dalam sesi.",
+      info: "Average recorded time up to the last event in a session.",
     },
     {
-      label: "Pengunjung kembali",
+      label: "Returning share",
       value: formatPercent(kpis.returning_share),
       source: "Supabase",
-      info: "Bagian sesi dari perangkat yang pernah membuka halaman bio sebelumnya.",
+      info: "Share of sessions from a device that has opened the bio page before.",
     },
   ]
 
@@ -130,7 +130,7 @@ export function BioAnalyticsClient({ bundle }: { bundle: BioAnalyticsBundle }) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Bio Analytics</h1>
           <p className="text-sm text-muted-foreground">
-            {range.startDate} – {range.endDate} · zona waktu {range.timezone}
+            {range.startDate} – {range.endDate} · timezone {range.timezone}
           </p>
         </div>
         <a
@@ -138,7 +138,7 @@ export function BioAnalyticsClient({ bundle }: { bundle: BioAnalyticsBundle }) {
           className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
         >
           <Download className="h-4 w-4" />
-          Unduh CSV
+          Download CSV
         </a>
       </header>
 
@@ -152,7 +152,7 @@ export function BioAnalyticsClient({ bundle }: { bundle: BioAnalyticsBundle }) {
 
       <BioAnalyticsFiltersBar filters={filters} options={supabase.options} />
 
-      <section aria-label="Ringkasan metrik" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <section aria-label="Key metrics" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((card) => (
           <Card key={card.label}>
             <CardContent className="p-4">
@@ -167,7 +167,7 @@ export function BioAnalyticsClient({ bundle }: { bundle: BioAnalyticsBundle }) {
               </div>
               <p className="mt-2 text-2xl font-semibold tabular-nums">{card.value}</p>
               {card.unavailable ? (
-                <p className="mt-1 text-xs text-muted-foreground">Sumber tidak tersedia</p>
+                <p className="mt-1 text-xs text-muted-foreground">Source unavailable</p>
               ) : null}
             </CardContent>
           </Card>
@@ -183,10 +183,10 @@ export function BioAnalyticsClient({ bundle }: { bundle: BioAnalyticsBundle }) {
         <SectionReachChart rows={supabase.summary.sections} />
         <ScrollDepthChart rows={supabase.summary.scroll_depth} />
         <BreakdownChart
-          title="Rujukan"
-          description="Dari mana pengunjung halaman /bio datang."
+          title="Referrers"
+          description="Where visitors to /bio came from."
           source="Umami"
-          labelHeader="Rujukan"
+          labelHeader="Referrer"
           rows={umami.metrics.referrer}
         />
       </div>
@@ -195,38 +195,38 @@ export function BioAnalyticsClient({ bundle }: { bundle: BioAnalyticsBundle }) {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <BreakdownChart
-          title="Perangkat"
-          description="Kategori perangkat menurut Umami."
+          title="Devices"
+          description="Device categories according to Umami."
           source="Umami"
-          labelHeader="Perangkat"
+          labelHeader="Device"
           rows={umami.metrics.device}
         />
         <BreakdownChart
-          title="Peramban"
-          description="Peramban yang digunakan pengunjung."
+          title="Browsers"
+          description="Browsers visitors used."
           source="Umami"
-          labelHeader="Peramban"
+          labelHeader="Browser"
           rows={umami.metrics.browser}
         />
         <BreakdownChart
-          title="Sistem operasi"
-          description="Sistem operasi pengunjung."
+          title="Operating systems"
+          description="Visitor operating systems."
           source="Umami"
-          labelHeader="Sistem operasi"
+          labelHeader="Operating system"
           rows={umami.metrics.os}
         />
         <BreakdownChart
-          title="Negara"
-          description="Negara asal pengunjung menurut Umami."
+          title="Countries"
+          description="Visitor countries according to Umami."
           source="Umami"
-          labelHeader="Negara"
+          labelHeader="Country"
           rows={umami.metrics.country}
         />
         <BreakdownChart
-          title="Wilayah"
-          description="Wilayah asal pengunjung menurut Umami."
+          title="Regions"
+          description="Visitor regions according to Umami."
           source="Umami"
-          labelHeader="Wilayah"
+          labelHeader="Region"
           rows={umami.metrics.region}
         />
       </div>

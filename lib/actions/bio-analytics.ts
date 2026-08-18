@@ -166,7 +166,7 @@ export async function getBioAnalyticsBundle(
 
   if (eventsResult.error) {
     supabase.status = "unavailable"
-    errors.push("Detail peristiwa tidak dapat dimuat.")
+    errors.push("Event details could not be loaded.")
   } else {
     supabase.events = {
       rows: (eventsResult.data as BioEvent[] | null) ?? [],

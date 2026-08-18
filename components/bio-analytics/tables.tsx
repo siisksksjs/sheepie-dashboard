@@ -26,7 +26,7 @@ import {
   shortenId,
 } from "./presentation"
 
-const JAKARTA_TIME = new Intl.DateTimeFormat("id-ID", {
+const JAKARTA_TIME = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Jakarta",
   dateStyle: "short",
   timeStyle: "medium",
@@ -52,25 +52,25 @@ export function JourneyTable({ rows }: { rows: BioJourneyRow[] }) {
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <CardTitle className="text-base">Urutan perjalanan sesi</CardTitle>
-            <CardDescription>Rangkaian peristiwa paling umum dalam satu sesi.</CardDescription>
+            <CardTitle className="text-base">Session journeys</CardTitle>
+            <CardDescription>The most common event sequences within a single session.</CardDescription>
           </div>
           <Badge variant="outline" className="shrink-0">
-            Sumber: Supabase
+            Source: Supabase
           </Badge>
         </div>
       </CardHeader>
       <CardContent>
         {rows.length === 0 ? (
-          <EmptyState message="Belum ada perjalanan sesi pada rentang dan filter ini." />
+          <EmptyState message="No session journeys for this range and filter set." />
         ) : (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Urutan peristiwa</TableHead>
-                  <TableHead className="text-right">Sesi</TableHead>
-                  <TableHead className="text-right">Bagian</TableHead>
+                  <TableHead>Event sequence</TableHead>
+                  <TableHead className="text-right">Sessions</TableHead>
+                  <TableHead className="text-right">Share</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -117,36 +117,36 @@ export function EventTable({
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <CardTitle className="text-base">Detail peristiwa</CardTitle>
+            <CardTitle className="text-base">Event detail</CardTitle>
             <CardDescription>
-              Peristiwa anonim terbaru lebih dulu. Tidak ada nama, email, atau alamat IP.
+              Newest anonymous events first. No names, emails, or IP addresses.
             </CardDescription>
           </div>
           <Badge variant="outline" className="shrink-0">
-            Sumber: Supabase
+            Source: Supabase
           </Badge>
         </div>
       </CardHeader>
       <CardContent>
         {isUnavailable ? (
-          <EmptyState message="Sumber data peristiwa sedang tidak tersedia. Coba muat ulang sebentar lagi." />
+          <EmptyState message="The event data source is unavailable. Try reloading in a moment." />
         ) : events.rows.length === 0 ? (
-          <EmptyState message="Tidak ada peristiwa yang cocok dengan rentang dan filter ini." />
+          <EmptyState message="No events match this range and filter set." />
         ) : (
           <>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Waktu (Jakarta)</TableHead>
-                    <TableHead>Sesi</TableHead>
-                    <TableHead>Peristiwa</TableHead>
-                    <TableHead>Produk</TableHead>
-                    <TableHead>Tujuan</TableHead>
-                    <TableHead>Bagian / CTA</TableHead>
-                    <TableHead>Sumber / Kampanye</TableHead>
-                    <TableHead className="text-right">Durasi</TableHead>
-                    <TableHead>Perangkat</TableHead>
+                    <TableHead>Time (Jakarta)</TableHead>
+                    <TableHead>Session</TableHead>
+                    <TableHead>Event</TableHead>
+                    <TableHead>Product</TableHead>
+                    <TableHead>Destination</TableHead>
+                    <TableHead>Section / CTA</TableHead>
+                    <TableHead>Source / Campaign</TableHead>
+                    <TableHead className="text-right">Elapsed</TableHead>
+                    <TableHead>Device</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -156,7 +156,7 @@ export function EventTable({
                       <TableCell className="whitespace-nowrap tabular-nums">
                         {JAKARTA_TIME.format(new Date(event.occurred_at))}
                       </TableCell>
-                      <TableCell className="font-mono text-xs" title="ID sesi anonim">
+                      <TableCell className="font-mono text-xs" title="Anonymous session id">
                         {shortenId(event.session_id)}
                       </TableCell>
                       <TableCell>{labelFor(EVENT_LABELS, event.event_name)}</TableCell>
@@ -184,7 +184,7 @@ export function EventTable({
                       </TableCell>
                       <TableCell>
                         <Badge variant={event.is_returning ? "secondary" : "outline"}>
-                          {event.is_returning ? "Kembali" : "Baru"}
+                          {event.is_returning ? "Returning" : "New"}
                         </Badge>
                       </TableCell>
                     </TableRow>
@@ -195,10 +195,10 @@ export function EventTable({
 
             <nav
               className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm"
-              aria-label="Navigasi halaman peristiwa"
+              aria-label="Event pagination"
             >
               <p className="text-muted-foreground tabular-nums">
-                {formatCount(firstRow)}–{formatCount(lastRow)} dari {formatCount(events.total)} peristiwa
+                {formatCount(firstRow)}–{formatCount(lastRow)} of {formatCount(events.total)} events
               </p>
               <div className="flex items-center gap-2">
                 {events.page > 1 ? (
@@ -207,15 +207,15 @@ export function EventTable({
                     className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 hover:bg-accent"
                     scroll={false}
                   >
-                    <ChevronLeft className="h-4 w-4" /> Sebelumnya
+                    <ChevronLeft className="h-4 w-4" /> Previous
                   </Link>
                 ) : (
                   <span className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-muted-foreground opacity-50">
-                    <ChevronLeft className="h-4 w-4" /> Sebelumnya
+                    <ChevronLeft className="h-4 w-4" /> Previous
                   </span>
                 )}
                 <span className="tabular-nums text-muted-foreground">
-                  Halaman {events.page} dari {lastPage}
+                  Page {events.page} of {lastPage}
                 </span>
                 {events.page < lastPage ? (
                   <Link
@@ -223,11 +223,11 @@ export function EventTable({
                     className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 hover:bg-accent"
                     scroll={false}
                   >
-                    Berikutnya <ChevronRight className="h-4 w-4" />
+                    Next <ChevronRight className="h-4 w-4" />
                   </Link>
                 ) : (
                   <span className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-muted-foreground opacity-50">
-                    Berikutnya <ChevronRight className="h-4 w-4" />
+                    Next <ChevronRight className="h-4 w-4" />
                   </span>
                 )}
               </div>
