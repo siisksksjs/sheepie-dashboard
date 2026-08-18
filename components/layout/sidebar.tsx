@@ -17,6 +17,7 @@ import {
   Menu,
   X,
   Goal,
+  MousePointerClick,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
@@ -63,6 +64,11 @@ const navigation = [
     name: "Ad Campaigns",
     href: "/ad-campaigns",
     icon: TrendingUp,
+  },
+  {
+    name: "Bio Analytics",
+    href: "/bio-analytics",
+    icon: MousePointerClick,
   },
   {
     name: "Changelog",
@@ -138,7 +144,7 @@ export function Sidebar() {
         <nav className="flex-1 space-y-6 p-4 overflow-y-auto">
           <div className="space-y-1">
             {navigation.map((item) => {
-              const isActive = pathname === item.href
+              const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
               return (
                 <Link
                   key={item.name}
@@ -165,7 +171,7 @@ export function Sidebar() {
             </p>
             <div className="space-y-1">
               {adminNavigation.map((item) => {
-                const isActive = pathname === item.href
+                const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
                 return (
                   <Link
                     key={item.name}
