@@ -1,5 +1,54 @@
 // Database types matching Supabase schema
 
+export type BioEventName =
+  | 'bio_page_view'
+  | 'bio_section_view'
+  | 'bio_scroll_depth'
+  | 'bio_product_view'
+  | 'bio_outbound_click'
+  | 'bio_share_click'
+
+export type ProductSlug = 'cervicloud' | 'lumicloud' | 'calmicloud'
+
+export type BioDestination =
+  | 'shopee'
+  | 'tokopedia'
+  | 'website'
+  | 'whatsapp'
+  | 'instagram'
+  | 'tiktok'
+  | 'share'
+
+export type BioEvent = {
+  id: string
+  event_id: string
+  occurred_at: string
+  received_at: string
+  schema_version: 1
+  event_name: BioEventName
+  visitor_id: string
+  session_id: string
+  sequence_no: number
+  section_id: string | null
+  product_slug: ProductSlug | null
+  cta_id: string | null
+  cta_position: string | null
+  destination: BioDestination | null
+  landing_path: '/bio'
+  referrer_category: string | null
+  utm_source: string | null
+  utm_medium: string | null
+  utm_campaign: string | null
+  utm_content: string | null
+  utm_term: string | null
+  elapsed_ms: number
+  is_returning: boolean
+  screen_category: 'mobile' | 'tablet' | 'desktop' | null
+  language: string | null
+  timezone: string | null
+  scroll_depth: 25 | 50 | 75 | 100 | null
+}
+
 export type Product = {
   id: string
   sku: string

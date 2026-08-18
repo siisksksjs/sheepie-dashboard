@@ -132,6 +132,7 @@ Matching the main Sheepie website (sheepiesleep.com):
 - `npm run start` - Start production server
 - `npm run lint` - Run ESLint
 - `npm run typecheck` - Run TypeScript type checking
+- `npm run test:bio-integration` - Apply the bio analytics migration and run behavior tests against the dedicated PostgreSQL database in `TEST_DATABASE_URL`. The database must be empty and disposable, support `pg_cron`, and use a superuser-equivalent test connection with permission to create extensions and roles and to `SET ROLE`. The test cleans up its analytics objects and roles afterward.
 
 ## License
 
