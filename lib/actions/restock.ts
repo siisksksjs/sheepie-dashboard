@@ -139,6 +139,80 @@ export async function createRestock(input: {
   }
 }
 
+export async function updateRestock(input: {
+  batch_id: string
+  order_date: string
+  shipping_mode: ShippingMode
+  account_id?: string | null
+  vendor?: string | null
+  notes?: string | null
+  items: RestockItemInput[]
+}) {
+  const supabase = await createClient()
+
+  const normalizedItems = await normalizeRestockItems(supabase, input.items)
+
+  if (normalizedItems.error) {
+    return { success: false, error: normalizedItems.error }
+  }
+
+  if (normalizedItems.missingCostSkus.length > 0) {
+    return {
+      success: false,
+      error: `Missing product cost for SKU(s): ${normalizedItems.missingCostSkus.join(", ")}`,
+    }
+  }
+
+  const validItems = normalizedItems.items
+
+  if (validItems.length === 0) {
+    return { success: false, error: "At least one valid restock item is required" }
+  }
+
+  if (normalizedItems.totalAmount <= 0) {
+    return { success: false, error: "Restock total amount must be greater than zero" }
+  }
+
+  const trimmedVendor = input.vendor?.trim() || null
+  const trimmedNotes = input.notes?.trim() || null
+
+  const { error: rpcError } = await supabase.rpc("update_inventory_purchase_restock", {
+    target_batch_id: input.batch_id,
+    target_order_date: input.order_date,
+    target_shipping_mode: input.shipping_mode,
+    target_account_id: input.account_id || null,
+    target_vendor: trimmedVendor,
+    target_notes: trimmedNotes,
+    target_items: validItems,
+  })
+
+  if (rpcError) {
+    console.error("Error updating restock batch:", rpcError)
+    return { success: false, error: rpcError.message }
+  }
+
+  revalidateRestockCreatePaths()
+
+  return { success: true }
+}
+
+export async function deleteRestock(input: { batch_id: string }) {
+  const supabase = await createClient()
+
+  const { error: rpcError } = await supabase.rpc("delete_inventory_purchase_restock", {
+    target_batch_id: input.batch_id,
+  })
+
+  if (rpcError) {
+    console.error("Error deleting restock batch:", rpcError)
+    return { success: false, error: rpcError.message }
+  }
+
+  revalidateRestockCreatePaths()
+
+  return { success: true }
+}
+
 export async function markRestockArrived(input: {
   batch_id: string
   arrival_date: string

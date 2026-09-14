@@ -2,9 +2,9 @@
 
 import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { PackagePlus, Plane, Ship, Truck } from "lucide-react"
+import { PackagePlus, Pencil, Plane, Ship, Trash2, Truck, X } from "lucide-react"
 
-import { createRestock, markRestockArrived } from "@/lib/actions/restock"
+import { createRestock, deleteRestock, markRestockArrived, updateRestock } from "@/lib/actions/restock"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -64,6 +64,338 @@ function getLeadDays(orderDate: string, arrivalDate: string | null) {
   }
 
   return Math.round(diffMs / 86_400_000)
+}
+
+type InTransitCardProps = {
+  restock: RestockRow
+  products: Product[]
+  arrivalDate: string
+  onArrivalDateChange: (value: string) => void
+  onMarkArrived: () => void
+  isArriving: boolean
+  onChanged: () => void
+}
+
+function InTransitCard({
+  restock,
+  products,
+  arrivalDate,
+  onArrivalDateChange,
+  onMarkArrived,
+  isArriving,
+  onChanged,
+}: InTransitCardProps) {
+  const [isEditing, setIsEditing] = useState(false)
+  const [isSaving, startSaveTransition] = useTransition()
+  const [isDeleting, startDeleteTransition] = useTransition()
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+
+  const [editOrderDate, setEditOrderDate] = useState(restock.order_date)
+  const [editShippingMode, setEditShippingMode] = useState<ShippingMode>(
+    restock.shipping_mode ?? "air",
+  )
+  const [editVendor, setEditVendor] = useState(restock.vendor ?? "")
+  const [editNotes, setEditNotes] = useState(restock.notes ?? "")
+  const [editItems, setEditItems] = useState<RestockItemForm[]>(
+    restock.items.map((item) => ({
+      id: item.id,
+      sku: item.sku,
+      quantity: item.quantity,
+      unit_cost: String(item.unit_cost),
+    })),
+  )
+
+  const beginEdit = () => {
+    setEditError(null)
+    setEditOrderDate(restock.order_date)
+    setEditShippingMode(restock.shipping_mode ?? "air")
+    setEditVendor(restock.vendor ?? "")
+    setEditNotes(restock.notes ?? "")
+    setEditItems(
+      restock.items.length > 0
+        ? restock.items.map((item) => ({
+            id: item.id,
+            sku: item.sku,
+            quantity: item.quantity,
+            unit_cost: String(item.unit_cost),
+          }))
+        : [createEmptyItem()],
+    )
+    setIsEditing(true)
+  }
+
+  const updateEditItem = (id: string, field: keyof RestockItemForm, value: string | number) => {
+    setEditItems((current) =>
+      current.map((item) => (item.id === id ? { ...item, [field]: value } : item)),
+    )
+  }
+
+  const addEditItem = () => {
+    setEditItems((current) => [...current, createEmptyItem()])
+  }
+
+  const removeEditItem = (id: string) => {
+    setEditItems((current) => (current.length === 1 ? current : current.filter((item) => item.id !== id)))
+  }
+
+  const handleSave = () => {
+    setEditError(null)
+
+    startSaveTransition(async () => {
+      const result = await updateRestock({
+        batch_id: restock.id,
+        order_date: editOrderDate,
+        shipping_mode: editShippingMode,
+        account_id: restock.account_id,
+        vendor: editVendor || null,
+        notes: editNotes || null,
+        items: editItems.map((item) => ({
+          sku: item.sku,
+          quantity: item.quantity,
+          unit_cost: item.unit_cost === "" ? null : Number(item.unit_cost),
+        })),
+      })
+
+      if (!result.success) {
+        setEditError(result.error || "Failed to update restock")
+        return
+      }
+
+      setIsEditing(false)
+      onChanged()
+    })
+  }
+
+  const handleDelete = () => {
+    setEditError(null)
+
+    startDeleteTransition(async () => {
+      const result = await deleteRestock({ batch_id: restock.id })
+
+      if (!result.success) {
+        setEditError(result.error || "Failed to remove restock")
+        setConfirmingDelete(false)
+        return
+      }
+
+      onChanged()
+    })
+  }
+
+  if (isEditing) {
+    return (
+      <div className="space-y-4 rounded-lg border p-4">
+        <div className="flex items-center justify-between">
+          <p className="font-semibold">Edit Restock</p>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
+            <X className="mr-1 h-4 w-4" />
+            Cancel
+          </Button>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor={`edit-order-date-${restock.id}`}>China Order Date *</Label>
+            <Input
+              id={`edit-order-date-${restock.id}`}
+              type="date"
+              value={editOrderDate}
+              onChange={(event) => setEditOrderDate(event.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Shipping Mode *</Label>
+            <Select value={editShippingMode} onValueChange={(value) => setEditShippingMode(value as ShippingMode)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {shippingModeOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor={`edit-vendor-${restock.id}`}>Vendor</Label>
+            <Input
+              id={`edit-vendor-${restock.id}`}
+              value={editVendor}
+              onChange={(event) => setEditVendor(event.target.value)}
+              placeholder="Supplier name"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`edit-notes-${restock.id}`}>Notes</Label>
+            <Textarea
+              id={`edit-notes-${restock.id}`}
+              value={editNotes}
+              onChange={(event) => setEditNotes(event.target.value)}
+              placeholder="Optional shipping notes or problem context"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-3 border-t pt-4">
+          <div className="flex items-center justify-between">
+            <Label>Restock Items *</Label>
+            <Button type="button" variant="outline" size="sm" onClick={addEditItem}>
+              <PackagePlus className="mr-2 h-4 w-4" />
+              Add Item
+            </Button>
+          </div>
+
+          {editItems.map((item) => (
+            <div key={item.id} className="grid items-end gap-3 md:grid-cols-[1.5fr_0.7fr_0.9fr_auto]">
+              <div className="space-y-2">
+                <Label>Product *</Label>
+                <Select value={item.sku} onValueChange={(value) => updateEditItem(item.id, "sku", value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select product" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {products.map((product) => (
+                      <SelectItem key={product.id} value={product.sku}>
+                        {product.sku} - {product.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Qty *</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={item.quantity}
+                  onChange={(event) =>
+                    updateEditItem(item.id, "quantity", parseInt(event.target.value, 10) || 0)
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Unit Cost</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Optional, 0 uses product cost"
+                  value={item.unit_cost}
+                  onChange={(event) => updateEditItem(item.id, "unit_cost", event.target.value)}
+                />
+              </div>
+              <Button type="button" variant="ghost" onClick={() => removeEditItem(item.id)}>
+                Remove
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        {editError && (
+          <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {editError}
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <Button type="button" onClick={handleSave} disabled={isSaving}>
+            {isSaving ? "Saving..." : "Save Changes"}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => setIsEditing(false)} disabled={isSaving}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="font-semibold">{restock.vendor || "Restock Batch"}</p>
+          <p className="text-sm text-muted-foreground">
+            Ordered {formatDate(restock.order_date)} via {getModeLabel(restock.shipping_mode)}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary">In Transit</Badge>
+          <Button type="button" variant="ghost" size="sm" onClick={beginEdit} aria-label="Edit restock">
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setConfirmingDelete(true)}
+            aria-label="Remove restock"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        {restock.items.map((item) => (
+          <div key={item.id} className="flex items-center justify-between text-sm text-muted-foreground">
+            <span>
+              {item.product_name} ({item.sku}) x{item.quantity}
+            </span>
+            <span>{formatCurrency(item.total_cost)}</span>
+          </div>
+        ))}
+      </div>
+
+      {confirmingDelete ? (
+        <div className="space-y-3 rounded-lg border border-destructive/20 bg-destructive/10 p-3">
+          <p className="text-sm text-destructive">
+            Remove this in-transit restock? This deletes the batch and its linked finance entry. This cannot be undone.
+          </p>
+          <div className="flex gap-3">
+            <Button type="button" variant="destructive" onClick={handleDelete} disabled={isDeleting}>
+              {isDeleting ? "Removing..." : "Confirm Remove"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmingDelete(false)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+          <div className="space-y-2">
+            <Label htmlFor={`arrival-${restock.id}`}>Warehouse Arrival Date</Label>
+            <Input
+              id={`arrival-${restock.id}`}
+              type="date"
+              value={arrivalDate}
+              onChange={(event) => onArrivalDateChange(event.target.value)}
+            />
+          </div>
+          <Button type="button" onClick={onMarkArrived} disabled={isArriving}>
+            {isArriving ? "Posting..." : "Mark Arrived"}
+          </Button>
+        </div>
+      )}
+
+      {editError && (
+        <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {editError}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function RestockClient({ restocks, products }: Props) {
@@ -326,45 +658,18 @@ export function RestockClient({ restocks, products }: Props) {
               <p className="text-sm text-muted-foreground">No restocks are currently in transit.</p>
             ) : (
               inTransitRestocks.map((restock) => (
-                <div key={restock.id} className="space-y-3 rounded-lg border p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="font-semibold">{restock.vendor || "Restock Batch"}</p>
-                      <p className="text-sm text-muted-foreground">
-                        Ordered {formatDate(restock.order_date)} via {getModeLabel(restock.shipping_mode)}
-                      </p>
-                    </div>
-                    <Badge variant="secondary">In Transit</Badge>
-                  </div>
-
-                  <div className="space-y-1">
-                    {restock.items.map((item) => (
-                      <div key={item.id} className="flex items-center justify-between text-sm text-muted-foreground">
-                        <span>
-                          {item.product_name} ({item.sku}) x{item.quantity}
-                        </span>
-                        <span>{formatCurrency(item.total_cost)}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-                    <div className="space-y-2">
-                      <Label htmlFor={`arrival-${restock.id}`}>Warehouse Arrival Date</Label>
-                      <Input
-                        id={`arrival-${restock.id}`}
-                        type="date"
-                        value={arrivalDates[restock.id] || new Date().toISOString().split("T")[0]}
-                        onChange={(event) =>
-                          setArrivalDates((current) => ({ ...current, [restock.id]: event.target.value }))
-                        }
-                      />
-                    </div>
-                    <Button type="button" onClick={() => handleArrival(restock.id)} disabled={isArriving}>
-                      {isArriving ? "Posting..." : "Mark Arrived"}
-                    </Button>
-                  </div>
-                </div>
+                <InTransitCard
+                  key={restock.id}
+                  restock={restock}
+                  products={products}
+                  arrivalDate={arrivalDates[restock.id] || new Date().toISOString().split("T")[0]}
+                  onArrivalDateChange={(value) =>
+                    setArrivalDates((current) => ({ ...current, [restock.id]: value }))
+                  }
+                  onMarkArrived={() => handleArrival(restock.id)}
+                  isArriving={isArriving}
+                  onChanged={() => router.refresh()}
+                />
               ))
             )}
 
