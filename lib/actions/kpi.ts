@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
 import type { BundleComposition, MonthlyKpiTarget, OrderLineItem, Product } from "@/lib/types/database.types"
 import { buildKpiActuals, KPI_BASE_SKUS } from "@/lib/kpi/workspace"
+import { KPI_VARIANT_SKUS } from "@/supabase/functions/_shared/kpi-skus"
+import { formatJakartaDate } from "@/lib/bio-analytics/range"
 
 const KPI_BASE_SKU_SET = new Set<string>(KPI_BASE_SKUS)
 const KPI_BASE_SKU_ORDER = new Map<string, number>(
@@ -14,6 +16,8 @@ export type KpiProductRow = {
   sku: string
   name: string
   variant: string | null
+  /** Colour-variant SKUs whose sales count toward this row. */
+  variant_skus: string[]
   target_units: number
   target_gmv: number
   actual_units: number
@@ -165,6 +169,7 @@ export async function getKpiWorkspace(monthValue: string): Promise<KpiWorkspace>
         sku: product.sku,
         name: product.name,
         variant: product.variant,
+        variant_skus: Object.keys(KPI_VARIANT_SKUS).filter((sku) => KPI_VARIANT_SKUS[sku] === product.sku),
         target_units: target?.target_units || 0,
         target_gmv: Number(target?.target_gmv || 0),
         ...actual,
@@ -229,8 +234,7 @@ export async function saveMonthlyKpiTargets(input: SaveKpiInput): Promise<SaveKp
 }
 
 function getCurrentMonthKey() {
-  const now = new Date()
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+  return formatJakartaDate(new Date()).slice(0, 7)
 }
 
 export async function getCurrentMonth() {

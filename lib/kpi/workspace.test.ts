@@ -29,6 +29,29 @@ describe("KPI GMV workspace", () => {
     expect(Array.from(result.bySku.keys())).toEqual(["Lumi-001", "Calmi-001"])
   })
 
+  it("counts Lumi Apricot sales and Apricot bundles toward LumiCloud", () => {
+    const result = buildKpiActuals({
+      orders: [{ channel_fees: 0, order_line_items: [
+        { sku: "Lumi-002", quantity: 1, pack_size: "bundle_2", selling_price: 426_000 },
+        { sku: "Silence-&-Darkness-Kit-Apricot", quantity: 1, pack_size: "single", selling_price: 291_000 },
+      ] }],
+      products: [
+        { sku: "Lumi-002", is_bundle: false },
+        { sku: "Calmi-001", is_bundle: false },
+        { sku: "Silence-&-Darkness-Kit-Apricot", is_bundle: true },
+      ],
+      bundleCompositions: [
+        { bundle_sku: "Silence-&-Darkness-Kit-Apricot", component_sku: "Lumi-002", quantity: 1 },
+        { bundle_sku: "Silence-&-Darkness-Kit-Apricot", component_sku: "Calmi-001", quantity: 1 },
+      ],
+    })
+
+    expect(result.bySku.get("Lumi-001")).toMatchObject({ actual_units: 3, actual_gmv: 426_000 + 145_500 })
+    expect(result.bySku.get("Calmi-001")).toMatchObject({ actual_units: 1, actual_gmv: 145_500 })
+    expect(result.bySku.has("Lumi-002")).toBe(false)
+    expect(result.other.actual_units).toBe(0)
+  })
+
   it("does not expose a synthetic other-products KPI row", () => {
     const actionSource = fs.readFileSync("lib/actions/kpi.ts", "utf8")
 

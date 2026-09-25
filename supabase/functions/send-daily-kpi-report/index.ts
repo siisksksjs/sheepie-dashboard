@@ -4,10 +4,9 @@ import { assertAuthorizedRequest, jsonResponse } from "../_shared/auth.ts"
 import { renderDailyKpiReportEmailHtml } from "../_shared/email-html.ts"
 import { sendEmail } from "../_shared/resend.ts"
 import { calculateSalesOrder, getSalesPackMultiplier } from "../_shared/sales-metrics.ts"
+import { KPI_BASE_SKUS, resolveKpiSku } from "../_shared/kpi-skus.ts"
 
 const JAKARTA_TIME_ZONE = "Asia/Jakarta"
-const KPI_BASE_SKUS = ["Cervi-001", "Lumi-001", "Calmi-001"]
-const KPI_BASE_SKU_SET = new Set(KPI_BASE_SKUS)
 const KPI_BASE_SKU_ORDER = new Map(KPI_BASE_SKUS.map((sku, index) => [sku, index]))
 
 type OrderRow = {
@@ -177,7 +176,9 @@ async function buildDailyKpiReport(supabase: ReturnType<typeof createClient>, no
   let dailySalesGmv = 0
   let dailySalesRevenue = 0
   const addActual = (sku: string, units: number, gmv: number, revenue: number) => {
-    if (!KPI_BASE_SKU_SET.has(sku)) return
+    const kpiSku = resolveKpiSku(sku)
+    if (!kpiSku) return
+    sku = kpiSku
     const existing = actualsBySku.get(sku) || { units: 0, gmv: 0, revenue: 0 }
     actualsBySku.set(sku, {
       units: existing.units + units,
@@ -229,7 +230,7 @@ async function buildDailyKpiReport(supabase: ReturnType<typeof createClient>, no
         orderHasTodaySales = true
       }
 
-      if (KPI_BASE_SKU_SET.has(item.sku)) {
+      if (resolveKpiSku(item.sku)) {
         addActual(item.sku, unitCount, lineMetrics.gmv, lineMetrics.revenue)
         recordDailySales(item.sku, formatProductName(catalogBySku.get(item.sku) || { sku: item.sku, name: item.sku }), unitCount, lineMetrics.gmv, lineMetrics.revenue)
         continue
@@ -239,7 +240,7 @@ async function buildDailyKpiReport(supabase: ReturnType<typeof createClient>, no
       if (!product?.is_bundle) continue
 
       const componentRows = (compositionsByBundle.get(item.sku) || [])
-        .filter((component) => KPI_BASE_SKU_SET.has(component.component_sku))
+        .filter((component) => resolveKpiSku(component.component_sku))
       const totalComponentUnits = componentRows.reduce((sum, component) => sum + component.quantity * unitCount, 0)
 
       for (const component of componentRows) {

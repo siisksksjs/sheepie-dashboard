@@ -1,8 +1,8 @@
 import { calculateSalesOrder } from "@/supabase/functions/_shared/sales-metrics"
+import { resolveKpiSku } from "@/supabase/functions/_shared/kpi-skus"
 import type { PackSize } from "@/lib/products/pack-sizes"
 
-export const KPI_BASE_SKUS = ["Cervi-001", "Lumi-001", "Calmi-001"] as const
-const KPI_BASE_SKU_SET = new Set<string>(KPI_BASE_SKUS)
+export { KPI_BASE_SKUS } from "@/supabase/functions/_shared/kpi-skus"
 
 export type KpiActual = { actual_units: number; actual_gmv: number; actual_revenue: number }
 export type KpiActualOrder = {
@@ -52,14 +52,15 @@ export function buildKpiActuals(input: {
     })
     items.forEach((item, index) => {
       const line = metrics.lines[index]
-      if (KPI_BASE_SKU_SET.has(item.sku)) {
-        addSku(item.sku, line.units, line.gmv, line.revenue)
+      const kpiSku = resolveKpiSku(item.sku)
+      if (kpiSku) {
+        addSku(kpiSku, line.units, line.gmv, line.revenue)
         return
       }
 
       const product = productsBySku.get(item.sku)
       const components = product?.is_bundle
-        ? (compositionsByBundle.get(item.sku) || []).filter((row) => KPI_BASE_SKU_SET.has(row.component_sku))
+        ? (compositionsByBundle.get(item.sku) || []).filter((row) => resolveKpiSku(row.component_sku))
         : []
       const componentUnits = components.reduce((sum, row) => sum + row.quantity * line.units, 0)
 
@@ -71,7 +72,7 @@ export function buildKpiActuals(input: {
       for (const component of components) {
         const units = component.quantity * line.units
         const weight = units / componentUnits
-        addSku(component.component_sku, units, line.gmv * weight, line.revenue * weight)
+        addSku(resolveKpiSku(component.component_sku)!, units, line.gmv * weight, line.revenue * weight)
       }
     })
   }

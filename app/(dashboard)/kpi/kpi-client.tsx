@@ -186,7 +186,7 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
                 <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
                     <div className="text-lg font-semibold">{formatProductShortName(row).replace(" | Units Sold", "")}</div>
-                    <div className="text-sm text-muted-foreground">{row.sku}</div>
+                    <div className="text-sm text-muted-foreground">{[row.sku, ...row.variant_skus].join(" + ")}</div>
                   </div>
                   <div className={`rounded-full px-3 py-1 text-sm font-semibold ${status.className}`}>
                     {status.label}
@@ -258,8 +258,8 @@ export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace
                   return (
                     <TableRow key={row.sku}>
                       <TableCell>
-                        <div className="font-medium">{row.variant ? `${row.name} - ${row.variant}` : row.name}</div>
-                        <div className="text-xs text-muted-foreground">{row.sku}</div>
+                        <div className="font-medium">{formatKpiProductName(row)}</div>
+                        <div className="text-xs text-muted-foreground">{[row.sku, ...row.variant_skus].join(" + ")}</div>
                       </TableCell>
                       <TableCell className="min-w-36">
                         <Input
@@ -498,4 +498,12 @@ function formatProductShortName(row: EditableRow) {
   if (sku.startsWith("calmi")) return "CalmiCloud | Units Sold"
 
   return `${row.name} | Units Sold`
+}
+
+function formatKpiProductName(row: EditableRow) {
+  if (row.variant_skus.length > 0) {
+    return `${formatProductShortName(row).replace(" | Units Sold", "")} - All colours`
+  }
+
+  return row.variant ? `${row.name} - ${row.variant}` : row.name
 }
