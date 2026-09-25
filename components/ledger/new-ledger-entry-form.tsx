@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import type { MovementType, Product } from "@/lib/types/database.types"
+import { getJakartaToday } from "@/lib/utils"
 
 const movementTypes: { value: MovementType; label: string; isInbound: boolean }[] = [
   { value: "IN_PURCHASE", label: "Purchase In (+)", isInbound: true },
@@ -31,7 +32,7 @@ export function NewLedgerEntryForm({ products }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [selectedMovementType, setSelectedMovementType] = useState<MovementType | "">("")
   const [quantity, setQuantity] = useState("")
-  const [entryDate, setEntryDate] = useState(new Date().toISOString().split("T")[0])
+  const [entryDate, setEntryDate] = useState(getJakartaToday())
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()

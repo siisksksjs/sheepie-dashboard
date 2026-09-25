@@ -1,6 +1,8 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { getJakartaToday, getMonthEndDate } from "@/lib/utils"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { revalidatePath } from "next/cache"
 import { cache } from "react"
 import type { Order, OrderLineItem, Product, Channel, OrderStatus } from "@/lib/types/database.types"
@@ -738,7 +740,7 @@ export async function updateOrderStatus(
       orderId: order.id,
       orderLabel: `Order ${order.order_id}`,
       channel: order.channel,
-      entryDate: new Date().toISOString().split("T")[0],
+      entryDate: getJakartaToday(),
       amount: settlementAmount,
       notes: `Status changed from ${previousStatus} to ${newStatus}`,
     })
@@ -777,7 +779,7 @@ export async function updateOrderStatus(
 export async function getOrderStats() {
   const supabase = await createClient()
 
-  const { data: orders } = await supabase.from("orders").select("*")
+  const { data: orders } = await fetchAllRows(() => supabase.from("orders").select("id, status").order("id"))
 
   const totalOrders = orders?.length || 0
   const paidOrders = orders?.filter(o => o.status === "paid" || o.status === "shipped").length || 0
@@ -794,13 +796,14 @@ export async function getOrderStats() {
 
 export async function getDailySalesSnippet(date?: string) {
   const supabase = await createClient()
-  const targetDate = date || new Date().toISOString().split("T")[0]
+  const targetDate = date || getJakartaToday()
 
-  const { data: orders } = await supabase
+  const { data: orders } = await fetchAllRows(() => supabase
     .from("orders")
-    .select("channel, channel_fees, order_line_items!inner(sku, quantity, pack_size, selling_price)")
+    .select("id, channel, channel_fees, order_line_items!inner(sku, quantity, pack_size, selling_price)")
     .in("status", ["paid", "shipped"])
     .eq("order_date", targetDate)
+    .order("id"))
 
   if (!orders || orders.length === 0) {
     return {
@@ -836,14 +839,15 @@ export async function getMonthlySalesByDay(month: string) {
 
   const [year, monthNumber] = month.split("-").map((value) => parseInt(value, 10))
   const startDate = `${month}-01`
-  const endDate = new Date(year, monthNumber, 0).toISOString().split("T")[0]
+  const endDate = getMonthEndDate(year, monthNumber)
 
-  const { data: orders } = await supabase
+  const { data: orders } = await fetchAllRows(() => supabase
     .from("orders")
-    .select("order_date, order_line_items!inner(quantity, pack_size)")
+    .select("id, order_date, order_line_items!inner(quantity, pack_size)")
     .in("status", ["paid", "shipped"])
     .gte("order_date", startDate)
     .lte("order_date", endDate)
+    .order("id"))
 
   if (!orders || orders.length === 0) {
     return [] as { date: string; orders: number; units: number }[]
@@ -966,7 +970,7 @@ type ReportsAggregate = {
 function applyOrderDateFilter<T>(query: T, year?: number, month?: number) {
   if (year && month) {
     const startDate = `${year}-${month.toString().padStart(2, "0")}-01`
-    const endDate = new Date(year, month, 0).toISOString().split("T")[0]
+    const endDate = getMonthEndDate(year, month)
     return (query as any).gte("order_date", startDate).lte("order_date", endDate) as T
   }
 
@@ -1007,7 +1011,7 @@ const EMPTY_REPORTS_AGGREGATE: ReportsAggregate = {
 const getReportsAggregate = cache(async (year?: number, month?: number): Promise<ReportsAggregate> => {
   const supabase = await createClient()
 
-  const ordersQuery = applyOrderDateFilter(
+  const buildOrdersQuery = () => applyOrderDateFilter(
     supabase
       .from("orders")
       .select(`
@@ -1024,13 +1028,14 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
           cost_per_unit_snapshot
         )
       `)
-      .in("status", ["paid", "shipped", "returned"]),
+      .in("status", ["paid", "shipped", "returned"])
+      .order("id"),
     year,
     month
   )
 
   const [ordersResult, productsResult] = await Promise.all([
-    ordersQuery,
+    fetchAllRows(buildOrdersQuery),
     supabase.from("products").select("sku, name, variant, cost_per_unit"),
   ])
 
@@ -1044,7 +1049,7 @@ const getReportsAggregate = cache(async (year?: number, month?: number): Promise
     return EMPTY_REPORTS_AGGREGATE
   }
 
-  const orders = (ordersResult.data || []) as ReportOrder[]
+  const orders = ordersResult.data as unknown as ReportOrder[]
   const products = (productsResult.data || []) as ReportProduct[]
 
   if (orders.length === 0) {
@@ -1474,23 +1479,25 @@ export async function getReorderRecommendations() {
   ]))
 
   const [{ data: orders }, { data: stockRows }, { data: ledgerRows }] = await Promise.all([
-    supabase
+    fetchAllRows(() => supabase
       .from("orders")
-      .select("order_date, order_line_items!inner(quantity, pack_size, selling_price, sku)")
+      .select("id, order_date, order_line_items!inner(quantity, pack_size, selling_price, sku)")
       .in("status", ["paid", "shipped"])
       .gte("order_date", startDate.toISOString())
       .lte("order_date", endDateInclusive)
-      .in("order_line_items.sku", targetSkus),
+      .in("order_line_items.sku", targetSkus)
+      .order("id")),
     supabase
       .from("stock_on_hand")
       .select("sku, current_stock")
       .in("sku", guidanceSkus),
-    supabase
+    fetchAllRows(() => supabase
       .from("inventory_ledger")
-      .select("entry_date, sku, quantity")
+      .select("id, entry_date, sku, quantity")
       .in("sku", guidanceSkus)
       .gte("entry_date", recommendationStartDay)
-      .lte("entry_date", recommendationEndDay),
+      .lte("entry_date", recommendationEndDay)
+      .order("id")),
   ])
 
   const effectiveUnits = buildEffectiveUnitsBySku({

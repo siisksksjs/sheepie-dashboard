@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { revalidatePath } from "next/cache"
 import { cache } from "react"
 import type {
@@ -472,18 +473,20 @@ async function _getProjectedRevenueInternal() {
     }
 
     // OPTIMIZED: Fetch ALL orders with line items in ONE query instead of N queries
-    const { data: allOrders, error: ordersError } = await supabase
+    const { data: allOrders, error: ordersError } = await fetchAllRows(() => supabase
       .from("orders")
       .select(`
         id,
         channel_fees,
         order_line_items(
           quantity,
+          pack_size,
           selling_price,
           sku
         )
       `)
       .in("status", ["paid", "shipped"])
+      .order("id"))
 
     if (ordersError) {
       console.error("Error fetching orders:", ordersError)
@@ -505,7 +508,7 @@ async function _getProjectedRevenueInternal() {
         channelFees: order.channel_fees,
         lines: lineItems.map((item: any, index: number) => ({
           key: String(index), sellingPrice: item.selling_price, quantity: item.quantity,
-          packSize: "single", unitCost: null,
+          packSize: item.pack_size, unitCost: null,
         })),
       })
 
@@ -513,7 +516,7 @@ async function _getProjectedRevenueInternal() {
         const stats = skuStats.get(item.sku)
         if (!stats) continue // Skip if not an active product
         stats.totalRevenue += metrics.lines[itemIndex].revenue
-        stats.totalUnitsSold += item.quantity
+        stats.totalUnitsSold += metrics.lines[itemIndex].units
       }
     }
 

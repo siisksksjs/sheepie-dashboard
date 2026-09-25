@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { revalidatePath } from "next/cache"
 import {
   buildMonthlyAdsReportBundle,
@@ -32,6 +33,7 @@ import type {
 import { calculateSalesOrder, resolveSalesUnitCost } from "@/supabase/functions/_shared/sales-metrics"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
+import { getJakartaToday } from "@/lib/utils"
 
 // ============================================================================
 // CAMPAIGN CRUD OPERATIONS
@@ -1717,7 +1719,7 @@ async function getCampaignMetricsBatch(options?: {
     }
   }
 
-  const today = new Date().toISOString().split("T")[0]
+  const today = getJakartaToday()
   const allChannels = Array.from(new Set(campaigns.flatMap((campaign) => campaign.target_channels)))
   const globalStartDate = campaigns.reduce(
     (min, campaign) => campaign.start_date < min ? campaign.start_date : min,
@@ -1730,7 +1732,7 @@ async function getCampaignMetricsBatch(options?: {
 
   const [ordersResult, productsResult] = await Promise.all([
     allChannels.length > 0
-      ? supabase
+      ? fetchAllRows(() => supabase
           .from("orders")
           .select(`
             id,
@@ -1751,6 +1753,7 @@ async function getCampaignMetricsBatch(options?: {
           .gte("order_date", globalStartDate)
           .lte("order_date", globalEndDate)
           .in("status", ["paid", "shipped"])
+          .order("id"))
       : Promise.resolve({ data: [], error: null }),
     supabase.from("products").select("sku, name, cost_per_unit"),
   ])

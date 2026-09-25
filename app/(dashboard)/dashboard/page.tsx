@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { InfoTooltip } from "@/components/ui/info-tooltip"
 import { formatCurrency } from "@/lib/utils"
+import { formatJakartaDate } from "@/lib/bio-analytics/range"
 import { Package, AlertTriangle, TrendingUp, Box, DollarSign } from "lucide-react"
 import Link from "next/link"
 import { Fragment } from "react"
@@ -17,7 +18,7 @@ type SearchParams = Promise<{ date?: string }>
 
 export default async function DashboardPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams
-  const today = new Date().toISOString().split("T")[0]
+  const today = formatJakartaDate(new Date())
   const datePattern = /^\d{4}-\d{2}-\d{2}$/
   const selectedDate = params.date && datePattern.test(params.date) ? params.date : today
 

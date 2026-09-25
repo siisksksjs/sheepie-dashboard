@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { formatCurrency, formatDate, getJakartaToday } from "@/lib/utils"
 import type {
   Product,
   ShippingMode,
@@ -405,7 +405,7 @@ export function RestockClient({ restocks, products }: Props) {
   const [createError, setCreateError] = useState<string | null>(null)
   const [arrivalError, setArrivalError] = useState<string | null>(null)
   const [purchaseItems, setPurchaseItems] = useState<RestockItemForm[]>([createEmptyItem()])
-  const [orderDate, setOrderDate] = useState(new Date().toISOString().split("T")[0])
+  const [orderDate, setOrderDate] = useState(getJakartaToday())
   const [shippingMode, setShippingMode] = useState<ShippingMode>("air")
   const [vendor, setVendor] = useState("")
   const [notes, setNotes] = useState("")
@@ -441,7 +441,7 @@ export function RestockClient({ restocks, products }: Props) {
   }
 
   const resetForm = () => {
-    setOrderDate(new Date().toISOString().split("T")[0])
+    setOrderDate(getJakartaToday())
     setShippingMode("air")
     setVendor("")
     setNotes("")
@@ -479,7 +479,7 @@ export function RestockClient({ restocks, products }: Props) {
     setArrivalError(null)
 
     startArrivalTransition(async () => {
-      const arrivalDate = arrivalDates[batchId] || new Date().toISOString().split("T")[0]
+      const arrivalDate = arrivalDates[batchId] || getJakartaToday()
       const result = await markRestockArrived({
         batch_id: batchId,
         arrival_date: arrivalDate,
@@ -662,7 +662,7 @@ export function RestockClient({ restocks, products }: Props) {
                   key={restock.id}
                   restock={restock}
                   products={products}
-                  arrivalDate={arrivalDates[restock.id] || new Date().toISOString().split("T")[0]}
+                  arrivalDate={arrivalDates[restock.id] || getJakartaToday()}
                   onArrivalDateChange={(value) =>
                     setArrivalDates((current) => ({ ...current, [restock.id]: value }))
                   }

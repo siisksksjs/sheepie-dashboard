@@ -11,7 +11,7 @@ import {
   getPackSizeLabel,
   type PackSize,
 } from "@/lib/products/pack-sizes"
-import { formatCurrency } from "@/lib/utils"
+import { formatCurrency, getJakartaToday } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -94,7 +94,7 @@ export function NewOrderForm({ products, packSizes, channelPrices }: Props) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedChannel, setSelectedChannel] = useState<Channel | "">("")
-  const [orderDate, setOrderDate] = useState(new Date().toISOString().split("T")[0])
+  const [orderDate, setOrderDate] = useState(getJakartaToday())
   const [orderId, setOrderId] = useState("")
   const [actualGrossRevenue, setActualGrossRevenue] = useState("")
 

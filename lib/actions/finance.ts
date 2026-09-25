@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache"
 import { cache } from "react"
 import { createClient } from "@/lib/supabase/server"
+import { getMonthEndDate } from "@/lib/utils"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { getReportsBundle } from "./orders"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
@@ -60,7 +62,7 @@ function getDateRange(year?: number, month?: number): DateRange {
   if (year && month) {
     return {
       startDate: `${year}-${month.toString().padStart(2, "0")}-01`,
-      endDate: new Date(year, month, 0).toISOString().split("T")[0],
+      endDate: getMonthEndDate(year, month),
     }
   }
 
@@ -164,26 +166,27 @@ export const getFinanceEntries = cache(async (filters?: {
   const supabase = await createClient()
   const range = getDateRange(filters?.year, filters?.month)
 
-  let query = applyDateRange(
-    supabase
-      .from("finance_entries")
-      .select("*")
-      .order("entry_date", { ascending: false })
-      .order("created_at", { ascending: false }),
-    "entry_date",
-    range
-  )
+  const buildQuery = () => {
+    let query = applyDateRange(
+      supabase
+        .from("finance_entries")
+        .select("*")
+        .order("entry_date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .order("id"),
+      "entry_date",
+      range
+    )
 
-  if (filters?.accountId) {
-    query = query.eq("account_id", filters.accountId)
-  }
+    if (filters?.accountId) {
+      query = query.eq("account_id", filters.accountId)
+    }
 
-  if (filters?.limit) {
-    query = query.limit(filters.limit)
+    return query
   }
 
   const [{ data: entries, error: entriesError }, accounts, categories] = await Promise.all([
-    query,
+    filters?.limit ? buildQuery().limit(filters.limit) : fetchAllRows(buildQuery),
     getFinanceAccounts(),
     getFinanceCategories(),
   ])

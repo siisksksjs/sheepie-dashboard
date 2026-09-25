@@ -17,7 +17,7 @@ import {
   createFinanceTransfer,
   saveMarketplaceAccountMappings,
 } from "@/lib/actions/finance"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { formatCurrency, formatDate, getJakartaToday } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -409,7 +409,7 @@ export function FinanceClient({
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Date</Label>
-                      <Input name="entry_date" type="date" defaultValue={new Date().toISOString().split("T")[0]} required />
+                      <Input name="entry_date" type="date" defaultValue={getJakartaToday()} required />
                     </div>
                     <div className="space-y-2">
                       <Label>Amount</Label>
@@ -497,7 +497,7 @@ export function FinanceClient({
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label>Date</Label>
-                      <Input name="entry_date" type="date" defaultValue={new Date().toISOString().split("T")[0]} required />
+                      <Input name="entry_date" type="date" defaultValue={getJakartaToday()} required />
                     </div>
                     <div className="space-y-2">
                       <Label>Amount</Label>
