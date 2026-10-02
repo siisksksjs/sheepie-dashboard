@@ -19,7 +19,7 @@ import type {
   ShippingMode,
 } from "@/lib/types/database.types"
 
-type RestockRow = Awaited<ReturnType<typeof import("@/lib/actions/finance").getInventoryPurchaseBatches>>[number]
+type RestockRow = Awaited<ReturnType<typeof import("@/lib/actions/restock-batches").getInventoryPurchaseBatches>>[number]
 
 type Props = {
   restocks: RestockRow[]
@@ -356,7 +356,7 @@ function InTransitCard({
       {confirmingDelete ? (
         <div className="space-y-3 rounded-lg border border-destructive/20 bg-destructive/10 p-3">
           <p className="text-sm text-destructive">
-            Remove this in-transit restock? This deletes the batch and its linked finance entry. This cannot be undone.
+            Remove this in-transit restock? This deletes the batch. Stock is unaffected because it never arrived.
           </p>
           <div className="flex gap-3">
             <Button type="button" variant="destructive" onClick={handleDelete} disabled={isDeleting}>

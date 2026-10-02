@@ -2,11 +2,7 @@ import { readFile } from "node:fs/promises"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createClient } from "@/lib/supabase/server"
 import { createLedgerEntry } from "../actions/inventory"
-import {
-  calculateOrderSettlementAmount,
-  createMarketplaceSettlementEntry,
-  isSettledOrderStatus,
-} from "@/lib/marketplace-settlements"
+import { isSettledOrderStatus } from "@/lib/orders/settled-status"
 
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
@@ -53,10 +49,7 @@ vi.mock("@/lib/restock/guidance", () => ({
   buildReorderWindow: vi.fn(),
 }))
 
-vi.mock("@/lib/marketplace-settlements", () => ({
-  calculateOrderSettlementAmount: vi.fn(),
-  createMarketplaceSettlementEntry: vi.fn(),
-  createMarketplaceSettlementReversalEntry: vi.fn(),
+vi.mock("@/lib/orders/settled-status", () => ({
   isSettledOrderStatus: vi.fn(() => false),
 }))
 
@@ -133,26 +126,13 @@ describe("duplicate order source contract", () => {
   })
 })
 
-describe("orders page duplicate UI contract", () => {
-  it("expects the orders page to expose Duplicate and wire duplicateOrder from the list page", async () => {
-    const source = await readFile("app/(dashboard)/orders/page.tsx", "utf8")
-
-    expect(source).toContain("Duplicate")
-    expect(source).toContain("duplicateOrder(")
-  })
-})
-
-describe("orders list client duplicate UI contract", () => {
-  it("expects the client component to expose Duplicate and call the duplicate handler via onDuplicate", async () => {
+describe("orders list re-log UI contract", () => {
+  it("replaces one-click Duplicate on list rows with a reviewed Log again", async () => {
     const source = await readFile("components/orders/orders-list-client.tsx", "utf8")
 
-    expect(source).toContain("handleDuplicate")
-    expect(source).toContain("duplicateLabel")
-    expect(source).toContain("onDuplicate(orderId)")
-    expect(source).toMatch(/onClick=\{\(\)\s*=>\s*handleDuplicate\(order\.id\)\}/)
-    expect(source).toMatch(/try\s*\{[\s\S]*onDuplicate\(orderId\)/)
-    expect(source).toMatch(/catch\s*\(\s*error\s*\)/)
-    expect(source).toMatch(/finally\s*\{[\s\S]*setPendingOrderId\(null\)/)
+    expect(source).toContain("Log again")
+    expect(source).toContain("/orders/new?from=${order.id}")
+    expect(source).not.toContain("onDuplicate(")
   })
 })
 
@@ -515,10 +495,6 @@ describe("duplicateOrder", () => {
     vi.mocked(createLedgerEntry).mockResolvedValue({
       success: true,
     } as any)
-    vi.mocked(calculateOrderSettlementAmount).mockReturnValue(135000)
-    vi.mocked(createMarketplaceSettlementEntry).mockResolvedValue({
-      success: true,
-    } as any)
 
     const sourceOrder = {
       id: "ord_source",
@@ -656,8 +632,6 @@ describe("duplicateOrder", () => {
     }, {
       skipChangelog: true,
     })
-
-    expect(createMarketplaceSettlementEntry).toHaveBeenCalled()
   })
 
   it("returns a failure when a settled duplicate ledger write fails", async () => {
@@ -824,166 +798,6 @@ describe("duplicateOrder", () => {
     await expect(duplicateOrder("ord_source")).resolves.toEqual({
       success: false,
       error: "ledger failed",
-    })
-
-    expect(deleteEq).toHaveBeenCalledWith("id", "ord_new")
-    expect(createLedgerEntry).toHaveBeenCalledWith({
-      sku: "Calmi-001",
-      movement_type: "RETURN",
-      quantity: 2,
-      reference: "Order SHOPE-20260402-001 - Rollback",
-    }, {
-      skipChangelog: true,
-    })
-  })
-
-  it("returns a failure when settlement creation fails after settled duplicate stock deductions", async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date("2026-04-01T17:30:00.000Z"))
-    vi.mocked(isSettledOrderStatus).mockReturnValue(true)
-    vi.mocked(createLedgerEntry)
-      .mockResolvedValueOnce({
-        success: true,
-      } as any)
-      .mockResolvedValueOnce({
-        success: true,
-      } as any)
-    vi.mocked(calculateOrderSettlementAmount).mockReturnValue(135000)
-    vi.mocked(createMarketplaceSettlementEntry).mockResolvedValue({
-      success: false,
-      error: "settlement failed",
-    } as any)
-
-    const sourceOrder = {
-      id: "ord_source",
-      order_id: "SHOPE-20260401-009",
-      channel: "shopee" as const,
-      order_date: "2026-04-01",
-      status: "returned" as const,
-      channel_fees: 15000,
-      notes: "duplicate me",
-      created_at: "2026-04-01T08:00:00.000Z",
-      updated_at: "2026-04-01T08:00:00.000Z",
-    }
-
-    const sourceLineItems = [
-      {
-        id: "line_1",
-        order_id: "ord_source",
-        sku: "Calmi-001",
-        quantity: 2,
-        selling_price: 75000,
-        cost_per_unit_snapshot: 12000,
-        created_at: "2026-04-01T08:00:00.000Z",
-      },
-    ]
-
-    const createdOrder = {
-      id: "ord_new",
-      order_id: "SHOPE-20260402-001",
-      channel: "shopee" as const,
-      order_date: "2026-04-02",
-      status: "paid" as const,
-      channel_fees: 15000,
-      notes: "duplicate me",
-      created_at: "2026-04-01T17:30:00.000Z",
-      updated_at: "2026-04-01T17:30:00.000Z",
-    }
-
-    const deleteEq = vi.fn(async () => ({ error: null }))
-
-    const ordersSingleBuilder = {
-      select: vi.fn(() => ordersSingleBuilder),
-      eq: vi.fn(() => ordersSingleBuilder),
-      single: vi.fn(async () => ({ data: sourceOrder, error: null })),
-    }
-
-    const nextOrderIdBuilder = {
-      select: vi.fn(() => nextOrderIdBuilder),
-      like: vi.fn(() => nextOrderIdBuilder),
-      order: vi.fn(() => nextOrderIdBuilder),
-      limit: vi.fn(async () => ({ data: [], error: null })),
-    }
-
-    const createOrderBuilder = {
-      insert: vi.fn(() => ({
-        select: () => ({
-          single: async () => ({ data: createdOrder, error: null }),
-        }),
-      })),
-    }
-
-    const deleteOrderBuilder = {
-      delete: vi.fn(() => ({
-        eq: deleteEq,
-      })),
-    }
-
-    const orderLineItemsQueryBuilder = {
-      select: vi.fn(() => orderLineItemsQueryBuilder),
-      eq: vi.fn(async () => ({ data: sourceLineItems, error: null })),
-    }
-
-    const orderLineItemsInsertBuilder = {
-      insert: vi.fn(async () => ({ error: null })),
-    }
-
-    const productCostLookupBuilder = {
-      select: vi.fn(() => productCostLookupBuilder),
-      in: vi.fn(async () => ({
-        data: [{ sku: "Calmi-001", cost_per_unit: 12000 }],
-        error: null,
-      })),
-    }
-
-    const settledProductBuilder = {
-      select: vi.fn(() => settledProductBuilder),
-      eq: vi.fn(() => settledProductBuilder),
-      single: vi.fn(async () => ({ data: { is_bundle: false }, error: null })),
-    }
-
-    const ordersBuilders = [ordersSingleBuilder, nextOrderIdBuilder, createOrderBuilder, deleteOrderBuilder]
-    const orderLineItemsBuilders = [orderLineItemsQueryBuilder, orderLineItemsInsertBuilder]
-    const productBuilders = [productCostLookupBuilder, settledProductBuilder]
-
-    vi.mocked(createClient).mockResolvedValue({
-      from: vi.fn((table: string) => {
-        if (table === "orders") {
-          const builder = ordersBuilders.shift()
-          if (!builder) {
-            throw new Error("Unexpected orders builder request")
-          }
-
-          return builder
-        }
-
-        if (table === "order_line_items") {
-          const builder = orderLineItemsBuilders.shift()
-          if (!builder) {
-            throw new Error("Unexpected order_line_items builder request")
-          }
-
-          return builder
-        }
-
-        if (table === "products") {
-          const builder = productBuilders.shift()
-          if (!builder) {
-            throw new Error("Unexpected products builder request")
-          }
-
-          return builder
-        }
-
-        throw new Error(`Unexpected table: ${table}`)
-      }),
-    } as any)
-
-    const { duplicateOrder } = await import("../actions/orders")
-
-    await expect(duplicateOrder("ord_source")).resolves.toEqual({
-      success: false,
-      error: "settlement failed",
     })
 
     expect(deleteEq).toHaveBeenCalledWith("id", "ord_new")

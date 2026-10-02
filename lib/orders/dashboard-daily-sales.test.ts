@@ -13,19 +13,6 @@ const ordersSource = fs.readFileSync(
 )
 
 describe("dashboard daily product sales contract", () => {
-  it("shows only product and quantity columns", () => {
-    const tableHeader = dashboardSource.slice(
-      dashboardSource.indexOf("<TableHeader>"),
-      dashboardSource.indexOf("</TableHeader>") + "</TableHeader>".length,
-    )
-
-    expect(tableHeader).toContain("Product")
-    expect(tableHeader).toContain("Quantity")
-    expect(tableHeader).not.toContain("Revenue")
-    expect(tableHeader).not.toContain("Platform")
-    expect(dashboardSource).toContain("<TableRow key={item.sku}>")
-  })
-
   it("loads bundle compositions and delegates aggregation to the daily sales helper", () => {
     const snippet = ordersSource.slice(
       ordersSource.indexOf("export async function getDailySalesSnippet"),

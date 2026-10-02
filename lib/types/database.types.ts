@@ -151,6 +151,8 @@ export type ProductPackSize = {
   sku: string
   pack_size: PackSize
   is_enabled: boolean
+  /** Listing thumbnail (static /listings/* path or Storage URL). */
+  image_url?: string | null
   created_at: string
   updated_at: string
 }

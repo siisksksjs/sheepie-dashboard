@@ -1,548 +1,219 @@
-import { getStockOnHand } from "@/lib/actions/inventory"
-import { getSalesReport, getReturnSummary, getReorderRecommendations, getDailySalesSnippet } from "@/lib/actions/orders"
-import { getAllBundlesWithAvailability } from "@/lib/actions/bundles"
-import { getProjectedRevenue } from "@/lib/actions/products"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { InfoTooltip } from "@/components/ui/info-tooltip"
-import { formatCurrency } from "@/lib/utils"
-import { formatJakartaDate } from "@/lib/bio-analytics/range"
-import { Package, AlertTriangle, TrendingUp, Box, DollarSign } from "lucide-react"
+import type { Metadata } from "next"
 import Link from "next/link"
-import { Fragment } from "react"
-import { DateFilter } from "./date-filter"
+import { ArrowRight } from "lucide-react"
+import { OrderSky } from "@/components/today/order-sky"
+import { ListingThumb } from "@/components/listing-thumb"
+import { PlatformBadge } from "@/components/shell/platform-badge"
+import { PLATFORMS } from "@/components/shell/platforms"
+import { PaceBar, Stat } from "@/components/ui/page"
+import { getTodayData } from "@/lib/queries/today"
+import { cn, formatCurrency } from "@/lib/utils"
 
-type SearchParams = Promise<{ date?: string }>
+export const metadata: Metadata = { title: "Today · Sheepie" }
+export const dynamic = "force-dynamic"
 
-export default async function DashboardPage({ searchParams }: { searchParams: SearchParams }) {
-  const params = await searchParams
-  const today = formatJakartaDate(new Date())
-  const datePattern = /^\d{4}-\d{2}-\d{2}$/
-  const selectedDate = params.date && datePattern.test(params.date) ? params.date : today
+const units = (n: number) => `${Math.round(n).toLocaleString("id-ID")} ${Math.round(n) === 1 ? "item" : "items"}`
+const pct = (n: number) => `${Math.round(n * 100)}%`
+const rp = (n: number) => formatCurrency(n)
+const count = (n: number) => Math.round(n).toLocaleString("id-ID")
 
-  const [
-    stockData,
-    salesReport,
-    returnSummary,
-    reorderRecommendations,
-    dailySales,
-    bundles,
-    projectedRevenue,
-  ] = await Promise.all([
-    getStockOnHand(),
-    getSalesReport(),
-    getReturnSummary(),
-    getReorderRecommendations(),
-    getDailySalesSnippet(selectedDate),
-    getAllBundlesWithAvailability(),
-    getProjectedRevenue(),
-  ])
-  const physicalStockData = stockData.filter((item) => !item.is_bundle)
-  const stats = {
-    totalProducts: physicalStockData.length,
-    lowStockItems: physicalStockData.filter((item) => item.is_low_stock).length,
-    totalStock: physicalStockData.reduce((sum, item) => sum + item.current_stock, 0),
-  }
-  const paidOrdersCount = salesReport.byChannel.reduce((sum, channel) => sum + channel.orders, 0)
-  const totalGmv = salesReport.byChannel.reduce((sum, channel) => sum + channel.gmv, 0)
-  const totalRevenue = salesReport.byChannel.reduce((sum, channel) => sum + channel.revenue, 0)
-  const totalProfit = salesReport.byChannel.reduce((sum, channel) => sum + channel.profit, 0)
-  const totalUnitsSold = salesReport.byProduct.reduce((sum, product) => sum + product.units_sold, 0)
-  const returnedUnits = returnSummary.returnedUnits || 0
-  const grossUnitsSold = totalUnitsSold + returnedUnits
-  const returnedBySku = new Map<string, number>(
-    (returnSummary.bySku || []).map((item: any) => [item.sku, item.units])
-  )
+export default async function TodayPage() {
+  const data = await getTodayData()
+  const { totals, month, stock, reorder } = data
+  const greeting = data.hourNow < 11 ? "Good morning" : data.hourNow < 18 ? "Good afternoon" : "Good evening"
+  const share = month.targetGmv > 0 ? month.actualGmv / month.targetGmv : null
+  const pace = share === null ? null : share >= month.elapsed + 0.05 ? "ahead of pace" : share <= month.elapsed - 0.05 ? "behind pace" : "on pace"
 
-  // Collapse mode-specific guidance into one conservative reorder window per SKU.
-  const dynamicReorderPoints = new Map<string, { min: number; max: number }>(
-    reorderRecommendations.recommendations.reduce((acc: Array<[string, { min: number; max: number }]>, rec) => {
-      const existing = acc.find(([sku]) => sku === rec.sku)?.[1]
-
-      if (!existing) {
-        acc.push([rec.sku, { min: rec.reorderMin, max: rec.reorderMax }])
-        return acc
-      }
-
-      existing.min = Math.max(existing.min, rec.reorderMin)
-      existing.max = Math.max(existing.max, rec.reorderMax)
-      return acc
-    }, [])
-  )
-  const groupedReorderRecommendations = reorderRecommendations.recommendations.reduce<
-    Array<{ sku: string; name: string; routes: typeof reorderRecommendations.recommendations }>
+  const groupedReorderRecommendations = reorder.recommendations.reduce<
+    Array<{ sku: string; name: string; routes: typeof reorder.recommendations }>
   >((groups, rec) => {
     const existing = groups.find((group) => group.sku === rec.sku)
-
-    if (existing) {
-      existing.routes.push(rec)
-      return groups
-    }
-
-    groups.push({
-      sku: rec.sku,
-      name: rec.name,
-      routes: [rec],
-    })
+    if (existing) existing.routes.push(rec)
+    else groups.push({ sku: rec.sku, name: rec.name, routes: [rec] })
     return groups
   }, [])
 
-  // Get low stock items based on dynamic reorder points from Restock Guidance
-  const lowStockItems = stockData
-    .filter(item => item.status === 'active' && !item.is_bundle)
-    .filter(item => {
-      const dynamicPoint = dynamicReorderPoints.get(item.sku)
-      if (dynamicPoint) {
-        // Use dynamic reorder point (max) based on sales velocity
-        return item.current_stock <= dynamicPoint.max
-      }
-      // Fall back to static reorder_point for products not in guidance
-      return item.is_low_stock
-    })
-    .map(item => ({
-      ...item,
-      dynamic_reorder_point: dynamicReorderPoints.get(item.sku)
-    }))
-
-  // Get low stock bundles
-  const lowStockBundles = bundles.filter(b => b.is_low_stock)
+  const low = stock
+    .filter((s) => s.needsReorder)
+    .sort((a, b) => a.stock / Math.max(1, a.reorderAt ?? 1) - b.stock / Math.max(1, b.reorderAt ?? 1))
 
   return (
-    <div>
-      <h1 className="text-3xl font-display font-bold mb-2">Dashboard</h1>
-      <p className="text-muted-foreground mb-8">
-        Overview of your inventory and orders
-      </p>
-
-      {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 mb-8">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Products
-            </CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{stats.totalProducts}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Active SKUs in catalog
+    <div className="space-y-4">
+      <section className="sky relative overflow-hidden rounded-[26px] px-5 pb-5 pt-6 sm:px-8 sm:pb-6 sm:pt-7">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h1 className="text-[15px] font-semibold text-white/80">{greeting}. Today so far</h1>
+          <p className="num text-[12px] font-semibold text-white/60">
+            {new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(`${data.today}T00:00:00Z`))} · WIB
+          </p>
+        </div>
+        <div className="mt-4 flex flex-wrap items-end justify-between gap-5">
+          <div>
+            <p className="num font-display text-[44px] font-semibold leading-none sm:text-[54px]">{rp(totals.gmv)}</p>
+            <p className="mt-3 text-[14px] font-medium text-white/80">
+              {totals.orders === 0 ? "No orders logged yet today." : `${totals.orders} ${totals.orders === 1 ? "order" : "orders"} · ${units(totals.units)}`}
             </p>
-          </CardContent>
-        </Card>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-[16px] border border-white/25 bg-white/12 px-4 py-2.5 backdrop-blur-md">
+              <p className="text-[11.5px] font-semibold text-white/70">After fees</p>
+              <p className="num font-display text-[18px] font-semibold">{rp(totals.revenue)}</p>
+            </div>
+            <div className="rounded-[16px] border border-white/25 bg-white/12 px-4 py-2.5 backdrop-blur-md">
+              <p className="text-[11.5px] font-semibold text-white/70">Kept after costs</p>
+              <p className="num font-display text-[18px] font-semibold">
+                {rp(totals.profit)}
+                {!totals.costComplete && <span className="ml-1 font-body text-[11px] text-white/60">est.</span>}
+              </p>
+            </div>
+          </div>
+        </div>
+        {data.orders.length > 0 ? (
+          <OrderSky orders={data.orders} hourNow={data.hourNow} />
+        ) : (
+          <p className="mt-6 max-w-[48ch] text-[14px] text-white/75">Each order you log today floats in here as a small cloud at the hour you logged it — tap + to log the first one.</p>
+        )}
+        {data.byChannel.length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {data.byChannel.map((c) => (
+              <span key={c.channel} className="num inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-white/10 px-2.5 py-1 text-[12px] font-semibold">
+                <span className="size-2 rounded-full" style={{ background: PLATFORMS[c.channel].color }} />
+                {PLATFORMS[c.channel].label} {c.orders} · {rp(c.gmv)}
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Low Stock Items
-            </CardTitle>
-            <AlertTriangle className={`h-4 w-4 ${lowStockItems.length > 0 ? 'text-warning' : 'text-muted-foreground'}`} />
-          </CardHeader>
-          <CardContent>
-            <div className={`text-3xl font-bold ${lowStockItems.length > 0 ? 'text-warning' : ''}`}>
-              {lowStockItems.length}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Based on sales velocity
-            </p>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+        <section className="glass rounded-[22px] p-5 sm:p-6">
+          <p className="max-w-[44ch] font-display text-[21px] font-medium leading-snug">
+            {pace ? (
+              <>
+                {month.label} is <span className={cn("font-semibold", pace === "behind pace" && "text-[#b4561f]")}>{pace}</span> — {rp(month.actualGmv)} of the {rp(month.targetGmv)} GMV
+                target with {pct(month.elapsed)} of the month gone.
+              </>
+            ) : (
+              <>
+                {rp(month.actualGmv)} so far in {month.label}. Set this month&apos;s KPI targets to see whether that&apos;s on pace.
+              </>
+            )}
+          </p>
+          <div className="mt-6 space-y-5">
+            <PaceBar label="GMV" value={month.actualGmv} target={month.targetGmv} elapsed={month.elapsed} format={rp} />
+            <PaceBar label="Items sold" value={month.actualUnits} target={month.targetUnits} elapsed={month.elapsed} format={count} tone="sky" />
+          </div>
+          <div className="mt-6 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+            <Stat label="GMV this month" value={rp(month.actualGmv)} note={month.targetGmv ? `${pct(month.actualGmv / month.targetGmv)} of target` : "No target yet"} />
+            <Stat label="Items this month" value={count(month.actualUnits)} note={month.targetUnits ? `of ${count(month.targetUnits)}` : "No target yet"} />
+            <Link href="/kpi" className="glass-inset col-span-2 flex items-center justify-between rounded-[16px] px-4 py-3.5 text-[13.5px] font-semibold text-primary/80 hover:text-primary sm:col-span-1">
+              KPI by product <ArrowRight className="size-4" />
+            </Link>
+          </div>
+        </section>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Stock Units
-            </CardTitle>
-            <Box className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{stats.totalStock}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Units on hand
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total GMV
-            </CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold leading-tight tracking-tight tabular-nums break-words 2xl:text-3xl">
-              {formatCurrency(totalGmv)}
+        <section className="glass flex flex-col rounded-[22px] p-5 sm:p-6">
+          <h2 className="font-display text-[19px] font-semibold">Needs you</h2>
+          {low.length === 0 ? (
+            <p className="mt-1.5 text-[14px] text-muted-foreground">Nothing right now — every product is above its reorder point.</p>
+          ) : (
+            <ul className="mt-3 space-y-2.5">
+              {low.slice(0, 3).map((s, i) => (
+                <li key={s.sku} className={cn("flex items-center gap-3 rounded-[18px] border p-3", i === 0 ? "border-[#e3a24a]/45 bg-[#e3a24a]/10" : "border-primary/10 bg-white/45")}>
+                  <ListingThumb src={s.imageUrl} name={s.name} sku={s.sku} size={48} />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold leading-snug">Reorder {s.name}</p>
+                    <p className="num text-[13px] text-muted-foreground">
+                      {s.stock} left · reorder at {s.reorderAt}
+                    </p>
+                  </div>
+                  {i === 0 && (
+                    <Link href="/restock" className="rounded-full bg-primary px-3.5 py-2 text-[12.5px] font-bold text-white">
+                      Restock
+                    </Link>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="mt-auto pt-6">
+            <div className="mb-1 flex items-baseline justify-between">
+              <h3 className="text-[14px] font-bold">Stock</h3>
+              <Link href="/products" className="text-[12.5px] font-semibold text-muted-foreground hover:text-primary">
+                Products
+              </Link>
             </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              From {paidOrdersCount} paid or shipped orders
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold leading-tight tracking-tight tabular-nums break-words 2xl:text-3xl">
-              {formatCurrency(totalRevenue)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">GMV minus channel fees</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Profit</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold leading-tight tracking-tight tabular-nums break-words 2xl:text-3xl">
-              {formatCurrency(totalProfit)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Revenue minus COGS</p>
-          </CardContent>
-        </Card>
+            {stock.map((s) => {
+              const ref = Math.max(s.reorderAt ?? 0, 1) * 2.5
+              const w = Math.min(1, Math.max(0, s.stock) / ref)
+              return (
+                <div key={s.sku} className="grid grid-cols-[32px_1fr_minmax(0,1.2fr)_56px] items-center gap-3 border-b border-primary/[0.07] py-2 last:border-0">
+                  <ListingThumb src={s.imageUrl} name={s.name} sku={s.sku} size={32} className="rounded-[9px]" />
+                  <span className="truncate text-[13px] font-semibold">{s.name}</span>
+                  <div className="h-2 overflow-hidden rounded-full bg-primary/[0.08]">
+                    <div className={cn("h-full rounded-full", s.needsReorder ? "bg-[#e3a24a]" : "bg-primary")} style={{ width: `${Math.max(w * 100, s.stock > 0 ? 3 : 0)}%` }} />
+                  </div>
+                  <span className={cn("num text-right text-[13px] font-semibold", s.stock < 0 && "text-destructive")}>{s.stock}</span>
+                </div>
+              )
+            })}
+          </div>
+        </section>
       </div>
 
-      <Card className="mb-8">
-        <CardHeader className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
-            <CardTitle>Orders</CardTitle>
-            <CardDescription>
-              Quick order action and daily sales by selected date
-            </CardDescription>
-          </div>
-          <Link href="/orders/new">
-            <Button>Create Order</Button>
-          </Link>
-        </CardHeader>
-        <CardContent>
-          <DateFilter selectedDate={selectedDate} />
-
-          <div className="mb-4 text-sm text-muted-foreground">
-            {dailySales.totalOrders} orders and {dailySales.totalUnits} units sold on {dailySales.date}
-          </div>
-          <div className="mb-4 text-sm">
-            Daily GMV: <span className="font-semibold">{formatCurrency(dailySales.totalGmv)}</span>
-            <span className="mx-2">·</span>
-            Daily Revenue: <span className="font-semibold">{formatCurrency(dailySales.totalRevenue)}</span>
-          </div>
-          {dailySales.items.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-              No paid or shipped sales recorded for this day.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead className="text-right">Quantity</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {dailySales.items.map((item) => (
-                  <TableRow key={item.sku}>
-                    <TableCell className="font-medium">{item.productName}</TableCell>
-                    <TableCell className="text-right font-semibold">{item.quantity}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Projected Revenue Card */}
-      <Card className="mb-8 border-primary/20 bg-primary/5">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <DollarSign className="h-5 w-5 text-primary" />
-            <CardTitle>
-              Projected Revenue from Current Stock
-              {returnedUnits > 0 && (
-                <InfoTooltip
-                  content="Net units exclude returns. Gross includes returns."
-                  formula={`Net: ${totalUnitsSold} · Returned: ${returnedUnits} · Gross: ${grossUnitsSold}`}
-                />
-              )}
-            </CardTitle>
-          </div>
-          <CardDescription>
-            Potential revenue if all current stock sells at historical average prices
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-6">
-            <div className="text-4xl font-bold text-primary">
-              {formatCurrency(projectedRevenue.total_projected_revenue)}
-            </div>
-            <p className="text-sm text-muted-foreground mt-2">
-              Based on {stats.totalStock} units in stock across {stats.totalProducts} products
+      {groupedReorderRecommendations.length > 0 && (
+        <section className="glass rounded-[22px] p-5 sm:p-6">
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="font-display text-[19px] font-semibold">Reorder guide</h2>
+            <p className="text-[12.5px] text-muted-foreground">
+              From average daily sales on in-stock days since {reorder.startDate.toISOString().slice(0, 10)}, and learned shipping times.
             </p>
           </div>
-
-          {projectedRevenue.products_projection.length > 0 && (
-            <div>
-              <h4 className="text-sm font-semibold mb-3 text-muted-foreground">Products by Projected Revenue</h4>
-              <div className="space-y-3">
-                {projectedRevenue.products_projection.filter(p => p.current_stock > 0).map((product) => (
-                    <div key={product.sku} className="flex items-center justify-between p-3 bg-card rounded-lg border">
-                      <div className="flex-1">
-                        <div className="font-medium">{product.name}</div>
-                        {product.variant && (
-                          <div className="text-sm text-muted-foreground">{product.variant}</div>
-                        )}
-                        <div className="text-xs text-muted-foreground mt-1">
-                          {product.current_stock} units × {formatCurrency(product.avg_revenue_per_unit)}/unit avg
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-lg font-semibold text-primary">
-                          {formatCurrency(product.projected_revenue)}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {product.total_units_sold > 0 ? (
-                            <span className="inline-flex items-center gap-1">
-                              {product.total_units_sold} sold all time
-                              {(returnedBySku.get(product.sku) || 0) > 0 ? (
-                                <InfoTooltip
-                                  content="Net units exclude returns. Gross includes returns."
-                                  formula={`Net: ${product.total_units_sold} · Returned: ${returnedBySku.get(product.sku)} · Gross: ${product.total_units_sold + (returnedBySku.get(product.sku) || 0)}`}
-                                />
-                              ) : null}
-                            </span>
-                          ) : (
-                            'No sales yet'
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="mb-8">
-        <CardHeader>
-          <CardTitle>Restock Guidance</CardTitle>
-          <CardDescription>
-            Based on average daily sales during in-stock days since {reorderRecommendations.startDate.toISOString().slice(0, 10)}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>SKU</TableHead>
-                <TableHead>Product</TableHead>
-                <TableHead>Mode</TableHead>
-                <TableHead className="text-right">Avg/Day</TableHead>
-                <TableHead className="text-right">Lead+Buffer</TableHead>
-                <TableHead className="text-right">Reorder Point</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {groupedReorderRecommendations.map((group) => (
-                <Fragment key={group.sku}>
-                  <TableRow className="bg-muted/40 hover:bg-muted/40">
-                    <TableCell className="font-mono text-sm font-semibold">{group.sku}</TableCell>
-                    <TableCell colSpan={5} className="font-semibold">
-                      {group.name}
-                    </TableCell>
-                  </TableRow>
+          <div className="grid gap-3 md:grid-cols-2">
+            {groupedReorderRecommendations.map((group) => (
+              <div key={group.sku} className="glass-inset rounded-[18px] p-4">
+                <p className="font-semibold">{group.name}</p>
+                <ul className="mt-2 space-y-1.5">
                   {group.routes.map((rec) => (
-                    <TableRow key={`${rec.sku}-${rec.mode}`}>
-                      <TableCell />
-                      <TableCell />
-                      <TableCell>{rec.mode}</TableCell>
-                      <TableCell className="text-right">{rec.avgDaily.toFixed(2)}</TableCell>
-                      <TableCell className="text-right">
-                        {rec.leadTimeLabel}
-                      </TableCell>
-                      <TableCell className="text-right font-semibold">
-                        {rec.reorderMin === rec.reorderMax
-                          ? `${rec.reorderMin} units`
-                          : `${rec.reorderMin}-${rec.reorderMax} units`}
-                      </TableCell>
-                    </TableRow>
+                    <li key={`${rec.sku}-${rec.mode}`} className="num flex flex-wrap items-baseline justify-between gap-x-3 text-[13px]">
+                      <span className="text-muted-foreground">
+                        {rec.mode} · {rec.avgDaily.toFixed(2)}/day · {rec.leadTimeLabel}
+                      </span>
+                      <span className="font-semibold">{rec.reorderMin === rec.reorderMax ? `${rec.reorderMin} units` : `${rec.reorderMin}–${rec.reorderMax} units`}</span>
+                    </li>
                   ))}
-                </Fragment>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      {/* Low Stock Alerts */}
-      {(lowStockItems.length > 0 || lowStockBundles.length > 0) && (
-        <div className="space-y-4 mb-8">
-          {/* Regular Products Low Stock */}
-          {lowStockItems.length > 0 && (
-            <Card className="border-warning/50 bg-warning/5">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-warning" />
-                  <CardTitle>Low Stock Alert - Products</CardTitle>
-                </div>
-                <CardDescription>
-                  Based on sales velocity and the highest reorder point across available restock modes
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>Product</TableHead>
-                      <TableHead className="text-right">Current Stock</TableHead>
-                      <TableHead className="text-right">Reorder Point</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {lowStockItems.map((item: any) => (
-                      <TableRow key={item.id}>
-                        <TableCell className="font-mono text-sm">{item.sku}</TableCell>
-                        <TableCell>
-                          <div className="font-medium">{item.name}</div>
-                          {item.variant && (
-                            <div className="text-sm text-muted-foreground">{item.variant}</div>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span className="font-semibold text-warning">
-                            {item.current_stock}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right text-muted-foreground">
-                          {item.dynamic_reorder_point
-                            ? `${item.dynamic_reorder_point.min}-${item.dynamic_reorder_point.max}`
-                            : item.reorder_point}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Bundles Low Stock */}
-          {lowStockBundles.length > 0 && (
-            <Card className="border-warning/50 bg-warning/5">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-warning" />
-                  <CardTitle>Low Stock Alert - Bundles</CardTitle>
-                </div>
-                <CardDescription>
-                  These bundles have low availability due to component stock levels
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>Bundle</TableHead>
-                      <TableHead className="text-right">Available</TableHead>
-                      <TableHead className="text-right">Reorder Point</TableHead>
-                      <TableHead>Components</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {lowStockBundles.map((bundle) => (
-                      <TableRow key={bundle.id}>
-                        <TableCell className="font-mono text-sm">{bundle.sku}</TableCell>
-                        <TableCell>
-                          <div className="font-medium">{bundle.name}</div>
-                          {bundle.variant && (
-                            <div className="text-sm text-muted-foreground">{bundle.variant}</div>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span className="font-semibold text-warning">
-                            {bundle.available_stock}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right text-muted-foreground">
-                          {bundle.reorder_point}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {bundle.compositions.length} components
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
-      {/* Current Stock Overview */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Stock Overview</CardTitle>
-          <CardDescription>
-            Current inventory levels for main SKUs
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {physicalStockData.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No products in inventory. Add products to get started.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Product</TableHead>
-                  <TableHead className="text-right">Current Stock</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {physicalStockData.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="font-mono text-sm">{item.sku}</TableCell>
-                    <TableCell>
-                      <div className="font-medium">{item.name}</div>
-                      {item.variant && (
-                        <div className="text-sm text-muted-foreground">{item.variant}</div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span
-                        className={
-                          item.is_low_stock
-                            ? "font-semibold text-warning"
-                            : "text-muted-foreground"
-                        }
-                      >
-                        {item.current_stock}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      {item.status === 'active' ? (
-                        <Badge variant="success">Active</Badge>
-                      ) : (
-                        <Badge variant="outline">Discontinued</Badge>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {data.orders.length > 0 && (
+        <section className="glass rounded-[22px] p-5 sm:p-6">
+          <div className="mb-2 flex items-baseline justify-between">
+            <h2 className="font-display text-[19px] font-semibold">Logged today</h2>
+            <Link href="/orders" className="text-[12.5px] font-semibold text-muted-foreground hover:text-primary">
+              All orders
+            </Link>
+          </div>
+          <ul className="divide-y divide-primary/[0.07]">
+            {[...data.orders].reverse().map((o) => (
+              <li key={o.id}>
+                <Link href={`/orders/${o.id}`} className="flex items-center gap-3 py-2.5 hover:text-primary">
+                  <PlatformBadge channel={o.channel} size={28} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14px] font-semibold">{o.summary}</span>
+                    <span className="num block text-[12px] text-muted-foreground">
+                      {o.orderId} · {new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(o.createdAt))}
+                    </span>
+                  </span>
+                  <span className="num font-semibold">{rp(o.gmv)}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   )
 }

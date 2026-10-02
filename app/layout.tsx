@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Playfair_Display, Quicksand } from "next/font/google";
+import { Toaster } from "sonner";
 import "./globals.css";
 
 const playfair = Playfair_Display({
@@ -34,6 +35,11 @@ export default function RootLayout({
         className={`${playfair.variable} ${quicksand.variable} antialiased font-body`}
       >
         {children}
+        <Toaster
+          position="bottom-center"
+          offset={96}
+          toastOptions={{ className: "!rounded-2xl !border !border-white/80 !bg-white/90 !backdrop-blur-xl !text-[#213368] !font-body" }}
+        />
       </body>
     </html>
   );

@@ -19,12 +19,7 @@ import {
   buildReorderWindow,
 } from "@/lib/restock/guidance"
 import { calculateInStockDays } from "@/lib/restock/in-stock-days"
-import {
-  calculateOrderSettlementAmount,
-  createMarketplaceSettlementEntry,
-  createMarketplaceSettlementReversalEntry,
-  isSettledOrderStatus,
-} from "@/lib/marketplace-settlements"
+import { isSettledOrderStatus } from "@/lib/orders/settled-status"
 import { buildEffectiveUnitsBySku } from "@/lib/restock/effective-units"
 import {
   buildDailySalesSummary,
@@ -463,32 +458,6 @@ async function createOrderWithWorkflow(formData: CreateOrderInput): Promise<Crea
     }
   }
 
-  if (isSettledOrder) {
-    const settlementAmount = calculateOrderSettlementAmount(lineItemsToInsert, formData.channel_fees)
-    const settlementResult = await createMarketplaceSettlementEntry({
-      orderId: order.id,
-      orderLabel: `Order ${order.order_id}`,
-      channel: order.channel,
-      entryDate: order.order_date,
-      amount: settlementAmount,
-      notes: order.notes,
-    })
-
-    if (!settlementResult.success) {
-      const cleanupError = await cleanupFailedSettledOrderCreation({
-        supabase,
-        orderId: order.id,
-        orderLabel: `Order ${order.order_id}`,
-        successfulLedgerEntries,
-      })
-
-      return {
-        success: false,
-        error: cleanupError || settlementResult.error || "Failed to create marketplace settlement entry",
-      }
-    }
-  }
-
   revalidatePath("/orders")
   revalidatePath("/dashboard")
   revalidatePath("/ledger")
@@ -715,38 +684,6 @@ export async function updateOrderStatus(
           skipChangelog: true,
         })
       }
-    }
-  }
-
-  const settlementAmount = calculateOrderSettlementAmount(lineItems, order.channel_fees)
-
-  if (!wasSettled && isSettled) {
-    const settlementResult = await createMarketplaceSettlementEntry({
-      orderId: order.id,
-      orderLabel: `Order ${order.order_id}`,
-      channel: order.channel,
-      entryDate: order.order_date,
-      amount: settlementAmount,
-      notes: order.notes,
-    })
-
-    if (!settlementResult.success) {
-      console.error("Failed to create marketplace settlement entry:", settlementResult.error)
-    }
-  }
-
-  if (wasSettled && !isSettled) {
-    const reversalResult = await createMarketplaceSettlementReversalEntry({
-      orderId: order.id,
-      orderLabel: `Order ${order.order_id}`,
-      channel: order.channel,
-      entryDate: getJakartaToday(),
-      amount: settlementAmount,
-      notes: `Status changed from ${previousStatus} to ${newStatus}`,
-    })
-
-    if (!reversalResult.success) {
-      console.error("Failed to reverse marketplace settlement entry:", reversalResult.error)
     }
   }
 

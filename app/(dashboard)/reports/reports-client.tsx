@@ -43,13 +43,6 @@ const channelLabels: Record<string, string> = {
   offline: "Offline",
 }
 
-const platformLabels: Record<string, string> = {
-  tiktok_ads: "TikTok Ads",
-  shopee_ads: "Shopee Ads",
-  facebook_ads: "Facebook Ads",
-  google_ads: "Google Ads",
-}
-
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
 
 const channelColors: Record<string, string> = {
@@ -84,7 +77,6 @@ type Props = {
   initialOverview: any
   initialMonthly: any
   initialChannelProduct: any
-  initialAdPerformance: any
   initialReturnSummary: any
   initialCalendarDetails: any
   selectedYear: number | undefined
@@ -95,7 +87,6 @@ export function ReportsClient({
   initialOverview,
   initialMonthly,
   initialChannelProduct,
-  initialAdPerformance,
   initialReturnSummary,
   initialCalendarDetails,
   selectedYear,
@@ -120,7 +111,6 @@ export function ReportsClient({
   const overviewReport = initialOverview
   const monthlyReport = initialMonthly
   const channelProductReport = initialChannelProduct
-  const adPerformance = initialAdPerformance
   const returnSummary = initialReturnSummary
 
   const totalGmv = overviewReport?.byChannel.reduce((sum: number, ch: any) => sum + ch.gmv, 0) || 0
@@ -488,7 +478,6 @@ export function ReportsClient({
             <TabsTrigger value="channels" className="flex-shrink-0">Channels</TabsTrigger>
             <TabsTrigger value="products" className="flex-shrink-0">Products</TabsTrigger>
             <TabsTrigger value="details" className="flex-shrink-0">Details</TabsTrigger>
-            <TabsTrigger value="ads" className="flex-shrink-0">Ad Performance</TabsTrigger>
           </TabsList>
         </div>
 
@@ -1241,313 +1230,6 @@ export function ReportsClient({
           )}
         </TabsContent>
 
-        {/* Ad Performance Tab */}
-        <TabsContent value="ads" className="space-y-4">
-          {adPerformance && adPerformance.campaigns_metrics.length > 0 ? (
-            <>
-              {/* Overall Ad Metrics Cards */}
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">
-                      Total Ad Spend
-                    </CardTitle>
-                    <DollarSign className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">
-                      {formatCurrency(adPerformance.total_ad_spend)}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Across all campaigns
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">
-                      <span className="inline-flex items-center gap-1">
-                        Total GMV
-                        <InfoTooltip
-                          content="GMV from ad-driven orders"
-                          formula="Customer sales before channel fees"
-                        />
-                      </span>
-                    </CardTitle>
-                    <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">
-                      {formatCurrency(adPerformance.total_gmv)}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      From ad-driven orders
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">
-                      <span className="inline-flex items-center gap-1">
-                        Overall GMV ROAS
-                        <InfoTooltip
-                          content="Return on Ad Spend"
-                          formula="Total GMV ÷ Total Ad Spend"
-                        />
-                      </span>
-                    </CardTitle>
-                    <Target className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className={`text-2xl font-bold ${
-                      adPerformance.overall_gmv_roas >= 2 ? 'text-success' :
-                      adPerformance.overall_gmv_roas >= 1 ? 'text-warning' :
-                      'text-destructive'
-                    }`}>
-                      {adPerformance.overall_gmv_roas.toFixed(2)}x
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Return on ad spend
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">
-                      <span className="inline-flex items-center gap-1">
-                        Avg Cost/Order
-                        <InfoTooltip
-                          content="Average cost per order from ads"
-                          formula="Total Ad Spend ÷ Total Orders"
-                        />
-                      </span>
-                    </CardTitle>
-                    <ShoppingBag className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">
-                      {formatCurrency(adPerformance.avg_cost_per_order)}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {adPerformance.total_orders} total orders
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Campaign Performance Table */}
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>Campaign Performance</CardTitle>
-                      <CardDescription>
-                        Detailed metrics for all campaigns ({adPerformance.active_campaigns_count} active)
-                      </CardDescription>
-                    </div>
-                    <Link href="/ad-campaigns">
-                      <Button variant="outline" size="sm">
-                        View All Campaigns
-                      </Button>
-                    </Link>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {/* Mobile View */}
-                  <div className="md:hidden space-y-3">
-                    {adPerformance.campaigns_metrics.map((campaign: any) => (
-                      <div key={campaign.id} className="border rounded-lg p-3 space-y-2">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <p className="font-medium">{campaign.campaign_name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {platformLabels[campaign.platform]}
-                            </p>
-                          </div>
-                          <Badge variant={campaign.status === 'active' ? 'success' : 'secondary'}>
-                            {campaign.status}
-                          </Badge>
-                        </div>
-                        <div className="space-y-1 text-sm">
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Spend:</span>
-                            <span className="font-medium">{formatCurrency(campaign.total_spend)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Revenue:</span>
-                            <span className="font-medium">{formatCurrency(campaign.revenue)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">GMV ROAS:</span>
-                            <span className={`font-semibold ${
-                              campaign.roas >= 2 ? 'text-success' :
-                              campaign.roas >= 1 ? 'text-warning' :
-                              'text-destructive'
-                            }`}>
-                              {campaign.roas.toFixed(2)}x
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Desktop View */}
-                  <div className="hidden md:block overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Campaign</TableHead>
-                          <TableHead>Platform</TableHead>
-                          <TableHead>Period</TableHead>
-                          <TableHead className="text-right">Spend</TableHead>
-                          <TableHead className="text-right">Orders</TableHead>
-                          <TableHead className="text-right">
-                            <span className="inline-flex items-center">
-                              Revenue
-                              <InfoTooltip
-                                content="Revenue from campaign"
-                                formula="Selling Price - Channel Fees"
-                              />
-                            </span>
-                          </TableHead>
-                          <TableHead className="text-right">
-                            <span className="inline-flex items-center">
-                              GMV ROAS
-                              <InfoTooltip
-                                content="Return on Ad Spend"
-                                formula="GMV ÷ Ad Spend"
-                              />
-                            </span>
-                          </TableHead>
-                          <TableHead className="text-right">
-                            <span className="inline-flex items-center">
-                              Cost/Order
-                              <InfoTooltip
-                                content="Average cost per order"
-                                formula="Ad Spend ÷ Orders"
-                              />
-                            </span>
-                          </TableHead>
-                          <TableHead>Status</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {adPerformance.campaigns_metrics.map((campaign: any) => {
-                          const startDate = new Date(campaign.start_date).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric'
-                          })
-                          const endDate = campaign.end_date
-                            ? new Date(campaign.end_date).toLocaleDateString('en-US', {
-                                month: 'short',
-                                day: 'numeric'
-                              })
-                            : 'Ongoing'
-
-                          return (
-                            <TableRow key={campaign.id}>
-                              <TableCell className="font-medium">
-                                <Link href={`/ad-campaigns/${campaign.id}`} className="hover:underline">
-                                  {campaign.campaign_name}
-                                </Link>
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline">
-                                  {platformLabels[campaign.platform]}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-muted-foreground text-sm">
-                                {startDate} - {endDate}
-                              </TableCell>
-                              <TableCell className="text-right font-medium">
-                                {formatCurrency(campaign.total_spend)}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {campaign.orders_count}
-                              </TableCell>
-                              <TableCell className="text-right font-medium">
-                                {formatCurrency(campaign.revenue)}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <span className={`font-semibold ${
-                                  campaign.roas >= 2 ? 'text-success' :
-                                  campaign.roas >= 1 ? 'text-warning' :
-                                  'text-destructive'
-                                }`}>
-                                  {campaign.roas.toFixed(2)}x
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-right text-muted-foreground">
-                                {formatCurrency(campaign.cost_per_order)}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant={
-                                  campaign.status === 'active' ? 'success' :
-                                  campaign.status === 'completed' ? 'secondary' :
-                                  'default'
-                                }>
-                                  {campaign.status}
-                                </Badge>
-                              </TableCell>
-                            </TableRow>
-                          )
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Spend vs Revenue Chart */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Spend vs Revenue by Campaign</CardTitle>
-                  <CardDescription>Compare ad spend with generated revenue</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={350}>
-                    <BarChart data={adPerformance.campaigns_metrics}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis
-                        dataKey="campaign_name"
-                        angle={-45}
-                        textAnchor="end"
-                        height={100}
-                      />
-                      <YAxis />
-                      <Tooltip
-                        formatter={(value) => formatCurrency(Number(value))}
-                        contentStyle={{ backgroundColor: 'var(--card)', border: '1px solid var(--border)' }}
-                      />
-                      <Legend />
-                      <Bar dataKey="total_spend" fill="#ef4444" name="Ad Spend" />
-                      <Bar dataKey="revenue" fill="#10b981" name="Revenue" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            </>
-          ) : (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <Target className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No ad campaigns yet</h3>
-                <p className="text-muted-foreground mb-4">
-                  Start tracking your ad spend and measure ROAS by creating your first campaign
-                </p>
-                <Link href="/ad-campaigns/new">
-                  <Button>
-                    Create First Campaign
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
       </Tabs>
 
       <Dialog open={Boolean(selectedCalendarDate)} onOpenChange={(open) => !open && setSelectedCalendarDate(null)}>

@@ -3,6 +3,8 @@ import { KpiClient } from "./kpi-client"
 
 type SearchParams = Promise<{ month?: string }>
 
+export const metadata = { title: "KPI · Sheepie" }
+
 export default async function KpiPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams
   const selectedMonth = params.month && /^\d{4}-\d{2}$/.test(params.month)

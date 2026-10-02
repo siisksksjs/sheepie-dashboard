@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft, Plus, Trash2 } from "lucide-react"
@@ -34,10 +34,19 @@ type LineItem = {
   selling_price: number
 }
 
+export type NewOrderInitial = {
+  channel: Channel
+  lineItems: Omit<LineItem, "id">[]
+  channelFees: number | null
+  notes: string | null
+}
+
 type Props = {
   products: Product[]
   packSizes: ProductPackSize[]
   channelPrices: ProductChannelPackPrice[]
+  /** Prefill from an earlier order ("change something first" in Quick log). */
+  initial?: NewOrderInitial
 }
 
 function createEmptyLineItem(): LineItem {
@@ -88,12 +97,14 @@ function allocatePricesByDefaultRatio(
   }))
 }
 
-export function NewOrderForm({ products, packSizes, channelPrices }: Props) {
+export function NewOrderForm({ products, packSizes, channelPrices, initial }: Props) {
   const router = useRouter()
-  const [lineItems, setLineItems] = useState<LineItem[]>([])
+  const [lineItems, setLineItems] = useState<LineItem[]>(() => (initial?.lineItems ?? []).map((item) => ({ ...item, id: crypto.randomUUID() })))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [selectedChannel, setSelectedChannel] = useState<Channel | "">("")
+  const [selectedChannel, setSelectedChannel] = useState<Channel | "">(initial?.channel ?? "")
+  // Keep the prefilled prices on first render; re-price only when the channel actually changes.
+  const prefilledChannel = useRef<Channel | "">(initial?.channel ?? "")
   const [orderDate, setOrderDate] = useState(getJakartaToday())
   const [orderId, setOrderId] = useState("")
   const [actualGrossRevenue, setActualGrossRevenue] = useState("")
@@ -145,6 +156,8 @@ export function NewOrderForm({ products, packSizes, channelPrices }: Props) {
 
   useEffect(() => {
     if (!selectedChannel) return
+    if (prefilledChannel.current && prefilledChannel.current === selectedChannel) return
+    prefilledChannel.current = ""
 
     setLineItems((current) =>
       current.map((item) => {
@@ -382,12 +395,13 @@ export function NewOrderForm({ products, packSizes, channelPrices }: Props) {
                   step="0.01"
                   min="0"
                   placeholder="0"
+                  defaultValue={initial?.channelFees ?? undefined}
                 />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="notes">Notes</Label>
-                <Input id="notes" name="notes" placeholder="Optional notes" />
+                <Input id="notes" name="notes" placeholder="Optional notes" defaultValue={initial?.notes ?? undefined} />
               </div>
             </div>
 

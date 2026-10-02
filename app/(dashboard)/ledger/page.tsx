@@ -16,6 +16,8 @@ const movementTypeLabels: Record<string, { label: string; variant: "default" | "
   ADJUSTMENT: { label: "Adjustment", variant: "outline" },
 }
 
+export const metadata = { title: "Ledger · Sheepie" }
+
 export default async function LedgerPage() {
   const [entries, products] = await Promise.all([
     getLedgerEntries({ limit: 100 }),
