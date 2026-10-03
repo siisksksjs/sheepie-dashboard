@@ -61,7 +61,7 @@ type KpiOrder = {
 type KpiProductCatalogRow = Pick<Product, "sku" | "name" | "variant" | "is_bundle">
 
 function normalizeMonth(value: string) {
-  if (!/^\d{4}-\d{2}$/.test(value)) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) {
     return null
   }
 
@@ -230,6 +230,7 @@ export async function saveMonthlyKpiTargets(input: SaveKpiInput): Promise<SaveKp
   }
 
   revalidatePath("/kpi")
+  revalidatePath("/dashboard")
   return { success: true }
 }
 

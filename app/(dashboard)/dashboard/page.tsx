@@ -21,7 +21,7 @@ export default async function TodayPage() {
   const data = await getTodayData()
   const { totals, month, stock, reorder } = data
   const greeting = data.hourNow < 11 ? "Good morning" : data.hourNow < 18 ? "Good afternoon" : "Good evening"
-  const share = month.targetGmv > 0 ? month.actualGmv / month.targetGmv : null
+  const share = month.targetGmv > 0 ? month.actualGmv / month.targetGmv : month.targetUnits > 0 ? month.actualUnits / month.targetUnits : null
   const pace = share === null ? null : share >= month.elapsed + 0.05 ? "ahead of pace" : share <= month.elapsed - 0.05 ? "behind pace" : "on pace"
 
   const groupedReorderRecommendations = reorder.recommendations.reduce<
@@ -89,8 +89,7 @@ export default async function TodayPage() {
           <p className="max-w-[44ch] font-display text-[21px] font-medium leading-snug">
             {pace ? (
               <>
-                {month.label} is <span className={cn("font-semibold", pace === "behind pace" && "text-[#b4561f]")}>{pace}</span> — {rp(month.actualGmv)} of the {rp(month.targetGmv)} GMV
-                target with {pct(month.elapsed)} of the month gone.
+                {month.label} is <span className={cn("font-semibold", pace === "behind pace" && "text-[#b4561f]")}>{pace}</span> — {month.targetGmv > 0 ? `${rp(month.actualGmv)} of the ${rp(month.targetGmv)} GMV target` : `${count(month.actualUnits)} of the ${count(month.targetUnits)} item target`} with {pct(month.elapsed)} of the month gone.
               </>
             ) : (
               <>
@@ -103,7 +102,7 @@ export default async function TodayPage() {
             <PaceBar label="Items sold" value={month.actualUnits} target={month.targetUnits} elapsed={month.elapsed} format={count} tone="sky" />
           </div>
           <div className="mt-6 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-            <Stat label="GMV this month" value={rp(month.actualGmv)} note={month.targetGmv ? `${pct(month.actualGmv / month.targetGmv)} of target` : "No target yet"} />
+            <Stat label="GMV this month" value={rp(month.actualGmv)} note={month.targetGmv ? `${pct(month.actualGmv / month.targetGmv)} of target` : "No GMV target set"} />
             <Stat label="Items this month" value={count(month.actualUnits)} note={month.targetUnits ? `of ${count(month.targetUnits)}` : "No target yet"} />
             <Link href="/kpi" className="glass-inset col-span-2 flex items-center justify-between rounded-[16px] px-4 py-3.5 text-[13.5px] font-semibold text-primary/80 hover:text-primary sm:col-span-1">
               KPI by product <ArrowRight className="size-4" />
@@ -200,11 +199,11 @@ export default async function TodayPage() {
             {[...data.orders].reverse().map((o) => (
               <li key={o.id}>
                 <Link href={`/orders/${o.id}`} className="flex items-center gap-3 py-2.5 hover:text-primary">
-                  <PlatformBadge channel={o.channel} size={28} />
+                  <span className="relative flex-none"><ListingThumb src={o.imageUrl} name={o.imageName} sku={o.imageSku} size={52} /><span className="absolute -bottom-1 -right-1 rounded-lg ring-2 ring-white"><PlatformBadge channel={o.channel} size={24} /></span></span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[14px] font-semibold">{o.summary}</span>
                     <span className="num block text-[12px] text-muted-foreground">
-                      {o.orderId} · {new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(o.createdAt))}
+                      {PLATFORMS[o.channel].label} · {o.orderId} · {new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(o.createdAt))}
                     </span>
                   </span>
                   <span className="num font-semibold">{rp(o.gmv)}</span>

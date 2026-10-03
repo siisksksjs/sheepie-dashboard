@@ -81,7 +81,7 @@ export function OrdersListClient({ orders, images }: Props) {
                 channel === p ? "border-primary bg-primary text-white" : "border-primary/10 bg-white/70 text-muted-foreground hover:text-primary",
               )}
             >
-              {p !== "all" && <span className="size-2 rounded-full" style={{ background: PLATFORMS[p].color }} />}
+              {p !== "all" && <PlatformBadge channel={p} size={23} />}
               {p === "all" ? "All platforms" : PLATFORMS[p].label}
             </button>
           ))}
@@ -120,7 +120,7 @@ export function OrdersListClient({ orders, images }: Props) {
                   <span className="min-w-0 flex-1">
                     <span className="block text-[14px] font-bold leading-snug">{order.order_line_items.map(lineLabel).join(" + ") || "No items"}</span>
                     <span className="num mt-0.5 block text-[12px] text-muted-foreground">
-                      {order.order_id} · {formatDate(order.order_date)}
+                      {PLATFORMS[order.channel as Channel].label} · {order.order_id} · {formatDate(order.order_date)}
                     </span>
                   </span>
                   <Badge variant={statusBadges[order.status]}>{order.status.charAt(0).toUpperCase() + order.status.slice(1)}</Badge>
@@ -157,13 +157,13 @@ export function OrdersListClient({ orders, images }: Props) {
                     <span className="relative flex-none">
                       <ListingThumb src={thumbFor(order)} name={order.order_line_items[0]?.product_name ?? order.order_id} sku={order.order_line_items[0]?.sku} size={46} />
                       <span className="absolute -bottom-1 -right-1 rounded-[6px] ring-2 ring-white">
-                        <PlatformBadge channel={order.channel} size={19} />
+                        <PlatformBadge channel={order.channel} size={24} />
                       </span>
                     </span>
                     <span className="min-w-0">
                       <span className="block truncate text-[14px] font-bold">{order.order_line_items.map(lineLabel).join(" + ") || "No items"}</span>
                       <span className="num block truncate text-[12px] text-muted-foreground">
-                        {order.order_id}
+                        {PLATFORMS[order.channel as Channel].label} · {order.order_id}
                         {order.notes ? ` · ${order.notes}` : ""}
                       </span>
                     </span>

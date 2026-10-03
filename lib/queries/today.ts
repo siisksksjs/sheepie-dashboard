@@ -15,6 +15,9 @@ export type SkyOrder = {
   units: number
   gmv: number
   summary: string
+  imageUrl: string | null
+  imageSku: string
+  imageName: string
 }
 
 export type StockLine = {
@@ -115,6 +118,9 @@ export async function getTodayData(now = new Date()): Promise<TodayData> {
       id: o.id,
       orderId: o.order_id,
       channel: o.channel,
+      imageUrl: items[0] ? images[`${items[0].sku}:${items[0].pack_size ?? "single"}`] ?? images[`${items[0].sku}:single`] ?? null : null,
+      imageSku: items[0]?.sku ?? "",
+      imageName: (productBySku.get(items[0]?.sku)?.name as string) ?? "Order",
       createdAt: o.created_at,
       units: t.units,
       gmv: t.gmv,

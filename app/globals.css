@@ -157,3 +157,10 @@
     text-wrap: balance;
   }
 }
+
+@layer components {
+  .workspace-eyebrow { font-family: var(--font-body); font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-foreground); }
+  .workspace-select { height: 44px; width: 100%; min-width: 0; border: 1px solid var(--input); border-radius: 999px; background: rgb(255 255 255 / 0.75); padding: 0 14px; font: inherit; font-size: 13px; color: var(--foreground); }
+  .workspace-summary { border: 1px solid rgb(255 255 255 / 0.85); background: linear-gradient(120deg, rgb(162 193 224 / 0.18), rgb(255 255 255 / 0.72)); border-radius: 24px; padding: 12px; }
+  .workspace-summary .glass-inset { background: transparent; border-color: transparent; }
+}

@@ -16,9 +16,9 @@ export function PageHeader({ title, description, actions }: { title: string; des
 
 export function Stat({ label, value, note, className }: { label: string; value: ReactNode; note?: ReactNode; className?: string }) {
   return (
-    <div className={cn("glass-inset rounded-[16px] px-4 py-3.5", className)}>
+    <div className={cn("glass-inset min-w-0 rounded-[16px] px-4 py-3.5", className)}>
       <p className="text-[12.5px] font-semibold text-muted-foreground">{label}</p>
-      <p className="num mt-1 font-display text-[22px] font-semibold leading-tight">{value}</p>
+      <p className={cn("num mt-1 break-words font-display text-[22px] font-semibold leading-tight", typeof value === "string" && value.length > 11 && "text-[18px] sm:text-[22px]")}>{value}</p>
       {note && <p className="mt-1 text-[12px] text-muted-foreground">{note}</p>}
     </div>
   )
@@ -35,7 +35,7 @@ export function PaceBar({ label, value, target, elapsed, format, tone = "navy" }
           <span className="text-muted-foreground"> / {target > 0 ? format(target) : "no target"}</span>
         </span>
       </div>
-      <div className="relative mt-2 h-2.5 rounded-full bg-primary/[0.08]" role="meter" aria-label={label} aria-valuenow={value} aria-valuemin={0} aria-valuemax={target}>
+      <div className="relative mt-2 h-2.5 rounded-full bg-primary/[0.08]" role="meter" aria-label={label} aria-valuenow={share * 100} aria-valuemin={0} aria-valuemax={100} aria-valuetext={`${format(value)} of ${target > 0 ? format(target) : "no target"}`}>
         <div className={cn("absolute inset-y-0 left-0 rounded-full transition-[width] duration-1000", tone === "navy" ? "bg-primary" : "bg-secondary")} style={{ width: `${share * 100}%` }} />
         {target > 0 && <span className="absolute -top-1.5 h-[22px] w-[2px] rounded-full bg-[#e3a24a]" style={{ left: `calc(${elapsed * 100}% - 1px)` }} title="Where an even pace would be today" />}
       </div>

@@ -18,8 +18,9 @@ export default async function BioAnalyticsPage({
   searchParams: Promise<BioSearchParams>
 }) {
   // Authentication is enforced by the dashboard middleware and route group.
-  const filters = parseBioFilters(await searchParams)
+  const params = await searchParams
+  const filters = parseBioFilters(params)
   const bundle = await getBioAnalyticsBundle(filters)
 
-  return <BioAnalyticsClient bundle={bundle} />
+  return <BioAnalyticsClient bundle={bundle} initialView={params.view === "events" || filters.eventPage > 1 ? "events" : "overview"} />
 }

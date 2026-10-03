@@ -64,7 +64,9 @@ dashboard-sheepie/
 │   │   ├── products/        # Product management
 │   │   ├── ledger/          # Inventory ledger
 │   │   ├── orders/          # Order management
-│   │   ├── finance/         # Cash flow and account tracking
+│   │   ├── reports/         # Sales, channel and product reporting
+│   │   ├── kpi/             # Monthly sales targets and daily pace
+│   │   ├── bio-analytics/   # Traffic and behavior analytics
 │   │   └── restock/         # Supplier replenishment workflow
 │   ├── login/               # Login page
 │   └── layout.tsx           # Root layout
@@ -80,26 +82,42 @@ dashboard-sheepie/
 
 ## Features
 
-- Dedicated `Restock` tab for supplier orders, arrival confirmation, and learned lead-time tracking
-- Ledger-first stock handling: restocks increase stock only when marked `arrived`
-- Finance cash-out tracking on supplier `order_date`
-- Dashboard restock guidance that learns lead time from recent completed shipments
+- Today overview with hourly orders, product photos, monthly goals and low-stock guidance
+- Quick log of usual orders with review, platform filters, favorites and 10-second undo
+- Photo-based product catalog and accessible platform logos and names
+- Inventory Ledger with search, movement filters and a reviewed KOL sample workflow
+- Restock tracking, arrival confirmation and learned lead-time guidance
+- Sales reports, monthly KPI targets and bio traffic/behavior analytics
+- Customer returns distinguish resaleable goods from defective dead stock
 
-### Phase 1 (Current)
-- ✅ Product Master (SKU, name, variant, cost, reorder point)
-- ✅ Inventory Ledger (append-only, computed stock)
-- ✅ Stock on Hand view (real-time computed from ledger)
-- ✅ Authentication & authorization
+### Return stock handling
 
-### Phase 2 (Planned)
-- Orders CRUD (Paid/Cancelled/Returned)
-- Auto-generate ledger entries from orders
-- Sales reporting
+Paid and shipped orders have already deducted inventory. An intact cancellation or
+checked resaleable return restores physical units. A defective return records a
+RETURN and matching OUT_DAMAGE in one transaction: saleable stock stays unchanged.
+Dead stock cannot be reopened as a sale or restored as resaleable stock. Existing
+restored returns can be written off explicitly; legacy orders without a restoration
+record require ledger review instead of an automatic deduction.
 
-### Phase 3 (Planned)
-- Bundle composition management
-- Bundle stock availability
-- Low stock alerts
+Order status and inventory movements commit together. The order row is locked, stale
+requests are rejected, and identical retries do not create duplicate movements.
+
+### Required migrations
+
+Apply migrations before deploying the UI. In addition to the earlier catalog and
+analytics migrations, this refresh requires:
+
+- `supabase/migrations/20261002_add_listing_images.sql`: product pack photos and the listing-images upload bucket
+- `supabase/migrations/20261003050501_order_return_disposition.sql`: return condition, defect note and atomic status/inventory handling
+
+### Return integration tests
+
+`TEST_ORDER_DATABASE_URL` must point to an empty, disposable PostgreSQL database with
+permission to create roles and schemas. Run
+`npx vitest run lib/orders/return-status.postgres.test.ts` to check packed products,
+bundle components, dead stock, resaleable returns, retries, concurrent requests,
+transaction rollback and authenticated execution. The suite refuses to run against
+an existing orders table. Never use the live database for this test.
 
 ## Design System
 
@@ -121,9 +139,9 @@ Matching the main Sheepie website (sheepiesleep.com):
 - `products` - Product master data
 - `inventory_ledger` - All inventory movements
 - `stock_on_hand` - Computed view (SUM of ledger quantities)
-- `orders` - Order records (Phase 2)
-- `order_line_items` - Order details (Phase 2)
-- `bundle_compositions` - Bundle definitions (Phase 3)
+- `orders` - Orders and return stock conditions
+- `order_line_items` - Pack quantities, prices and cost snapshots
+- `bundle_compositions` - Physical component quantities for kits
 
 ## Scripts
 

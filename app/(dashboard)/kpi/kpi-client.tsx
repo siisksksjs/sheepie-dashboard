@@ -1,509 +1,375 @@
 "use client"
 
-import { useEffect, useMemo, useState, useTransition } from "react"
+import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { CalendarDays, Save, TrendingUp } from "lucide-react"
+import { ArrowRight, Check, CircleAlert, Save, Settings2 } from "lucide-react"
 import type { KpiWorkspace } from "@/lib/actions/kpi"
 import { saveMonthlyKpiTargets } from "@/lib/actions/kpi"
-import { formatCurrency } from "@/lib/utils"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { formatCurrency, getJakartaToday } from "@/lib/utils"
+import { PageHeader, PaceBar, Stat } from "@/components/ui/page"
+import { ListingThumb } from "@/components/listing-thumb"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Label } from "@/components/ui/label"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog"
 
-type EditableRow = KpiWorkspace["rows"][number]
-
-export function KpiClient({ initialWorkspace }: { initialWorkspace: KpiWorkspace }) {
+type Targets = { target_units: number; target_gmv: number }
+export function KpiClient({
+  initialWorkspace,
+  images
+}: {
+  initialWorkspace: KpiWorkspace
+  images: Record<string, string>
+}) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
-  const [month, setMonth] = useState(initialWorkspace.month)
-  const [rows, setRows] = useState<EditableRow[]>(initialWorkspace.rows)
-  const [message, setMessage] = useState<string | null>(null)
-
-  useEffect(() => {
-    setMonth(initialWorkspace.month)
-    setRows(initialWorkspace.rows)
-  }, [initialWorkspace])
-
-  const totals = useMemo(() => {
-    const base = rows.reduce(
-      (acc, row) => ({
-        target_units: acc.target_units + row.target_units,
-        target_gmv: acc.target_gmv + row.target_gmv,
-        actual_units: acc.actual_units + row.actual_units,
-        actual_gmv: acc.actual_gmv + row.actual_gmv,
-        actual_revenue: acc.actual_revenue + row.actual_revenue,
-      }),
-      { target_units: 0, target_gmv: 0, actual_units: 0, actual_gmv: 0, actual_revenue: 0 },
+  const [pending, start] = useTransition()
+  const [editing, setEditing] = useState(false)
+  const [message, setMessage] = useState("")
+  const [targets, setTargets] = useState<Record<string, Targets>>(() =>
+    Object.fromEntries(
+      initialWorkspace.rows.map((r) => [
+        r.sku,
+        { target_units: r.target_units, target_gmv: r.target_gmv }
+      ])
     )
-    const unitsProgress = getProgress(base.actual_units, base.target_units)
-    const gmvProgress = getProgress(base.actual_gmv, base.target_gmv)
-
-    return {
-      ...base,
-      units_progress: unitsProgress,
-      gmv_progress: gmvProgress,
-      overall_progress: (unitsProgress + gmvProgress) / 2,
-    }
-  }, [rows])
-
-  const monthPacing = getMonthPacing(month)
-
-  const updateRow = (sku: string, field: "target_units" | "target_gmv", value: string) => {
-    const parsed = Number(value)
-    const nextValue = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
-
-    setRows((current) =>
-      current.map((row) =>
-        row.sku === sku
-          ? { ...row, [field]: field === "target_units" ? Math.round(nextValue) : nextValue }
-          : row,
-      ),
-    )
-  }
-
-  const handleMonthChange = (value: string) => {
-    setMonth(value)
-    router.push(`/kpi?month=${value}`)
-  }
-
-  const handleSave = () => {
-    setMessage(null)
-    startTransition(async () => {
-      const result = await saveMonthlyKpiTargets({
-        month,
-        rows: rows.map((row) => ({
-          sku: row.sku,
-          target_units: row.target_units,
-          target_gmv: row.target_gmv,
-        })),
-      })
-
-      if (!result.success) {
-        setMessage(result.error)
-        return
+  )
+  const { month } = initialWorkspace
+  const rows = initialWorkspace.rows
+  const totals = initialWorkspace.totals
+  const [year, m] = month.split("-").map(Number)
+  const days = new Date(Date.UTC(year, m, 0)).getUTCDate()
+  const today = getJakartaToday()
+  const elapsedDays =
+    month < today.slice(0, 7)
+      ? days
+      : month > today.slice(0, 7)
+        ? 0
+        : Number(today.slice(8, 10))
+  const elapsed = elapsedDays / days
+  const monthLabel = new Intl.DateTimeFormat("en-GB", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  }).format(new Date(`${month}-01T00:00:00Z`))
+  const remainingDays = Math.max(0, days - elapsedDays)
+  const gap = Math.max(0, totals.target_gmv - totals.actual_gmv)
+  const hasGmvTarget = totals.target_gmv > 0
+  const hasUnitTarget = totals.target_units > 0
+  const unitGap = Math.max(0, totals.target_units - totals.actual_units)
+  const progress = hasGmvTarget
+    ? totals.actual_gmv / totals.target_gmv
+    : hasUnitTarget
+      ? totals.actual_units / totals.target_units
+      : null
+  const pace =
+    progress === null
+      ? "Set a target to see your pace"
+      : progress >= 1
+        ? hasGmvTarget
+          ? "Monthly GMV target reached"
+          : "Monthly unit target reached"
+        : progress < elapsed - 0.05
+          ? "Behind pace this month"
+          : progress > elapsed + 0.05
+            ? "Ahead of pace"
+            : "On pace this month"
+  function update(sku: string, field: keyof Targets, raw: string) {
+    const number = Number(raw)
+    setTargets((t) => ({
+      ...t,
+      [sku]: {
+        ...t[sku],
+        [field]: Math.max(
+          0,
+          Number.isFinite(number)
+            ? field === "target_units"
+              ? Math.round(number)
+              : number
+            : 0
+        )
       }
-
-      setMessage("KPI targets saved.")
-      router.refresh()
+    }))
+  }
+  function save() {
+    setMessage("")
+    start(async () => {
+      try {
+        const result = await saveMonthlyKpiTargets({
+          month,
+          rows: rows.map((r) => ({ sku: r.sku, ...targets[r.sku] }))
+        })
+        if (!result.success) {
+          setMessage(result.error)
+          return
+        }
+        setEditing(false)
+        router.refresh()
+      } catch {
+        setMessage("Could not save targets. Please try again.")
+      }
     })
   }
-
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-3xl font-display font-bold mb-2">KPI</h1>
-          <p className="text-muted-foreground">
-            Monthly product targets compared with actual sales performance.
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            GMV is customer sales before channel fees. Existing saved money targets were preserved—please review them once as GMV targets.
-          </p>
-        </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-          <div className="relative">
-            <CalendarDays className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
+    <div className="space-y-5">
+      <PageHeader
+        title="Monthly targets"
+        description="A clear view of where you are, where you need to be, and what is left to sell."
+        actions={
+          <>
             <Input
+              aria-label="KPI month"
               type="month"
               value={month}
-              onChange={(event) => handleMonthChange(event.target.value)}
-              className="pl-10 sm:w-44"
+              onChange={(e) => {
+                if (/^\d{4}-\d{2}$/.test(e.target.value))
+                  router.push(`/kpi?month=${e.target.value}`)
+              }}
+              className="w-44"
             />
-          </div>
-          <Button type="button" onClick={handleSave} disabled={isPending}>
-            <Save className="mr-2 h-4 w-4" />
-            {isPending ? "Saving" : "Save"}
-          </Button>
+            <Button
+              onClick={() => {
+                setMessage("")
+                setTargets(
+                  Object.fromEntries(
+                    rows.map((r) => [
+                      r.sku,
+                      { target_units: r.target_units, target_gmv: r.target_gmv }
+                    ])
+                  )
+                )
+                setEditing(true)
+              }}
+            >
+              <Settings2 className="mr-2 size-4" /> Edit targets
+            </Button>
+          </>
+        }
+      />
+      <section className="glass grid gap-6 rounded-[26px] p-5 sm:p-7 lg:grid-cols-[1fr_1.1fr]">
+        <div>
+          <p className="workspace-eyebrow">
+            {monthLabel} · day {elapsedDays} of {days}
+          </p>
+          <h2 className="mt-3 text-[26px] leading-snug sm:text-[32px]">
+            {pace}
+          </h2>
+          <p className="mt-3 max-w-[44ch] text-sm text-muted-foreground">
+            {progress === null
+              ? "Choose a monthly GMV and unit target for each product to measure your progress."
+              : `${hasGmvTarget ? `${formatCurrency(totals.actual_gmv)} in GMV` : `${totals.actual_units} of ${totals.target_units} items sold`} so far. ${Math.round(elapsed * 100)}% of the month has passed.`}
+          </p>
+          <p className="mt-3 text-xs text-muted-foreground">
+            GMV is sales before platform fees. The marker shows an even pace
+            through the month.
+          </p>
         </div>
-      </div>
-
-      {message ? (
-        <div className="rounded-lg border bg-card p-3 text-sm text-muted-foreground">
-          {message}
-        </div>
-      ) : null}
-
-      <section className="space-y-5">
-        <Card className="border border-primary/10 bg-card shadow-sm">
-          <CardHeader className="pb-0">
-            <CardTitle className="text-lg font-semibold text-[#30343b]">
-              GMV {formatMonthName(month)}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex min-h-[330px] flex-col items-center justify-center pt-2">
-            <CircularGauge value={totals.gmv_progress} size={228} strokeWidth={24} />
-            <div className="mt-5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-2xl font-semibold leading-tight">
-              <span className="text-primary">Current {formatCompactNumber(totals.actual_gmv)}</span>
-              <span className="text-muted-foreground">|</span>
-              <span className="text-[#5d626b]">Target {formatCompactNumber(totals.target_gmv)}</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-5 lg:grid-cols-3">
-          {rows.map((row) => (
-            <Card key={row.sku} className="border border-primary/10 bg-card shadow-sm">
-              <CardHeader className="pb-0">
-                <CardTitle className="text-lg font-semibold text-[#30343b]">
-                  {formatProductShortName(row)}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex min-h-[270px] flex-col items-center justify-center pt-0">
-                <SemiCircleGauge value={getProgress(row.actual_units, row.target_units)} />
-                <div className="mt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-xl font-semibold leading-tight">
-                  <span className="text-primary">Current {row.actual_units.toLocaleString()}</span>
-                  <span className="text-muted-foreground">|</span>
-                  <span className="text-[#5d626b]">Target {row.target_units.toLocaleString()}</span>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+        <div className="flex flex-col justify-center gap-6">
+          <PaceBar
+            label="Monthly GMV"
+            value={totals.actual_gmv}
+            target={totals.target_gmv}
+            elapsed={elapsed}
+            format={formatCurrency}
+          />
+          <PaceBar
+            label="Items sold"
+            value={totals.actual_units}
+            target={totals.target_units}
+            elapsed={elapsed}
+            format={(n) => n.toLocaleString()}
+            tone="sky"
+          />
         </div>
       </section>
-
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <MetricCard title="Target Units" value={totals.target_units.toLocaleString()} />
-        <MetricCard title="Actual Units" value={totals.actual_units.toLocaleString()} />
-        <MetricCard title="Target GMV" value={formatCurrency(totals.target_gmv)} />
-        <MetricCard title="Actual GMV" value={formatCurrency(totals.actual_gmv)} />
-        <MetricCard title="Actual Revenue" value={formatCurrency(totals.actual_revenue)} />
+      <section
+        className="workspace-summary grid grid-cols-2 gap-3 lg:grid-cols-4"
+        aria-label="Monthly KPI summary"
+      >
+        <Stat
+          label="GMV still to go"
+          value={hasGmvTarget ? formatCurrency(gap) : "—"}
+          note={
+            totals.target_gmv > 0
+              ? "To reach the saved target"
+              : "No GMV target set"
+          }
+        />
+        <Stat
+          label="Items still to sell"
+          value={Math.max(
+            0,
+            totals.target_units - totals.actual_units
+          ).toLocaleString()}
+          note={
+            totals.target_units > 0
+              ? "Across tracked products"
+              : "No unit target set"
+          }
+        />
+        <Stat
+          label="Days remaining"
+          value={remainingDays}
+          note="After today · WIB"
+        />
+        <Stat
+          label={hasGmvTarget ? "GMV needed per day" : "Items needed per day"}
+          value={
+            progress !== null && remainingDays > 0
+              ? hasGmvTarget
+                ? formatCurrency(gap / remainingDays)
+                : Math.ceil(unitGap / remainingDays).toLocaleString()
+              : "—"
+          }
+          note="Across the remaining days"
+        />
+      </section>
+      <div className="flex items-baseline justify-between px-1">
+        <h2 className="text-xl">Product by product</h2>
+        <p className="text-xs text-muted-foreground">
+          All colours and kit components included
+        </p>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>SKU Monthly Pace</CardTitle>
-          <CardDescription>
-            Unit progress by SKU against the expected pace for day {monthPacing.elapsedDays} of {monthPacing.daysInMonth}.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          {rows.map((row) => {
-            const status = getPaceStatus(row, monthPacing)
-
-            return (
-              <div key={row.sku} className="rounded-lg border bg-card p-4">
-                <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <div className="text-lg font-semibold">{formatProductShortName(row).replace(" | Units Sold", "")}</div>
-                    <div className="text-sm text-muted-foreground">{[row.sku, ...row.variant_skus].join(" + ")}</div>
-                  </div>
-                  <div className={`rounded-full px-3 py-1 text-sm font-semibold ${status.className}`}>
-                    {status.label}
-                  </div>
+      <section className="grid gap-4 xl:grid-cols-3">
+        {rows.map((row) => {
+          const expected = Math.ceil(row.target_units * elapsed)
+          const delta = row.actual_units - expected
+          const hasTarget = row.target_units > 0
+          const behind = hasTarget && delta < 0
+          const label = !hasTarget
+            ? "No unit target"
+            : row.actual_units >= row.target_units
+              ? "Target reached"
+              : behind
+                ? `${-delta} items behind pace`
+                : delta > 0
+                  ? `${delta} items ahead of pace`
+                  : "On pace"
+          return (
+            <article key={row.sku} className="glass rounded-[24px] p-5">
+              <div className="mb-5 flex items-center gap-3">
+                <ListingThumb
+                  src={images[`${row.sku}:single`]}
+                  name={row.name}
+                  sku={row.sku}
+                  size={60}
+                />
+                <div className="min-w-0">
+                  <h3 className="font-body text-[15px] font-bold">
+                    {row.variant_skus.length
+                      ? row.name.replace(/ Blue$/, "")
+                      : row.name}
+                  </h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {row.variant_skus.length
+                      ? "All colours"
+                      : row.variant || row.sku}
+                  </p>
                 </div>
-
-                <div className="space-y-4">
-                  <ProgressRow
-                    label="Units sold"
-                    actual={row.actual_units}
-                    target={row.target_units}
-                    value={getProgress(row.actual_units, row.target_units)}
-                    valueLabel={`${row.actual_units.toLocaleString()} / ${row.target_units.toLocaleString()} units`}
-                  />
-                  <ProgressRow
-                    label="GMV"
-                    actual={row.actual_gmv}
-                    target={row.target_gmv}
-                    value={getProgress(row.actual_gmv, row.target_gmv)}
-                    valueLabel={`${formatCurrency(row.actual_gmv)} / ${formatCurrency(row.target_gmv)}`}
-                  />
-                </div>
-
-                <div className="mt-4 grid gap-3 text-sm text-muted-foreground md:grid-cols-3">
-                  <div>
-                    Expected by today: <span className="font-semibold text-foreground">{status.requiredByToday.toLocaleString()} units</span>
+              </div>
+              <span
+                className={`mb-5 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold ${behind ? "bg-[#f9ecdc] text-[#8a4917]" : "bg-primary/5 text-primary"}`}
+              >
+                {behind ? (
+                  <CircleAlert className="size-3.5" />
+                ) : hasTarget ? (
+                  <Check className="size-3.5" />
+                ) : (
+                  <Settings2 className="size-3.5" />
+                )}
+                {label}
+              </span>
+              <div className="space-y-5">
+                <PaceBar
+                  label="Items sold"
+                  value={row.actual_units}
+                  target={row.target_units}
+                  elapsed={elapsed}
+                  format={(n) => n.toLocaleString()}
+                />
+                <PaceBar
+                  label="GMV"
+                  value={row.actual_gmv}
+                  target={row.target_gmv}
+                  elapsed={elapsed}
+                  format={formatCurrency}
+                  tone="sky"
+                />
+              </div>
+              <div className="mt-5 flex justify-between border-t border-primary/10 pt-4 text-xs">
+                <span className="text-muted-foreground">Items to target</span>
+                <span className="num font-bold">
+                  {Math.max(0, row.target_units - row.actual_units)}
+                </span>
+              </div>
+            </article>
+          )
+        })}
+      </section>
+      <Dialog open={editing} onOpenChange={setEditing}>
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Targets for {monthLabel}</DialogTitle>
+            <DialogDescription>
+              Set GMV before platform fees and physical units sold. These
+              targets also appear on Today.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {rows.map((row) => (
+              <div key={row.sku} className="glass-inset rounded-2xl p-4">
+                <p className="mb-3 text-sm font-bold">
+                  {row.name}
+                  {row.variant_skus.length ? " · All colours" : ""}
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor={`units-${row.sku}`}>Item target</Label>
+                    <Input
+                      id={`units-${row.sku}`}
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={targets[row.sku].target_units}
+                      onChange={(e) =>
+                        update(row.sku, "target_units", e.target.value)
+                      }
+                    />
                   </div>
-                  <div>
-                    Monthly target: <span className="font-semibold text-foreground">{row.target_units.toLocaleString()} units</span>
-                  </div>
-                  <div>
-                    Remaining: <span className="font-semibold text-foreground">{Math.max(0, row.target_units - row.actual_units).toLocaleString()} units</span>
+                  <div className="space-y-2">
+                    <Label htmlFor={`gmv-${row.sku}`}>GMV target · IDR</Label>
+                    <Input
+                      id={`gmv-${row.sku}`}
+                      type="number"
+                      min={0}
+                      step={1000}
+                      value={targets[row.sku].target_gmv}
+                      onChange={(e) =>
+                        update(row.sku, "target_gmv", e.target.value)
+                      }
+                    />
                   </div>
                 </div>
               </div>
-            )
-          })}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Product KPI Targets</CardTitle>
-          <CardDescription>
-            Input target units sold and Target GMV for each active product. Revenue is shown after channel fees.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead className="text-right">Target Units</TableHead>
-                  <TableHead className="text-right">Actual Units</TableHead>
-                  <TableHead className="text-right">Target GMV</TableHead>
-                  <TableHead className="text-right">Actual GMV</TableHead>
-                  <TableHead className="text-right">Actual Revenue</TableHead>
-                  <TableHead className="text-right">Progress</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => {
-                  const rowProgress = (
-                    getProgress(row.actual_units, row.target_units)
-                    + getProgress(row.actual_gmv, row.target_gmv)
-                  ) / 2
-
-                  return (
-                    <TableRow key={row.sku}>
-                      <TableCell>
-                        <div className="font-medium">{formatKpiProductName(row)}</div>
-                        <div className="text-xs text-muted-foreground">{[row.sku, ...row.variant_skus].join(" + ")}</div>
-                      </TableCell>
-                      <TableCell className="min-w-36">
-                        <Input
-                          type="number"
-                          min={0}
-                          value={row.target_units}
-                          onChange={(event) => updateRow(row.sku, "target_units", event.target.value)}
-                          className="text-right"
-                        />
-                      </TableCell>
-                      <TableCell className="text-right font-medium">{row.actual_units}</TableCell>
-                      <TableCell className="min-w-44">
-                        <Input
-                          type="number"
-                          min={0}
-                          step="1000"
-                          value={row.target_gmv}
-                          onChange={(event) => updateRow(row.sku, "target_gmv", event.target.value)}
-                          className="text-right"
-                        />
-                      </TableCell>
-                      <TableCell className="text-right font-medium">{formatCurrency(row.actual_gmv)}</TableCell>
-                      <TableCell className="text-right font-medium">{formatCurrency(row.actual_revenue)}</TableCell>
-                      <TableCell className="text-right font-semibold">{rowProgress.toFixed(0)}%</TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
+            ))}
           </div>
-        </CardContent>
-      </Card>
+          {message && (
+            <p role="alert" className="text-sm text-destructive">
+              {message}
+            </p>
+          )}
+          <Button onClick={save} disabled={pending}>
+            <Save className="mr-2 size-4" />
+            {pending ? "Saving…" : "Save targets"}
+            <ArrowRight className="ml-2 size-4" />
+          </Button>
+        </DialogContent>
+      </Dialog>
     </div>
   )
-}
-
-function MetricCard({ title, value }: { title: string; value: string }) {
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
-        <TrendingUp className="h-4 w-4 text-muted-foreground" />
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold leading-tight break-words tabular-nums">{value}</div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function ProgressRow({
-  label,
-  value,
-  valueLabel,
-}: {
-  label: string
-  actual: number
-  target: number
-  value: number
-  valueLabel: string
-}) {
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between gap-4 text-sm">
-        <span className="font-medium text-muted-foreground">{label}</span>
-        <span className="font-semibold text-foreground">{valueLabel}</span>
-      </div>
-      <div className="h-3 overflow-hidden rounded-full bg-[#dbe8f5]">
-        <div
-          className="h-full rounded-full bg-primary transition-all"
-          style={{ width: `${Math.max(0, Math.min(value, 100))}%` }}
-        />
-      </div>
-    </div>
-  )
-}
-
-function CircularGauge({
-  value,
-  size,
-  strokeWidth,
-}: {
-  value: number
-  size: number
-  strokeWidth: number
-}) {
-  const normalized = Math.max(0, Math.min(value, 100))
-  const radius = (size - strokeWidth) / 2
-  const circumference = 2 * Math.PI * radius
-  const offset = circumference - (normalized / 100) * circumference
-
-  return (
-    <div className="relative" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="#dbe8f5"
-          strokeWidth={strokeWidth}
-        />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="var(--primary)"
-          strokeLinecap="round"
-          strokeWidth={strokeWidth}
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-        />
-      </svg>
-      <div className="absolute inset-0 flex items-center justify-center text-6xl font-black text-[#151922] tabular-nums">
-        {normalized.toFixed(0)}%
-      </div>
-    </div>
-  )
-}
-
-function SemiCircleGauge({ value }: { value: number }) {
-  const normalized = Math.max(0, Math.min(value, 100))
-  const size = 260
-  const strokeWidth = 24
-  const radius = 104
-  const center = size / 2
-  const circumference = Math.PI * radius
-  const offset = circumference - (normalized / 100) * circumference
-
-  return (
-    <div className="relative h-[165px] w-[260px]">
-      <svg width={size} height={165} viewBox="0 0 260 165">
-        <path
-          d={`M ${center - radius} ${center} A ${radius} ${radius} 0 0 1 ${center + radius} ${center}`}
-          fill="none"
-          stroke="#dbe8f5"
-          strokeLinecap="round"
-          strokeWidth={strokeWidth}
-        />
-        <path
-          d={`M ${center - radius} ${center} A ${radius} ${radius} 0 0 1 ${center + radius} ${center}`}
-          fill="none"
-          stroke="var(--primary)"
-          strokeLinecap="round"
-          strokeWidth={strokeWidth}
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-        />
-      </svg>
-      <div className="absolute inset-x-0 top-[78px] text-center text-6xl font-black text-[#151922] tabular-nums">
-        {normalized.toFixed(0)}%
-      </div>
-    </div>
-  )
-}
-
-function getProgress(actual: number, target: number) {
-  if (target <= 0) {
-    return actual > 0 ? 100 : 0
-  }
-
-  return Math.min((actual / target) * 100, 100)
-}
-
-function getMonthPacing(month: string) {
-  const [year, monthNumber] = month.split("-").map(Number)
-  const today = new Date()
-  const selectedMonthStart = new Date(year, monthNumber - 1, 1)
-  const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1)
-  const daysInMonth = new Date(year, monthNumber, 0).getDate()
-  let elapsedDays = today.getDate()
-
-  if (selectedMonthStart < currentMonthStart) {
-    elapsedDays = daysInMonth
-  }
-
-  if (selectedMonthStart > currentMonthStart) {
-    elapsedDays = 0
-  }
-
-  return {
-    daysInMonth,
-    elapsedDays: Math.max(0, Math.min(elapsedDays, daysInMonth)),
-  }
-}
-
-function getPaceStatus(row: EditableRow, pacing: { elapsedDays: number; daysInMonth: number }) {
-  const requiredByToday = pacing.elapsedDays <= 0
-    ? 0
-    : Math.ceil((row.target_units * pacing.elapsedDays) / pacing.daysInMonth)
-  const unitDelta = row.actual_units - requiredByToday
-
-  if (unitDelta < 0) {
-    return {
-      label: `Behind by ${Math.abs(unitDelta).toLocaleString()} units`,
-      requiredByToday,
-      className: "bg-destructive/10 text-destructive",
-    }
-  }
-
-  if (unitDelta > 0) {
-    return {
-      label: `In front by ${unitDelta.toLocaleString()} units`,
-      requiredByToday,
-      className: "bg-success/10 text-success",
-    }
-  }
-
-  return {
-    label: "On track",
-    requiredByToday,
-    className: "bg-primary/10 text-primary",
-  }
-}
-
-function formatMonthName(month: string) {
-  const parsed = new Date(`${month}-01T00:00:00`)
-
-  if (Number.isNaN(parsed.getTime())) {
-    return month
-  }
-
-  return parsed.toLocaleString("default", { month: "long" })
-}
-
-function formatCompactNumber(value: number) {
-  return Math.round(value).toLocaleString("en-US")
-}
-
-function formatProductShortName(row: EditableRow) {
-  const sku = row.sku.toLowerCase()
-
-  if (sku.startsWith("cervi")) return "CerviCloud | Units Sold"
-  if (sku.startsWith("lumi")) return "LumiCloud | Units Sold"
-  if (sku.startsWith("calmi")) return "CalmiCloud | Units Sold"
-
-  return `${row.name} | Units Sold`
-}
-
-function formatKpiProductName(row: EditableRow) {
-  if (row.variant_skus.length > 0) {
-    return `${formatProductShortName(row).replace(" | Units Sold", "")} - All colours`
-  }
-
-  return row.variant ? `${row.name} - ${row.variant}` : row.name
 }

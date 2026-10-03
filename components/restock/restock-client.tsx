@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { PackagePlus, Pencil, Plane, Ship, Trash2, Truck, X } from "lucide-react"
+import { PackagePlus, Pencil, Plane, Ship, Trash2, Truck, X, Plus, ArrowRight } from "lucide-react"
 
 import { createRestock, deleteRestock, markRestockArrived, updateRestock } from "@/lib/actions/restock"
 import { Badge } from "@/components/ui/badge"
@@ -13,6 +13,9 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { PageHeader, Stat } from "@/components/ui/page"
+import { ListingThumb } from "@/components/listing-thumb"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { formatCurrency, formatDate, getJakartaToday } from "@/lib/utils"
 import type {
   Product,
@@ -24,6 +27,7 @@ type RestockRow = Awaited<ReturnType<typeof import("@/lib/actions/restock-batche
 type Props = {
   restocks: RestockRow[]
   products: Product[]
+  images: Record<string, string>
 }
 
 type RestockItemForm = {
@@ -67,6 +71,7 @@ function getLeadDays(orderDate: string, arrivalDate: string | null) {
 }
 
 type InTransitCardProps = {
+  images: Record<string, string>
   restock: RestockRow
   products: Product[]
   arrivalDate: string
@@ -77,6 +82,7 @@ type InTransitCardProps = {
 }
 
 function InTransitCard({
+  images,
   restock,
   products,
   arrivalDate,
@@ -317,16 +323,16 @@ function InTransitCard({
   }
 
   return (
-    <div className="space-y-3 rounded-lg border p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
+    <div className="glass-inset min-w-0 space-y-4 rounded-[22px] p-4 sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <p className="font-semibold">{restock.vendor || "Restock Batch"}</p>
           <p className="text-sm text-muted-foreground">
-            Ordered {formatDate(restock.order_date)} via {getModeLabel(restock.shipping_mode)}
+            Ordered {formatDate(restock.order_date)} · {getModeLabel(restock.shipping_mode)} · {getLeadDays(restock.order_date, getJakartaToday()) ?? 0} days in transit
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="secondary">In Transit</Badge>
+          <Badge variant="secondary"><Truck className="mr-1 size-3" /> In transit</Badge>
           <Button type="button" variant="ghost" size="sm" onClick={beginEdit} aria-label="Edit restock">
             <Pencil className="h-4 w-4" />
           </Button>
@@ -345,9 +351,7 @@ function InTransitCard({
       <div className="space-y-1">
         {restock.items.map((item) => (
           <div key={item.id} className="flex items-center justify-between text-sm text-muted-foreground">
-            <span>
-              {item.product_name} ({item.sku}) x{item.quantity}
-            </span>
+            <span className="flex min-w-0 items-center gap-3"><ListingThumb src={images[`${item.sku}:single`]} name={item.product_name} sku={item.sku} size={42} /><span className="min-w-0"><span className="block truncate font-semibold text-primary">{item.product_name}</span><span className="block text-xs">{item.quantity} units · {item.sku}</span></span></span>
             <span>{formatCurrency(item.total_cost)}</span>
           </div>
         ))}
@@ -398,10 +402,11 @@ function InTransitCard({
   )
 }
 
-export function RestockClient({ restocks, products }: Props) {
+export function RestockClient({ restocks, products, images }: Props) {
   const router = useRouter()
   const [isCreating, startCreateTransition] = useTransition()
   const [isArriving, startArrivalTransition] = useTransition()
+  const [createOpen, setCreateOpen] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [arrivalError, setArrivalError] = useState<string | null>(null)
   const [purchaseItems, setPurchaseItems] = useState<RestockItemForm[]>([createEmptyItem()])
@@ -471,6 +476,7 @@ export function RestockClient({ restocks, products }: Props) {
       }
 
       resetForm()
+      setCreateOpen(false)
       router.refresh()
     })
   }
@@ -500,29 +506,53 @@ export function RestockClient({ restocks, products }: Props) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h1 className="text-3xl font-display font-bold">Restock</h1>
-          <p className="text-muted-foreground">
-            Track supplier orders from China through arrival at your Indonesia warehouse.
-          </p>
-        </div>
-        <div className="flex items-center gap-3 rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
-          <Truck className="h-4 w-4" />
-          Stock enters Ledger only when a batch is marked arrived.
-        </div>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+    <div className="space-y-5">
+      <PageHeader title="Restock" description="From supplier order to warehouse shelf. Keep your incoming stock in view." actions={<Button onClick={() => setCreateOpen(true)}><Plus className="mr-2 size-4" /> New supplier order</Button>} />
+      <section className="workspace-summary grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Restock summary">
+        <Stat label="Batches on the way" value={inTransitRestocks.length} note="Awaiting warehouse arrival" />
+        <Stat label="Units in transit" value={inTransitRestocks.reduce((sum, r) => sum + r.items.reduce((n, i) => n + i.quantity, 0), 0).toLocaleString()} note="Stock is added when received" />
+        <Stat label="Incoming purchase value" value={formatCurrency(inTransitRestocks.reduce((sum, r) => sum + r.total_amount, 0))} note="Recorded product costs" />
+        <Stat label="Batches received" value={arrivedRestocks.length} note="See delivery history below" />
+      </section>
+      <div className="flex flex-wrap items-center justify-between gap-2 px-2 text-xs font-semibold text-muted-foreground"><span>01 · Order placed</span><ArrowRight className="size-4" /><span className="text-primary">02 · In transit</span><ArrowRight className="size-4" /><span>03 · Received into stock</span></div>
         <Card>
           <CardHeader>
-            <CardTitle>Create Restock</CardTitle>
+            <CardTitle>On the way <span className="ml-2 font-body text-sm text-muted-foreground">{inTransitRestocks.length} batches</span></CardTitle>
             <CardDescription>
-              Record the supplier order now, then receive inventory later when the batch arrives.
+              Your incoming stock. Confirm a batch once it reaches your warehouse.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+            {inTransitRestocks.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No restocks are currently in transit.</p>
+            ) : (
+              inTransitRestocks.map((restock) => (
+                <InTransitCard
+                  key={restock.id}
+                  images={images}
+                  restock={restock}
+                  products={products}
+                  arrivalDate={arrivalDates[restock.id] || getJakartaToday()}
+                  onArrivalDateChange={(value) =>
+                    setArrivalDates((current) => ({ ...current, [restock.id]: value }))
+                  }
+                  onMarkArrived={() => handleArrival(restock.id)}
+                  isArriving={isArriving}
+                  onChanged={() => router.refresh()}
+                />
+              ))
+            )}
+
+            {arrivalError && (
+              <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {arrivalError}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-h-[88dvh] overflow-y-auto sm:max-w-[720px]">
+          <DialogHeader><DialogTitle>New supplier order</DialogTitle><DialogDescription>Record the purchase now. Stock will be added when you confirm arrival.</DialogDescription></DialogHeader>
             <form onSubmit={handleCreateRestock} className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
@@ -640,51 +670,15 @@ export function RestockClient({ restocks, products }: Props) {
               )}
 
               <Button type="submit" disabled={isCreating}>
-                {isCreating ? "Saving..." : "Create Restock"}
+                {isCreating ? "Saving..." : "Save supplier order"}
               </Button>
             </form>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>In Transit</CardTitle>
-            <CardDescription>
-              Confirm warehouse arrival here so stock posts to the ledger and changelog automatically.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {inTransitRestocks.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No restocks are currently in transit.</p>
-            ) : (
-              inTransitRestocks.map((restock) => (
-                <InTransitCard
-                  key={restock.id}
-                  restock={restock}
-                  products={products}
-                  arrivalDate={arrivalDates[restock.id] || getJakartaToday()}
-                  onArrivalDateChange={(value) =>
-                    setArrivalDates((current) => ({ ...current, [restock.id]: value }))
-                  }
-                  onMarkArrived={() => handleArrival(restock.id)}
-                  isArriving={isArriving}
-                  onChanged={() => router.refresh()}
-                />
-              ))
-            )}
-
-            {arrivalError && (
-              <div className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {arrivalError}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+        </DialogContent>
+      </Dialog>
 
       <Card>
         <CardHeader>
-          <CardTitle>Arrived History</CardTitle>
+          <CardTitle>Delivery history</CardTitle>
           <CardDescription>
             Completed batches that already posted inventory into the ledger.
           </CardDescription>
