@@ -7,6 +7,7 @@ import { safeRecordAutomaticChangelogEntry } from "./changelog"
 import { buildChangeItem } from "@/lib/changelog"
 import { triggerNotificationSender } from "@/lib/notifications/trigger-sender"
 import { buildInventoryLedgerRows } from "@/lib/inventory/ledger-entries"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
 
 function formatProductName(name: string, variant?: string | null) {
   return variant ? `${name} - ${variant}` : name
@@ -39,38 +40,18 @@ export async function getStockOnHand() {
   return data as StockOnHand[]
 }
 
-export async function getLedgerEntries(filters?: {
-  sku?: string
-  movement_type?: MovementType
-  limit?: number
-}) {
+export async function getLedgerEntries(filters?: { sku?: string; movement_type?: MovementType; limit?: number; all?: boolean }) {
   const supabase = await createClient()
-
-  let query = supabase
-    .from("inventory_ledger")
-    .select("*")
-    .order("entry_date", { ascending: false })
-
-  if (filters?.sku) {
-    query = query.eq("sku", filters.sku)
+  const buildQuery = () => {
+    let query = supabase.from("inventory_ledger").select("*").order("entry_date", { ascending: false }).order("id", { ascending: true })
+    if (filters?.sku) query = query.eq("sku", filters.sku)
+    if (filters?.movement_type) query = query.eq("movement_type", filters.movement_type)
+    if (filters?.limit) query = query.limit(filters.limit)
+    return query
   }
-
-  if (filters?.movement_type) {
-    query = query.eq("movement_type", filters.movement_type)
-  }
-
-  if (filters?.limit) {
-    query = query.limit(filters.limit)
-  }
-
-  const { data, error } = await query
-
-  if (error) {
-    console.error("Error fetching ledger entries:", error)
-    return []
-  }
-
-  return data as InventoryLedger[]
+  const { data, error } = filters?.all ? await fetchAllRows<InventoryLedger>(buildQuery) : await buildQuery()
+  if (error) { console.error("Error fetching ledger entries:", error); throw new Error("Could not load inventory movements. Please try again.") }
+  return (data ?? []) as InventoryLedger[]
 }
 
 export async function createLedgerEntry(formData: {

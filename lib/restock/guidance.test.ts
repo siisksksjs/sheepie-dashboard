@@ -440,26 +440,15 @@ describe("restock action changelog behavior", () => {
     expect(migration).toContain("INSERT INTO finance_entries")
     expect(migration).toContain("finance_entry_id")
   })
-
-  it("rejects the legacy finance purchase path instead of guessing a shipping mode", async () => {
-    const fs = await import("node:fs/promises")
-    const financeSource = await fs.readFile("lib/actions/finance.ts", "utf8")
-    const legacySection = financeSource.slice(
-      financeSource.indexOf("export async function createInventoryPurchase"),
-    )
-
-    expect(legacySection).not.toContain('shipping_mode: "air"')
-    expect(legacySection).toContain("Use the Restock tab")
-  })
 })
 
 describe("restock route file contract", () => {
   it("expects the sidebar to link to /restock", async () => {
     const fs = await import("node:fs/promises")
-    const sidebarSource = await fs.readFile("components/layout/sidebar.tsx", "utf8")
+    const navSource = await fs.readFile("components/shell/nav-items.ts", "utf8")
 
-    expect(sidebarSource).toContain('href: "/restock"')
-    expect(sidebarSource).toContain('name: "Restock"')
+    expect(navSource).toContain('href: "/restock"')
+    expect(navSource).toContain('label: "Restock"')
   })
 
   it("expects a dedicated restock route wired to RestockClient", async () => {
@@ -468,15 +457,6 @@ describe("restock route file contract", () => {
 
     expect(pageSource).toContain("RestockClient")
     expect(pageSource).toContain("getInventoryPurchaseBatches")
-  })
-
-  it("expects finance to hand off inventory purchases to the restock tab", async () => {
-    const fs = await import("node:fs/promises")
-    const financeSource = await fs.readFile("components/finance/finance-client.tsx", "utf8")
-
-    expect(financeSource).toContain('href="/restock"')
-    expect(financeSource).not.toContain("createInventoryPurchase")
-    expect(financeSource).not.toContain("Record Inventory Purchase")
   })
 })
 

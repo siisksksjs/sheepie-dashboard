@@ -1,8 +1,9 @@
 import { getReportsBundle } from "@/lib/actions/orders"
-import { getAdPerformanceSummary } from "@/lib/actions/ad-campaigns"
 import { ReportsClient } from "./reports-client"
 
 type SearchParams = Promise<{ year?: string; month?: string }>
+
+export const metadata = { title: "Reports · Sheepie" }
 
 export default async function ReportsPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams
@@ -10,18 +11,13 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
   const selectedYear = parseYearParam(params.year)
   const selectedMonth = selectedYear ? parseMonthParam(params.month) : undefined
 
-  const [{ overview, monthly, channelProduct, returns, calendar }, adPerf] =
-    await Promise.all([
-      getReportsBundle(selectedYear, selectedMonth),
-      getAdPerformanceSummary(),
-    ])
+  const { overview, monthly, channelProduct, returns, calendar } = await getReportsBundle(selectedYear, selectedMonth)
 
   return (
     <ReportsClient
       initialOverview={overview}
       initialMonthly={monthly}
       initialChannelProduct={channelProduct}
-      initialAdPerformance={adPerf}
       initialReturnSummary={returns}
       initialCalendarDetails={calendar}
       selectedYear={selectedYear}

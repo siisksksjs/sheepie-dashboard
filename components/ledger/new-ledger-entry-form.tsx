@@ -18,19 +18,20 @@ const movementTypes: { value: MovementType; label: string; isInbound: boolean }[
   { value: "OUT_SALE", label: "Sale Out (-)", isInbound: false },
   { value: "OUT_PROMO", label: "Promotional Giveaway (-)", isInbound: false },
   { value: "OUT_DAMAGE", label: "Damage/Loss (-)", isInbound: false },
-  { value: "RETURN", label: "Customer Return (+)", isInbound: true },
+  { value: "RETURN", label: "Resaleable Customer Return (+)", isInbound: true },
   { value: "ADJUSTMENT", label: "Adjustment (+/-)", isInbound: true },
 ]
 
 type Props = {
   products: Product[]
+  initialMovementType?: MovementType
 }
 
-export function NewLedgerEntryForm({ products }: Props) {
+export function NewLedgerEntryForm({ products, initialMovementType }: Props) {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [selectedMovementType, setSelectedMovementType] = useState<MovementType | "">("")
+  const [selectedMovementType, setSelectedMovementType] = useState<MovementType | "">(initialMovementType ?? "")
   const [quantity, setQuantity] = useState("")
   const [entryDate, setEntryDate] = useState(getJakartaToday())
 
@@ -77,7 +78,7 @@ export function NewLedgerEntryForm({ products }: Props) {
 
       <Card className="max-w-2xl">
         <CardHeader>
-          <CardTitle>Add Ledger Entry</CardTitle>
+          <CardTitle>Record a stock movement</CardTitle>
           <CardDescription>
             Record an inventory movement. Entries are immutable once created.
           </CardDescription>
@@ -101,6 +102,9 @@ export function NewLedgerEntryForm({ products }: Props) {
                   ))}
                 </SelectContent>
               </Select>
+              {selectedMovementType === "RETURN" && (
+                <p className="text-xs text-muted-foreground">Only add goods that can be sold again. For a defective customer return, open the order and choose Defective / dead stock instead.</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -109,6 +113,7 @@ export function NewLedgerEntryForm({ products }: Props) {
               </Label>
               <Select
                 name="movement_type"
+                value={selectedMovementType}
                 required
                 onValueChange={(value) => setSelectedMovementType(value as MovementType)}
               >
@@ -153,6 +158,8 @@ export function NewLedgerEntryForm({ products }: Props) {
                 placeholder={selectedMovementType === "ADJUSTMENT" ? "Enter +/- value" : "Enter quantity"}
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
+                step={1}
+                min={selectedMovementType === "ADJUSTMENT" ? undefined : 1}
                 required
               />
               <p className="text-xs text-muted-foreground">
@@ -170,14 +177,13 @@ export function NewLedgerEntryForm({ products }: Props) {
                 placeholder="e.g., Order #1234, Supplier invoice, etc."
               />
               <p className="text-xs text-muted-foreground">
-                Optional - can be updated later if needed
+                Add context now so the movement is easy to trace later.
               </p>
             </div>
 
             <div className="p-3 bg-warning/10 border border-warning/20 rounded-lg">
               <p className="text-sm text-warning-foreground">
-                <strong>Warning:</strong> Ledger entries cannot be deleted or modified after creation.
-                To fix mistakes, create an ADJUSTMENT entry.
+                This movement stays in your inventory history. Correct mistakes with a new adjustment.
               </p>
             </div>
 

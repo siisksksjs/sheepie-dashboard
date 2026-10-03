@@ -1,121 +1,58 @@
 "use client"
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useMemo, useState } from "react"
 import Link from "next/link"
-import { Eye } from "lucide-react"
+import { ChevronRight, RotateCcw } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ListingThumb } from "@/components/listing-thumb"
+import { PlatformBadge } from "@/components/shell/platform-badge"
+import { PLATFORMS, PLATFORM_ORDER } from "@/components/shell/platforms"
 import { filterOrdersForSearch } from "@/lib/orders/search"
 import { getPackSizeLabel } from "@/lib/products/pack-sizes"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { cn, formatCurrency, formatDate } from "@/lib/utils"
+import type { Channel } from "@/lib/types/database.types"
 
-const statusBadges: Record<string, "default" | "success" | "destructive" | "outline"> = {
+const statusBadges: Record<string, "default" | "success" | "destructive" | "outline" | "secondary"> = {
   paid: "success",
-  shipped: "default",
+  shipped: "secondary",
   cancelled: "destructive",
   returned: "outline",
-}
-
-const channelLabels: Record<string, string> = {
-  shopee: "Shopee",
-  tokopedia: "Tokopedia",
-  tiktok: "TikTok",
-  offline: "Offline",
 }
 
 type OrderListItem = Awaited<ReturnType<typeof import("@/lib/actions/orders").getOrders>>[number]
 type OrderListLineItem = OrderListItem["order_line_items"][number]
 
-type DuplicateOrderResult =
-  | {
-      success: true
-      data: {
-        id: string
-        order_id: string
-      }
-    }
-  | {
-      success: false
-      error: string
-    }
-
 type Props = {
   orders: OrderListItem[]
-  duplicateLabel: string
-  onDuplicate: (orderId: string) => Promise<DuplicateOrderResult>
+  /** Listing thumbnails keyed `${sku}:${packSize}`. */
+  images: Record<string, string>
 }
 
-type FeedbackState =
-  | {
-      kind: "success" | "error"
-      message: string
-    }
-  | null
+function lineLabel(item: OrderListLineItem) {
+  return `${item.quantity > 1 ? `${item.quantity}× ` : ""}${item.product_name}${item.pack_size && item.pack_size !== "single" ? ` · ${getPackSizeLabel(item.pack_size)}` : ""}`
+}
 
-export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props) {
-  const router = useRouter()
-  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null)
-  const [feedback, setFeedback] = useState<FeedbackState>(null)
+export function OrdersListClient({ orders, images }: Props) {
   const [searchQuery, setSearchQuery] = useState("")
-  const filteredOrders = filterOrdersForSearch(orders, searchQuery)
-
-  const handleDuplicate = async (orderId: string) => {
-    if (pendingOrderId) {
-      return
-    }
-
-    setPendingOrderId(orderId)
-    setFeedback(null)
-
-    try {
-      const result = await onDuplicate(orderId)
-
-      if (result.success) {
-        setFeedback({
-          kind: "success",
-          message: `Duplicated as ${result.data.order_id}`,
-        })
-        router.refresh()
-        return
-      }
-
-      setFeedback({
-        kind: "error",
-        message: result.error,
-      })
-    } catch (error) {
-      setFeedback({
-        kind: "error",
-        message: error instanceof Error ? error.message : "Failed to duplicate order",
-      })
-    } finally {
-      setPendingOrderId(null)
-    }
+  const [channel, setChannel] = useState<Channel | "all">("all")
+  const filteredOrders = useMemo(
+    () => filterOrdersForSearch(orders, searchQuery).filter((order) => channel === "all" || order.channel === channel),
+    [orders, searchQuery, channel],
+  )
+  const thumbFor = (order: OrderListItem) => {
+    const first = order.order_line_items[0]
+    if (!first) return null
+    return images[`${first.sku}:${first.pack_size ?? "single"}`] ?? images[`${first.sku}:single`] ?? null
   }
 
   return (
     <div className="space-y-4">
-      {feedback && (
-        <div
-          className={cn(
-            "rounded-lg border px-4 py-3 text-sm",
-            feedback.kind === "success"
-              ? "border-success/20 bg-success/10 text-success"
-              : "border-destructive/20 bg-destructive/10 text-destructive",
-          )}
-          role={feedback.kind === "error" ? "alert" : "status"}
-        >
-          {feedback.message}
-        </div>
-      )}
-
-      <div className="rounded-xl border bg-card p-4 shadow-sm">
+      <div className="glass rounded-[20px] p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="w-full sm:max-w-xl">
+          <div className="w-full sm:max-w-md">
             <Input
               type="search"
               name="order-search"
@@ -126,179 +63,134 @@ export function OrdersListClient({ orders, duplicateLabel, onDuplicate }: Props)
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Search by product name or revenue"
               aria-label="Search orders"
+              className="rounded-full"
             />
           </div>
-          <p className="shrink-0 text-sm text-muted-foreground" aria-live="polite">
+          <p className="shrink-0 text-sm font-semibold text-muted-foreground" aria-live="polite">
             {filteredOrders.length} matching order{filteredOrders.length === 1 ? "" : "s"}
           </p>
         </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          Revenue can be partial. Example: 500000
-        </p>
+        <div className="-mx-1 mt-3 flex gap-1.5 overflow-x-auto px-1 py-0.5">
+          {(["all", ...PLATFORM_ORDER] as const).map((p) => (
+            <button
+              key={p}
+              onClick={() => setChannel(p)}
+              aria-pressed={channel === p}
+              className={cn(
+                "flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-[12.5px] font-bold transition-colors",
+                channel === p ? "border-primary bg-primary text-white" : "border-primary/10 bg-white/70 text-muted-foreground hover:text-primary",
+              )}
+            >
+              {p !== "all" && <PlatformBadge channel={p} size={23} />}
+              {p === "all" ? "All platforms" : PLATFORMS[p].label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">Revenue can be partial. Example: 500000</p>
       </div>
 
       {filteredOrders.length === 0 ? (
-        <div className="rounded-xl border bg-card px-6 py-12 text-center">
-          <h2 className="font-semibold text-foreground">No orders match your search</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Try another product name or enter part of the revenue amount.
-          </p>
-          <Button className="mt-4" variant="outline" onClick={() => setSearchQuery("")}>
+        <div className="glass rounded-[20px] px-6 py-12 text-center">
+          <h2 className="font-display text-lg font-semibold text-foreground">No orders match your search</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Try another product name, part of the revenue amount, or a different platform.</p>
+          <Button
+            className="mt-4"
+            variant="outline"
+            onClick={() => {
+              setSearchQuery("")
+              setChannel("all")
+            }}
+          >
             Clear Search
           </Button>
         </div>
       ) : (
         <>
-      <div className="md:hidden space-y-3">
-        {filteredOrders.map((order) => {
-          const isPending = pendingOrderId === order.id
-
-          return (
-            <div key={order.id} className="border rounded-lg p-4 bg-card space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-medium font-mono text-sm">{order.order_id}</p>
-                  <p className="text-xs text-muted-foreground">{formatDate(order.order_date)}</p>
-                </div>
-                <div className="flex gap-2">
-                  <Badge variant="outline" className="text-xs">
-                    {channelLabels[order.channel]}
-                  </Badge>
-                  <Badge variant={statusBadges[order.status]} className="text-xs">
-                    {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                  </Badge>
-                </div>
-              </div>
-
-              {order.order_line_items.length > 0 && (
-                <div className="space-y-1">
-                  {order.order_line_items.map((item: OrderListLineItem) => (
-                    <div key={item.id} className="text-xs">
-                      <span className="text-muted-foreground">
-                        {item.quantity}x {item.product_name} · {getPackSizeLabel(item.pack_size)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {order.notes && (
-                <p className="text-xs text-muted-foreground line-clamp-2">{order.notes}</p>
-              )}
-
-              <div className="flex items-center justify-between gap-3 pt-2 border-t">
-                <div className="flex flex-col gap-1">
-                  <span className="text-sm font-medium">GMV: {formatCurrency(order.gmv)}</span>
-                  <span className="text-sm font-medium">
-                    Revenue: {formatCurrency(order.revenue)}
+          {/* Phone: one card per order */}
+          <ul className="space-y-2.5 md:hidden">
+            {filteredOrders.map((order) => (
+              <li key={order.id} className="glass rounded-[20px] p-3.5">
+                <Link href={`/orders/${order.id}`} className="flex items-start gap-3">
+                  <span className="relative flex-none">
+                    <ListingThumb src={thumbFor(order)} name={order.order_line_items[0]?.product_name ?? order.order_id} sku={order.order_line_items[0]?.sku} size={56} />
+                    <span className="absolute -bottom-1 -right-1 rounded-[7px] ring-2 ring-white">
+                      <PlatformBadge channel={order.channel} size={22} />
+                    </span>
                   </span>
-                  <span className="text-sm font-semibold text-success">
-                    Profit: {formatCurrency(order.profit)}
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[14px] font-bold leading-snug">{order.order_line_items.map(lineLabel).join(" + ") || "No items"}</span>
+                    <span className="num mt-0.5 block text-[12px] text-muted-foreground">
+                      {PLATFORMS[order.channel as Channel].label} · {order.order_id} · {formatDate(order.order_date)}
+                    </span>
                   </span>
+                  <Badge variant={statusBadges[order.status]}>{order.status.charAt(0).toUpperCase() + order.status.slice(1)}</Badge>
+                </Link>
+                <div className="num mt-3 flex items-end justify-between gap-3 border-t border-primary/[0.07] pt-3 text-[12.5px]">
+                  <span className="space-y-0.5">
+                    <span className="block">GMV {formatCurrency(order.gmv)}</span>
+                    <span className="block text-muted-foreground">Revenue {formatCurrency(order.revenue)}</span>
+                    <span className="block font-semibold text-[#1f6b42]">Profit {formatCurrency(order.profit)}</span>
+                  </span>
+                  <Link href={`/orders/new?from=${order.id}`} className="inline-flex items-center gap-1.5 rounded-full border border-primary/15 bg-white/70 px-3 py-1.5 font-bold text-primary">
+                    <RotateCcw className="size-3.5" /> Log again
+                  </Link>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDuplicate(order.id)}
-                    disabled={pendingOrderId !== null}
-                  >
-                    {isPending ? "Duplicating..." : duplicateLabel}
-                  </Button>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link href={`/orders/${order.id}`}>
-                      <Eye className="h-4 w-4 mr-2" />
-                      View
-                    </Link>
-                  </Button>
-                </div>
-              </div>
+              </li>
+            ))}
+          </ul>
+
+          {/* Desktop: dense rows, picture first so the right product is obvious */}
+          <div className="glass hidden overflow-hidden rounded-[20px] md:block">
+            <div className="grid grid-cols-[minmax(0,2.4fr)_120px_100px_repeat(3,minmax(0,1fr))_112px] gap-3 border-b border-primary/[0.07] px-5 py-3 text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+              <span>Order</span>
+              <span>Date</span>
+              <span>Status</span>
+              <span className="text-right">GMV</span>
+              <span className="text-right">Revenue</span>
+              <span className="text-right">Profit</span>
+              <span />
             </div>
-          )
-        })}
-      </div>
-
-      <div className="hidden md:block border rounded-lg bg-card overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Order ID</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Channel</TableHead>
-              <TableHead>Products</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">GMV</TableHead>
-              <TableHead className="text-right">Revenue</TableHead>
-              <TableHead className="text-right">Profit</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredOrders.map((order) => {
-              const isPending = pendingOrderId === order.id
-
-              return (
-                <TableRow key={order.id}>
-                  <TableCell className="font-medium font-mono">
-                    {order.order_id}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDate(order.order_date)}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">
-                      {channelLabels[order.channel]}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {order.order_line_items.length > 0 ? (
-                      <div className="space-y-1">
-                        {order.order_line_items.map((item: OrderListLineItem) => (
-                          <div key={item.id} className="text-sm text-muted-foreground">
-                            {item.quantity}x {item.product_name} · {getPackSizeLabel(item.pack_size)}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={statusBadges[order.status]}>
-                      {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right font-medium">{formatCurrency(order.gmv)}</TableCell>
-                  <TableCell className="text-right font-medium">
-                    {formatCurrency(order.revenue)}
-                  </TableCell>
-                  <TableCell className="text-right font-semibold text-success">
-                    {formatCurrency(order.profit)}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDuplicate(order.id)}
-                        disabled={pendingOrderId !== null}
-                      >
-                        {isPending ? "Duplicating..." : duplicateLabel}
-                      </Button>
-                      <Button variant="ghost" size="sm" asChild>
-                        <Link href={`/orders/${order.id}`}>
-                          <Eye className="h-4 w-4 mr-2" />
-                          View
-                        </Link>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
-      </div>
+            <ul className="divide-y divide-primary/[0.06]">
+              {filteredOrders.map((order) => (
+                <li key={order.id} className="group grid grid-cols-[minmax(0,2.4fr)_120px_100px_repeat(3,minmax(0,1fr))_112px] items-center gap-3 px-5 py-3 transition-colors hover:bg-white/55">
+                  <Link href={`/orders/${order.id}`} className="flex min-w-0 items-center gap-3">
+                    <span className="relative flex-none">
+                      <ListingThumb src={thumbFor(order)} name={order.order_line_items[0]?.product_name ?? order.order_id} sku={order.order_line_items[0]?.sku} size={46} />
+                      <span className="absolute -bottom-1 -right-1 rounded-[6px] ring-2 ring-white">
+                        <PlatformBadge channel={order.channel} size={24} />
+                      </span>
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[14px] font-bold">{order.order_line_items.map(lineLabel).join(" + ") || "No items"}</span>
+                      <span className="num block truncate text-[12px] text-muted-foreground">
+                        {PLATFORMS[order.channel as Channel].label} · {order.order_id}
+                        {order.notes ? ` · ${order.notes}` : ""}
+                      </span>
+                    </span>
+                  </Link>
+                  <span className="num text-[13px] text-muted-foreground">{formatDate(order.order_date)}</span>
+                  <span>
+                    <Badge variant={statusBadges[order.status]}>{order.status.charAt(0).toUpperCase() + order.status.slice(1)}</Badge>
+                  </span>
+                  <span className="num text-right text-[13.5px] font-semibold">{formatCurrency(order.gmv)}</span>
+                  <span className="num text-right text-[13.5px] text-muted-foreground">{formatCurrency(order.revenue)}</span>
+                  <span className={cn("num text-right text-[13.5px] font-semibold", order.profit >= 0 ? "text-[#1f6b42]" : "text-destructive")}>{formatCurrency(order.profit)}</span>
+                  <span className="flex items-center justify-end gap-1">
+                    <Link
+                      href={`/orders/new?from=${order.id}`}
+                      title="Log this order again — you check it before saving"
+                      className="inline-flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[12px] font-bold text-primary/70 opacity-0 transition-opacity hover:bg-white/80 hover:text-primary focus:opacity-100 group-hover:opacity-100"
+                    >
+                      <RotateCcw className="size-3.5" /> Log again
+                    </Link>
+                    <Link href={`/orders/${order.id}`} aria-label={`Open ${order.order_id}`} className="rounded-full p-1.5 text-primary/40 hover:text-primary">
+                      <ChevronRight className="size-4" />
+                    </Link>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </>
       )}
     </div>

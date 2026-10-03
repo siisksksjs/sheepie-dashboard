@@ -5,7 +5,7 @@ import { getJakartaToday, getMonthEndDate } from "@/lib/utils"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
 import { revalidatePath } from "next/cache"
 import { cache } from "react"
-import type { Order, OrderLineItem, Product, Channel, OrderStatus } from "@/lib/types/database.types"
+import type { Order, OrderLineItem, Product, Channel, OrderStatus, ReturnDisposition } from "@/lib/types/database.types"
 import { createLedgerEntry } from "./inventory"
 import { getLineItemCostPerUnit, getLineItemTotalCost } from "@/lib/line-item-costs"
 import { safeRecordAutomaticChangelogEntry } from "./changelog"
@@ -19,13 +19,9 @@ import {
   buildReorderWindow,
 } from "@/lib/restock/guidance"
 import { calculateInStockDays } from "@/lib/restock/in-stock-days"
-import {
-  calculateOrderSettlementAmount,
-  createMarketplaceSettlementEntry,
-  createMarketplaceSettlementReversalEntry,
-  isSettledOrderStatus,
-} from "@/lib/marketplace-settlements"
+import { isSettledOrderStatus } from "@/lib/orders/settled-status"
 import { buildEffectiveUnitsBySku } from "@/lib/restock/effective-units"
+import { triggerNotificationSender } from "@/lib/notifications/trigger-sender"
 import {
   buildDailySalesSummary,
   type DailyProductSalesItem,
@@ -463,32 +459,6 @@ async function createOrderWithWorkflow(formData: CreateOrderInput): Promise<Crea
     }
   }
 
-  if (isSettledOrder) {
-    const settlementAmount = calculateOrderSettlementAmount(lineItemsToInsert, formData.channel_fees)
-    const settlementResult = await createMarketplaceSettlementEntry({
-      orderId: order.id,
-      orderLabel: `Order ${order.order_id}`,
-      channel: order.channel,
-      entryDate: order.order_date,
-      amount: settlementAmount,
-      notes: order.notes,
-    })
-
-    if (!settlementResult.success) {
-      const cleanupError = await cleanupFailedSettledOrderCreation({
-        supabase,
-        orderId: order.id,
-        orderLabel: `Order ${order.order_id}`,
-        successfulLedgerEntries,
-      })
-
-      return {
-        success: false,
-        error: cleanupError || settlementResult.error || "Failed to create marketplace settlement entry",
-      }
-    }
-  }
-
   revalidatePath("/orders")
   revalidatePath("/dashboard")
   revalidatePath("/ledger")
@@ -582,198 +552,74 @@ export async function duplicateOrder(orderId: string): Promise<DuplicateOrderRes
 export async function updateOrderStatus(
   orderId: string,
   newStatus: OrderStatus,
-  previousStatus: OrderStatus
+  previousStatus: OrderStatus,
+  options?: { disposition?: ReturnDisposition; previousDisposition?: ReturnDisposition | null; note?: string }
 ) {
+  if (!["paid", "shipped", "cancelled", "returned"].includes(newStatus)
+    || !["paid", "shipped", "cancelled", "returned"].includes(previousStatus)) {
+    return { success: false as const, error: "Invalid order status." }
+  }
+  if (newStatus === "returned" && !options?.disposition) {
+    return { success: false as const, error: "Choose whether the returned goods can be resold or are dead stock." }
+  }
+  if (options?.disposition && !["restock", "dead_stock"].includes(options.disposition)) {
+    return { success: false as const, error: "Invalid return stock condition." }
+  }
+  if (options?.note !== undefined && (typeof options.note !== "string" || options.note.length > 500)) {
+    return { success: false as const, error: "Keep the return note within 500 characters." }
+  }
+
   const supabase = await createClient()
-
-  // Get order details
-  let orderData: Awaited<ReturnType<typeof getOrderById>>
-
-  try {
-    orderData = await getOrderById(orderId)
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Failed to load order",
-    }
-  }
-
-  if (!orderData) {
-    return { success: false, error: "Order not found" }
-  }
-
-  const { order, lineItems } = orderData
-
-  // Update order status
-  const { error: updateError } = await supabase
-    .from("orders")
-    .update({ status: newStatus })
-    .eq("id", orderId)
-
-  if (updateError) {
-    console.error("Error updating order status:", updateError)
-    return { success: false, error: updateError.message }
-  }
-
-  // Generate ledger entries based on status change
-  // Paid → Creates OUT_SALE entries (already done during order creation if status was 'paid')
-  // Cancelled → Creates RETURN entries to reverse the sale
-  // Returned → Creates RETURN entries to add stock back
-
-  const wasSettled = isSettledOrderStatus(previousStatus)
-  const isSettled = isSettledOrderStatus(newStatus)
-
-  if (wasSettled && (newStatus === "cancelled" || newStatus === "returned")) {
-    // Reverse the sale by creating RETURN entries
-    for (const item of lineItems) {
-      // Check if this is a bundle
-      const { data: product } = await supabase
-        .from("products")
-        .select("is_bundle")
-        .eq("sku", item.sku)
-        .single()
-
-      if (product?.is_bundle) {
-        // Get bundle components
-        const { data: compositions } = await supabase
-          .from("bundle_compositions")
-          .select("*")
-          .eq("bundle_sku", item.sku)
-
-        if (compositions && compositions.length > 0) {
-          // Create RETURN entries for each component
-          for (const comp of compositions) {
-            await createLedgerEntry({
-              sku: comp.component_sku,
-              movement_type: "RETURN",
-              quantity: comp.quantity * item.quantity,
-              reference: `Order ${order.order_id} - ${newStatus === "cancelled" ? "Cancelled" : "Returned"} (Bundle: ${item.sku})`,
-            }, {
-              skipChangelog: true,
-            })
-          }
-        }
-      } else {
-        // Regular product
-        const packSize = item.pack_size ?? DEFAULT_PACK_SIZE
-        const restoredUnits = item.quantity * getPackMultiplier(packSize)
-        await createLedgerEntry({
-          sku: item.sku,
-          movement_type: "RETURN",
-          quantity: restoredUnits,
-          reference: buildPackAwareOrderReference(
-            `Order ${order.order_id} - ${newStatus === "cancelled" ? "Cancelled" : "Returned"}`,
-            packSize,
-          ),
-        }, {
-          skipChangelog: true,
-        })
-      }
-    }
-  }
-
-  if (!wasSettled && isSettled) {
-    // Order wasn't paid before, now it is - create OUT_SALE entries
-    for (const item of lineItems) {
-      // Check if this is a bundle
-      const { data: product } = await supabase
-        .from("products")
-        .select("is_bundle")
-        .eq("sku", item.sku)
-        .single()
-
-      if (product?.is_bundle) {
-        // Get bundle components
-        const { data: compositions } = await supabase
-          .from("bundle_compositions")
-          .select("*")
-          .eq("bundle_sku", item.sku)
-
-        if (compositions && compositions.length > 0) {
-          // Create ledger entries for each component
-          for (const comp of compositions) {
-            await createLedgerEntry({
-              sku: comp.component_sku,
-              movement_type: "OUT_SALE",
-              quantity: -(comp.quantity * item.quantity),
-              reference: `Order ${order.order_id} (Bundle: ${item.sku})`,
-            }, {
-              skipChangelog: true,
-            })
-          }
-        }
-      } else {
-        // Regular product
-        const packSize = item.pack_size ?? DEFAULT_PACK_SIZE
-        const consumedUnits = item.quantity * getPackMultiplier(packSize)
-        await createLedgerEntry({
-          sku: item.sku,
-          movement_type: "OUT_SALE",
-          quantity: -consumedUnits,
-          reference: buildPackAwareOrderReference(`Order ${order.order_id}`, packSize),
-        }, {
-          skipChangelog: true,
-        })
-      }
-    }
-  }
-
-  const settlementAmount = calculateOrderSettlementAmount(lineItems, order.channel_fees)
-
-  if (!wasSettled && isSettled) {
-    const settlementResult = await createMarketplaceSettlementEntry({
-      orderId: order.id,
-      orderLabel: `Order ${order.order_id}`,
-      channel: order.channel,
-      entryDate: order.order_date,
-      amount: settlementAmount,
-      notes: order.notes,
-    })
-
-    if (!settlementResult.success) {
-      console.error("Failed to create marketplace settlement entry:", settlementResult.error)
-    }
-  }
-
-  if (wasSettled && !isSettled) {
-    const reversalResult = await createMarketplaceSettlementReversalEntry({
-      orderId: order.id,
-      orderLabel: `Order ${order.order_id}`,
-      channel: order.channel,
-      entryDate: getJakartaToday(),
-      amount: settlementAmount,
-      notes: `Status changed from ${previousStatus} to ${newStatus}`,
-    })
-
-    if (!reversalResult.success) {
-      console.error("Failed to reverse marketplace settlement entry:", reversalResult.error)
-    }
-  }
-
-  revalidatePath("/orders")
-  revalidatePath("/dashboard")
-  revalidatePath("/ledger")
-
-  let stockEffect: string | null = null
-  if (wasSettled && (newStatus === "cancelled" || newStatus === "returned")) {
-    stockEffect = "Created RETURN ledger entries to restore stock."
-  } else if (!wasSettled && isSettled) {
-    stockEffect = "Created OUT_SALE ledger entries to reduce stock."
-  }
-
-  await safeRecordAutomaticChangelogEntry({
-    area: "orders",
-    action_summary: "Updated order status",
-    entity_type: "order",
-    entity_id: order.id,
-    entity_label: `Order ${order.order_id}`,
-    notes: stockEffect,
-    items: [
-      buildChangeItem("Status", previousStatus, newStatus),
-    ].filter((item): item is NonNullable<typeof item> => Boolean(item)),
+  const { data, error } = await supabase.rpc("update_order_status_with_inventory", {
+    p_order_id: orderId,
+    p_new_status: newStatus,
+    p_expected_status: previousStatus,
+    p_return_disposition: options?.disposition ?? null,
+    p_expected_disposition: options?.previousDisposition ?? null,
+    p_return_note: options?.note?.trim() || null,
   })
+  if (error) {
+    console.error("Error updating order status:", error)
+    return { success: false as const, error: error.code === "PGRST202"
+      ? "The new stock handling is waiting for activation. Please try again after it is enabled."
+      : error.message }
+  }
+  if (!data || typeof data.changed !== "boolean") {
+    return { success: false as const, error: "Could not confirm the update. Refresh the order before trying again." }
+  }
 
-  return { success: true }
+  for (const path of ["/orders", `/orders/${orderId}`, "/dashboard", "/ledger", "/products", "/restock", "/reports", "/kpi"]) {
+    revalidatePath(path)
+  }
+  if (data.changed) {
+    if (data.ledger_entries > 0) {
+      try {
+        const notification = await triggerNotificationSender()
+        if (!notification.success && !notification.skipped) console.error("Error triggering notification sender:", notification.error)
+      } catch (notificationError) {
+        console.error("Error triggering notification sender:", notificationError)
+      }
+    }
+    await safeRecordAutomaticChangelogEntry({
+      area: "orders",
+      action_summary: data.return_disposition === "dead_stock" ? "Recorded dead stock return" : "Updated order status",
+      entity_type: "order",
+      entity_id: orderId,
+      entity_label: `Order ${orderId}`,
+      notes: data.stock_effect,
+      items: [buildChangeItem("Status", data.previous_status, data.status)].filter(
+        (item): item is NonNullable<typeof item> => Boolean(item)
+      ),
+    })
+  }
+  return {
+    success: true as const,
+    data: {
+      status: data.status as OrderStatus,
+      return_disposition: (data.return_disposition ?? null) as ReturnDisposition | null,
+      return_note: (data.return_note ?? null) as string | null,
+    },
+  }
 }
 
 export async function getOrderStats() {

@@ -3,30 +3,71 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft } from "lucide-react"
-import { duplicateOrder, updateOrderStatus } from "@/lib/actions/orders"
-import { resolveSalesUnitCost, calculateSalesOrder } from "@/supabase/functions/_shared/sales-metrics"
+import { ArrowLeft, Ban, PackageCheck, TriangleAlert } from "lucide-react"
+import { updateOrderStatus } from "@/lib/actions/orders"
+import {
+  resolveSalesUnitCost,
+  calculateSalesOrder
+} from "@/supabase/functions/_shared/sales-metrics"
 import { getPackMultiplier, getPackSizeLabel } from "@/lib/products/pack-sizes"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { Order, OrderLineItem, OrderStatus, Product } from "@/lib/types/database.types"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
+} from "@/components/ui/card"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from "@/components/ui/table"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter
+} from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
+import { cn } from "@/lib/utils"
+import type {
+  Order,
+  OrderLineItem,
+  OrderStatus,
+  Product,
+  ReturnDisposition
+} from "@/lib/types/database.types"
 
-const statusBadges: Record<string, "default" | "success" | "destructive" | "outline"> = {
+const statusBadges: Record<
+  string,
+  "default" | "success" | "destructive" | "outline"
+> = {
   paid: "success",
   shipped: "default",
   cancelled: "destructive",
-  returned: "outline",
+  returned: "outline"
 }
 
 const channelLabels: Record<string, string> = {
   shopee: "Shopee",
   tokopedia: "Tokopedia",
   tiktok: "TikTok",
-  offline: "Offline",
+  offline: "Offline"
 }
 
 type Props = {
@@ -35,54 +76,69 @@ type Props = {
   products: Product[]
 }
 
-export function OrderDetailClient({ initialOrder, lineItems, products }: Props) {
+export function OrderDetailClient({
+  initialOrder,
+  lineItems,
+  products
+}: Props) {
   const router = useRouter()
   const [order, setOrder] = useState(initialOrder)
   const [updating, setUpdating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [duplicating, setDuplicating] = useState(false)
-  const [duplicateError, setDuplicateError] = useState<string | null>(null)
-  const [duplicateSuccess, setDuplicateSuccess] = useState<string | null>(null)
+  const [pendingStatus, setPendingStatus] = useState<OrderStatus | null>(null)
+  const [disposition, setDisposition] =
+    useState<ReturnDisposition>("dead_stock")
+  const [returnNote, setReturnNote] = useState("")
 
-  const handleStatusChange = async (newStatus: OrderStatus) => {
+  const saveStatus = async (
+    newStatus: OrderStatus,
+    selectedDisposition?: ReturnDisposition
+  ) => {
+    if (updating) return
     setUpdating(true)
     setError(null)
-
-    const result = await updateOrderStatus(order.id, newStatus, order.status)
-
-    if (result.success) {
-      setOrder((current) => ({ ...current, status: newStatus }))
-      router.refresh()
-    } else {
-      setError(result.error || "Failed to update order status")
+    try {
+      const result = await updateOrderStatus(
+        order.id,
+        newStatus,
+        order.status,
+        {
+          disposition: selectedDisposition,
+          previousDisposition: order.return_disposition ?? null,
+          note: selectedDisposition ? returnNote : undefined
+        }
+      )
+      if (result.success) {
+        setOrder((current) => ({ ...current, ...result.data }))
+        setPendingStatus(null)
+        router.refresh()
+      } else {
+        setError(result.error || "Failed to update order status")
+      }
+    } catch {
+      setError(
+        "Could not confirm the update. Refresh the order before trying again."
+      )
+    } finally {
+      setUpdating(false)
     }
-
-    setUpdating(false)
   }
 
-  const handleDuplicateOrder = async () => {
-    if (duplicating) {
-      return
-    }
-
-    setDuplicating(true)
-    setDuplicateError(null)
-    setDuplicateSuccess(null)
-
-    try {
-      const result = await duplicateOrder(order.id)
-
-      if (!result.success) {
-        setDuplicateError(result.error || "Failed to duplicate order")
-        return
-      }
-
-      setDuplicateSuccess(`Duplicated as ${result.data.order_id || result.data.id}`)
-      router.refresh()
-    } catch (error) {
-      setDuplicateError(error instanceof Error ? error.message : "Failed to duplicate order")
-    } finally {
-      setDuplicating(false)
+  const handleStatusChange = (newStatus: OrderStatus) => {
+    if (newStatus === order.status) return
+    if (newStatus === "cancelled" || newStatus === "returned") {
+      setDisposition(
+        order.return_disposition === "dead_stock"
+          ? "dead_stock"
+          : newStatus === "returned"
+            ? "dead_stock"
+            : "restock"
+      )
+      setReturnNote(order.return_note ?? "")
+      setError(null)
+      setPendingStatus(newStatus)
+    } else {
+      void saveStatus(newStatus)
     }
   }
 
@@ -94,8 +150,11 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
       sellingPrice: item.selling_price,
       quantity: item.quantity,
       packSize: item.pack_size,
-      unitCost: resolveSalesUnitCost(item.cost_per_unit_snapshot, productMap.get(item.sku)?.cost_per_unit),
-    })),
+      unitCost: resolveSalesUnitCost(
+        item.cost_per_unit_snapshot,
+        productMap.get(item.sku)?.cost_per_unit
+      )
+    }))
   })
 
   return (
@@ -118,8 +177,8 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
                 </CardDescription>
               </div>
               <div className="flex items-center gap-3 self-start">
-                <Button variant="outline" onClick={handleDuplicateOrder} disabled={duplicating}>
-                  {duplicating ? "Duplicating..." : "Duplicate Order"}
+                <Button variant="outline" asChild>
+                  <Link href={`/orders/new?from=${order.id}`}>Log again</Link>
                 </Button>
                 <Badge variant={statusBadges[order.status]} className="text-sm">
                   {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
@@ -129,7 +188,9 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <p className="text-sm text-muted-foreground mb-1">Sales Channel</p>
+              <p className="text-sm text-muted-foreground mb-1">
+                Sales Channel
+              </p>
               <p className="font-medium">{channelLabels[order.channel]}</p>
             </div>
             <div>
@@ -146,16 +207,6 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
               <p className="text-sm text-muted-foreground mb-1">Notes</p>
               <p className="font-medium break-words">{order.notes || "-"}</p>
             </div>
-            {duplicateSuccess && (
-              <div className="sm:col-span-2 p-3 text-sm text-success bg-success/10 border border-success/20 rounded-lg">
-                {duplicateSuccess}
-              </div>
-            )}
-            {duplicateError && (
-              <div className="sm:col-span-2 p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg">
-                {duplicateError}
-              </div>
-            )}
           </CardContent>
         </Card>
 
@@ -163,7 +214,7 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
           <CardHeader>
             <CardTitle>Update Order Status</CardTitle>
             <CardDescription>
-              Changing status will auto-generate ledger entries
+              Review the stock condition when cancelling or returning an order.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -171,15 +222,27 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
               <div className="flex-1">
                 <Select
                   value={order.status}
-                  onValueChange={(value) => handleStatusChange(value as OrderStatus)}
+                  onValueChange={(value) =>
+                    handleStatusChange(value as OrderStatus)
+                  }
                   disabled={updating}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="paid">Paid</SelectItem>
-                    <SelectItem value="shipped">Shipped</SelectItem>
+                    <SelectItem
+                      value="paid"
+                      disabled={order.return_disposition === "dead_stock"}
+                    >
+                      Paid
+                    </SelectItem>
+                    <SelectItem
+                      value="shipped"
+                      disabled={order.return_disposition === "dead_stock"}
+                    >
+                      Shipped
+                    </SelectItem>
                     <SelectItem value="cancelled">Cancelled</SelectItem>
                     <SelectItem value="returned">Returned</SelectItem>
                   </SelectContent>
@@ -187,24 +250,201 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
               </div>
             </div>
 
-            <div className="mt-4 p-3 bg-muted/50 border rounded-lg">
-              <p className="text-sm text-muted-foreground">
-                <strong>Automatic ledger entries:</strong>
-              </p>
-              <ul className="text-sm text-muted-foreground mt-2 space-y-1">
-                <li>• Paid → Creates OUT_SALE entries (reduces stock)</li>
-                <li>• Cancelled (from Paid) → Creates RETURN entries (adds stock back)</li>
-                <li>• Returned (from Paid) → Creates RETURN entries (adds stock back)</li>
-              </ul>
+            <div className="mt-4 rounded-xl border bg-muted/50 p-4 text-sm">
+              {order.return_disposition === "dead_stock" ? (
+                <>
+                  <p className="flex items-center gap-2 font-bold">
+                    <Ban className="size-4" /> Dead stock · cannot be resold
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    Damaged goods are excluded from saleable stock.
+                  </p>
+                </>
+              ) : order.status === "cancelled" ||
+                order.status === "returned" ? (
+                <>
+                  <p className="font-bold">
+                    {order.return_disposition === "restock"
+                      ? "Stock restored for resale"
+                      : "Return condition not recorded"}
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    {order.return_disposition === "restock"
+                      ? "If these goods are defective, mark them as dead stock to remove them from saleable inventory."
+                      : "This order predates stock-condition tracking. Review its ledger before marking returned goods as dead stock."}
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="mt-3"
+                    onClick={() => {
+                      setDisposition("dead_stock")
+                      setReturnNote(order.return_note ?? "")
+                      setError(null)
+                      setPendingStatus(order.status)
+                    }}
+                  >
+                    Mark as dead stock
+                  </Button>
+                </>
+              ) : (
+                <p className="text-muted-foreground">
+                  Paid and shipped orders have already deducted stock. A
+                  defective return will keep saleable stock unchanged.
+                </p>
+              )}
+              {order.return_note && (
+                <p className="mt-2 break-words text-muted-foreground">
+                  {order.return_note}
+                </p>
+              )}
             </div>
 
-            {error && (
+            {error && !pendingStatus && (
               <div className="mt-4 p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg">
                 {error}
               </div>
             )}
           </CardContent>
         </Card>
+
+        <Dialog
+          open={pendingStatus !== null}
+          onOpenChange={(open) => {
+            if (!open && !updating) setPendingStatus(null)
+          }}
+        >
+          <DialogContent
+            className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-lg"
+            onEscapeKeyDown={(event) => {
+              if (updating) event.preventDefault()
+            }}
+            onInteractOutside={(event) => {
+              if (updating) event.preventDefault()
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>
+                {pendingStatus === order.status
+                  ? "Mark as dead stock"
+                  : pendingStatus === "returned"
+                    ? "Record a customer return"
+                    : "Cancel this order"}
+              </DialogTitle>
+              <DialogDescription>
+                Choose the condition for all items in this order before
+                confirming.
+              </DialogDescription>
+            </DialogHeader>
+            <div
+              className="grid gap-3"
+              role="radiogroup"
+              aria-label="Returned stock condition"
+            >
+              {(
+                [
+                  {
+                    value: "dead_stock",
+                    title: "Defective / dead stock",
+                    description: "Damaged goods cannot be sold again.",
+                    Icon: Ban
+                  },
+                  {
+                    value: "restock",
+                    title: "Can be resold",
+                    description:
+                      "Goods are unused or have been received and checked.",
+                    Icon: PackageCheck
+                  }
+                ] as const
+              ).map(({ value, title, description, Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={disposition === value}
+                  disabled={
+                    updating ||
+                    (value === "restock" &&
+                      order.return_disposition === "dead_stock")
+                  }
+                  onClick={() => setDisposition(value)}
+                  className={cn(
+                    "flex items-start gap-3 rounded-xl border p-4 text-left disabled:opacity-50",
+                    disposition === value
+                      ? "border-primary bg-primary/5 ring-1 ring-primary"
+                      : "border-border bg-white/40"
+                  )}
+                >
+                  <Icon className="mt-0.5 size-5 shrink-0" />
+                  <span>
+                    <span className="block font-bold">{title}</span>
+                    <span className="mt-1 block text-sm text-muted-foreground">
+                      {description}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="return-note" className="text-sm font-bold">
+                Return / defect note (optional)
+              </label>
+              <Textarea
+                id="return-note"
+                value={returnNote}
+                onChange={(event) => setReturnNote(event.target.value)}
+                maxLength={500}
+                disabled={updating}
+                placeholder="e.g. Broken seam reported by customer"
+              />
+            </div>
+            <div
+              className="rounded-xl bg-primary/5 p-4 text-sm"
+              aria-live="polite"
+            >
+              <p className="flex items-center gap-2 font-bold">
+                <TriangleAlert className="size-4" /> Saleable stock impact
+              </p>
+              <p className="mt-2 text-muted-foreground">
+                {disposition === "dead_stock"
+                  ? order.status === "paid" ||
+                    order.status === "shipped" ||
+                    order.return_disposition === "dead_stock"
+                    ? "No stock will be added back. These goods will be recorded as dead stock; stock was already deducted when the order was logged."
+                    : "Previously restored units will be removed from saleable stock and written off as dead stock."
+                  : order.status === "paid" || order.status === "shipped"
+                    ? "All physical units in this order will be added back to saleable stock. Confirm only after checking they can be sold."
+                    : "Stock has already been restored. Changing the status will not add it again."}
+              </p>
+            </div>
+            {error && (
+              <p className="text-sm text-destructive" role="alert">
+                {error}
+              </p>
+            )}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={updating}
+                onClick={() => setPendingStatus(null)}
+              >
+                Go back
+              </Button>
+              <Button
+                disabled={updating}
+                onClick={() => {
+                  if (pendingStatus) void saveStatus(pendingStatus, disposition)
+                }}
+              >
+                {updating
+                  ? "Recording…"
+                  : disposition === "dead_stock"
+                    ? "Confirm dead stock"
+                    : "Confirm & restore stock"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Card>
           <CardHeader>
@@ -215,15 +455,27 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
               {lineItems.map((item) => {
                 const product = productMap.get(item.sku)
                 return (
-                  <div key={item.id} className="rounded-lg border p-3 space-y-2">
+                  <div
+                    key={item.id}
+                    className="rounded-lg border p-3 space-y-2"
+                  >
                     <div>
-                      <p className="font-medium">{product?.name || "Unknown"}</p>
-                      <p className="text-xs text-muted-foreground font-mono">{item.sku}</p>
+                      <p className="font-medium">
+                        {product?.name || "Unknown"}
+                      </p>
+                      <p className="text-xs text-muted-foreground font-mono">
+                        {item.sku}
+                      </p>
                       {product?.variant && (
-                        <p className="text-xs text-muted-foreground">{product.variant}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {product.variant}
+                        </p>
                       )}
                       <p className="text-xs text-muted-foreground">
-                        {getPackSizeLabel(item.pack_size)} · {item.quantity} order(s) · {item.quantity * getPackMultiplier(item.pack_size)} unit(s)
+                        {getPackSizeLabel(item.pack_size)} · {item.quantity}{" "}
+                        order(s) ·{" "}
+                        {item.quantity * getPackMultiplier(item.pack_size)}{" "}
+                        unit(s)
                       </p>
                     </div>
                     <div className="grid grid-cols-3 gap-2 text-sm">
@@ -233,11 +485,17 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground">Unit</p>
-                        <p className="font-medium">{formatCurrency(item.selling_price)}</p>
+                        <p className="font-medium">
+                          {formatCurrency(item.selling_price)}
+                        </p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs text-muted-foreground">Subtotal</p>
-                        <p className="font-medium">{formatCurrency(item.quantity * item.selling_price)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Subtotal
+                        </p>
+                        <p className="font-medium">
+                          {formatCurrency(item.quantity * item.selling_price)}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -261,18 +519,28 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
                     const product = productMap.get(item.sku)
                     return (
                       <TableRow key={item.id}>
-                        <TableCell className="font-mono text-sm">{item.sku}</TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {item.sku}
+                        </TableCell>
                         <TableCell>
-                          <div className="font-medium">{product?.name || "Unknown"}</div>
+                          <div className="font-medium">
+                            {product?.name || "Unknown"}
+                          </div>
                           {product?.variant && (
-                            <div className="text-sm text-muted-foreground">{product.variant}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {product.variant}
+                            </div>
                           )}
                           <div className="text-xs text-muted-foreground">
                             {getPackSizeLabel(item.pack_size)}
                           </div>
                         </TableCell>
-                        <TableCell className="text-right">{item.quantity}</TableCell>
-                        <TableCell className="text-right">{formatCurrency(item.selling_price)}</TableCell>
+                        <TableCell className="text-right">
+                          {item.quantity}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(item.selling_price)}
+                        </TableCell>
                         <TableCell className="text-right font-medium">
                           {formatCurrency(item.quantity * item.selling_price)}
                         </TableCell>
@@ -286,7 +554,9 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
             <div className="mt-4 space-y-2 border-t pt-4">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">GMV</span>
-                <span className="font-medium">{formatCurrency(metrics.totals.gmv)}</span>
+                <span className="font-medium">
+                  {formatCurrency(metrics.totals.gmv)}
+                </span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Channel Fees</span>
@@ -296,7 +566,9 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Revenue</span>
-                <span className="font-medium">{formatCurrency(metrics.totals.revenue)}</span>
+                <span className="font-medium">
+                  {formatCurrency(metrics.totals.revenue)}
+                </span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Total Cost (COGS)</span>
@@ -306,12 +578,20 @@ export function OrderDetailClient({ initialOrder, lineItems, products }: Props) 
               </div>
               <div className="flex justify-between text-lg font-bold border-t pt-2">
                 <span>Profit</span>
-                <span className={metrics.totals.profit >= 0 ? "text-success" : "text-destructive"}>
+                <span
+                  className={
+                    metrics.totals.profit >= 0
+                      ? "text-success"
+                      : "text-destructive"
+                  }
+                >
                   {formatCurrency(metrics.totals.profit)}
                 </span>
               </div>
               {!metrics.totals.hasCompleteCostData && (
-                <p className="text-xs text-warning">Cost data missing—Profit may be overstated.</p>
+                <p className="text-xs text-warning">
+                  Cost data missing—Profit may be overstated.
+                </p>
               )}
             </div>
           </CardContent>

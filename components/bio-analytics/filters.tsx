@@ -57,7 +57,7 @@ function ToggleGroup({ legend, values, selected, labels, onToggle }: ToggleGroup
               type="button"
               onClick={() => onToggle(value)}
               aria-pressed={isSelected}
-              className="rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors data-[selected=true]:border-transparent data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground hover:bg-accent"
+              className="min-h-9 rounded-full border px-3 py-1 text-xs font-medium transition-colors data-[selected=true]:border-transparent data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground hover:bg-accent"
               data-selected={isSelected}
             >
               {labels ? labelFor(labels, value) : value}
@@ -110,7 +110,7 @@ export function BioAnalyticsFiltersBar({
                   onClick={() => apply({ preset: preset.value })}
                   aria-pressed={filters.preset === preset.value}
                   data-selected={filters.preset === preset.value}
-                  className="rounded-full border px-3 py-1 text-xs font-medium transition-colors data-[selected=true]:border-transparent data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground hover:bg-accent"
+                  className="min-h-10 rounded-full border px-3 py-1 text-xs font-medium transition-colors data-[selected=true]:border-transparent data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground hover:bg-accent"
                 >
                   {preset.label}
                 </button>
@@ -127,7 +127,7 @@ export function BioAnalyticsFiltersBar({
                 <Input
                   id="bio-from"
                   type="date"
-                  className="h-8 w-40"
+                  className="h-11 w-40"
                   value={filters.startDate ?? ""}
                   onChange={(event) => apply({ startDate: event.target.value || null })}
                 />
@@ -139,7 +139,7 @@ export function BioAnalyticsFiltersBar({
                 <Input
                   id="bio-to"
                   type="date"
-                  className="h-8 w-40"
+                  className="h-11 w-40"
                   value={filters.endDate ?? ""}
                   onChange={(event) => apply({ endDate: event.target.value || null })}
                 />
@@ -171,7 +171,8 @@ export function BioAnalyticsFiltersBar({
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <details open={hasActiveBioFilters(filters)} className="border-t border-primary/10 pt-3"><summary className="cursor-pointer text-sm font-semibold">Filter by product, destination or audience{hasActiveBioFilters(filters) ? " · Filters active" : ""}</summary>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <ToggleGroup
             legend="Product"
             values={options.products}
@@ -213,6 +214,7 @@ export function BioAnalyticsFiltersBar({
             onToggle={(value) => toggle("campaigns", value)}
           />
         </div>
+        </details>
       </CardContent>
     </Card>
   )

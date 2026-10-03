@@ -120,6 +120,7 @@ export type NotificationEvent = {
 export type Channel = 'shopee' | 'tokopedia' | 'tiktok' | 'offline'
 
 export type OrderStatus = 'paid' | 'shipped' | 'cancelled' | 'returned'
+export type ReturnDisposition = 'restock' | 'dead_stock'
 
 export type PackSize = 'single' | 'bundle_2' | 'bundle_3' | 'bundle_4'
 
@@ -129,6 +130,8 @@ export type Order = {
   channel: Channel
   order_date: string
   status: OrderStatus
+  return_disposition?: ReturnDisposition | null
+  return_note?: string | null
   channel_fees: number | null
   notes: string | null
   created_at: string
@@ -151,6 +154,8 @@ export type ProductPackSize = {
   sku: string
   pack_size: PackSize
   is_enabled: boolean
+  /** Listing thumbnail (static /listings/* path or Storage URL). */
+  image_url?: string | null
   created_at: string
   updated_at: string
 }
