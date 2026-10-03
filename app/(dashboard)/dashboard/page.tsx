@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { ArrowRight } from "lucide-react"
 import { OrderSky } from "@/components/today/order-sky"
+import { ProductKpis } from "@/components/today/product-kpis"
 import { ListingThumb } from "@/components/listing-thumb"
 import { PlatformBadge } from "@/components/shell/platform-badge"
 import { PLATFORMS } from "@/components/shell/platforms"
@@ -84,7 +85,7 @@ export default async function TodayPage() {
         )}
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+      <div className="grid items-start gap-4 lg:grid-cols-[1.3fr_1fr]">
         <section className="glass rounded-[22px] p-5 sm:p-6">
           <p className="max-w-[44ch] font-display text-[21px] font-medium leading-snug">
             {pace ? (
@@ -108,6 +109,7 @@ export default async function TodayPage() {
               KPI by product <ArrowRight className="size-4" />
             </Link>
           </div>
+          <ProductKpis rows={data.productKpis} month={month.key} elapsed={month.elapsed} />
         </section>
 
         <section className="glass flex flex-col rounded-[22px] p-5 sm:p-6">

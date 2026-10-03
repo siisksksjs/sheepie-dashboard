@@ -251,7 +251,7 @@ export function KpiClient({
                   ? `${delta} items ahead of pace`
                   : "On pace"
           return (
-            <article key={row.sku} className="glass rounded-[24px] p-5">
+            <article key={row.sku} id={`product-${row.sku}`} className="glass scroll-mt-6 rounded-[24px] p-5">
               <div className="mb-5 flex items-center gap-3">
                 <ListingThumb
                   src={images[`${row.sku}:single`]}
