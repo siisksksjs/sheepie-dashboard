@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { PackagePlus, Pencil, Plane, Ship, Trash2, Truck, X, Plus, ArrowRight } from "lucide-react"
 
 import { createRestock, deleteRestock, markRestockArrived, updateRestock } from "@/lib/actions/restock"
@@ -28,6 +29,9 @@ type Props = {
   restocks: RestockRow[]
   products: Product[]
   images: Record<string, string>
+  focusSku?: string
+  initialQuantity?: number
+  createInitially?: boolean
 }
 
 type RestockItemForm = {
@@ -402,27 +406,29 @@ function InTransitCard({
   )
 }
 
-export function RestockClient({ restocks, products, images }: Props) {
+export function RestockClient({ restocks, products, images, focusSku, initialQuantity = 1, createInitially = false }: Props) {
   const router = useRouter()
   const [isCreating, startCreateTransition] = useTransition()
   const [isArriving, startArrivalTransition] = useTransition()
-  const [createOpen, setCreateOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(createInitially)
   const [createError, setCreateError] = useState<string | null>(null)
   const [arrivalError, setArrivalError] = useState<string | null>(null)
-  const [purchaseItems, setPurchaseItems] = useState<RestockItemForm[]>([createEmptyItem()])
+  const [purchaseItems, setPurchaseItems] = useState<RestockItemForm[]>(() => [{ ...createEmptyItem(), sku: focusSku ?? "", quantity: initialQuantity }])
   const [orderDate, setOrderDate] = useState(getJakartaToday())
   const [shippingMode, setShippingMode] = useState<ShippingMode>("air")
   const [vendor, setVendor] = useState("")
   const [notes, setNotes] = useState("")
   const [arrivalDates, setArrivalDates] = useState<Record<string, string>>({})
+  const focusedProduct = products.find((product) => product.sku === focusSku)
+  const relevantRestocks = useMemo(() => focusSku ? restocks.filter((restock) => restock.items.some((item) => item.sku === focusSku)) : restocks, [restocks, focusSku])
 
   const inTransitRestocks = useMemo(
-    () => restocks.filter((restock) => restock.restock_status === "in_transit"),
-    [restocks],
+    () => relevantRestocks.filter((restock) => restock.restock_status === "in_transit"),
+    [relevantRestocks],
   )
   const arrivedRestocks = useMemo(
-    () => restocks.filter((restock) => restock.restock_status === "arrived"),
-    [restocks],
+    () => relevantRestocks.filter((restock) => restock.restock_status === "arrived"),
+    [relevantRestocks],
   )
 
   const updatePurchaseItem = (id: string, field: keyof RestockItemForm, value: string | number) => {
@@ -508,6 +514,7 @@ export function RestockClient({ restocks, products, images }: Props) {
   return (
     <div className="space-y-5">
       <PageHeader title="Restock" description="From supplier order to warehouse shelf. Keep your incoming stock in view." actions={<Button onClick={() => setCreateOpen(true)}><Plus className="mr-2 size-4" /> New supplier order</Button>} />
+      {focusedProduct && <div className="glass-inset flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-3 text-sm"><span>Showing batches containing <strong>{focusedProduct.name}</strong></span><Link href="/restock" className="text-xs font-bold">Show all products</Link></div>}
       <section className="workspace-summary grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Restock summary">
         <Stat label="Batches on the way" value={inTransitRestocks.length} note="Awaiting warehouse arrival" />
         <Stat label="Units in transit" value={inTransitRestocks.reduce((sum, r) => sum + r.items.reduce((n, i) => n + i.quantity, 0), 0).toLocaleString()} note="Stock is added when received" />
@@ -515,7 +522,7 @@ export function RestockClient({ restocks, products, images }: Props) {
         <Stat label="Batches received" value={arrivedRestocks.length} note="See delivery history below" />
       </section>
       <div className="flex flex-wrap items-center justify-between gap-2 px-2 text-xs font-semibold text-muted-foreground"><span>01 · Order placed</span><ArrowRight className="size-4" /><span className="text-primary">02 · In transit</span><ArrowRight className="size-4" /><span>03 · Received into stock</span></div>
-        <Card>
+        <Card id="in-transit" className="scroll-mt-6">
           <CardHeader>
             <CardTitle>On the way <span className="ml-2 font-body text-sm text-muted-foreground">{inTransitRestocks.length} batches</span></CardTitle>
             <CardDescription>

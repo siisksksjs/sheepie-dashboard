@@ -4,6 +4,8 @@ import { getKpiWorkspace, type KpiProductRow } from "@/lib/actions/kpi"
 import { getReorderRecommendations } from "@/lib/actions/orders"
 import { getStockOnHand } from "@/lib/actions/inventory"
 import { getListingImageMap } from "@/lib/actions/quick-log"
+import { getIncomingRestocks } from "@/lib/actions/restock-batches"
+import { buildIncomingStockBySku, getRestockCoverage } from "@/lib/restock/coverage"
 import { calculateSalesOrder, resolveSalesUnitCost, type SalesPackSize } from "@/supabase/functions/_shared/sales-metrics"
 import type { Channel } from "@/lib/types/database.types"
 
@@ -26,6 +28,10 @@ export type StockLine = {
   stock: number
   reorderAt: number | null
   needsReorder: boolean
+  incoming: number | null
+  additionalUnits: number | null
+  coveredByIncoming: boolean
+  inventoryPosition: number | null
   imageUrl: string | null
 }
 
@@ -70,7 +76,7 @@ export async function getTodayData(now = new Date()): Promise<TodayData> {
   const { date: today, hour } = jakartaParts(now)
   const monthKey = today.slice(0, 7)
 
-  const [{ data: rows, error }, products, kpi, stockRows, reorder, images] = await Promise.all([
+  const [{ data: rows, error }, products, kpi, stockRows, reorder, images, incomingRestocks] = await Promise.all([
     fetchAllRows<TodayOrderRow>(() =>
       supabase
         .from("orders")
@@ -84,6 +90,7 @@ export async function getTodayData(now = new Date()): Promise<TodayData> {
     getStockOnHand(),
     getReorderRecommendations(),
     getListingImageMap(),
+    getIncomingRestocks(),
   ])
   if (error) throw new Error(error.message)
 
@@ -138,6 +145,7 @@ export async function getTodayData(now = new Date()): Promise<TodayData> {
     reorderAtBySku.set(rec.sku, Math.max(reorderAtBySku.get(rec.sku) ?? 0, rec.reorderMax))
   }
 
+  const incomingBySku = buildIncomingStockBySku(incomingRestocks.batches)
   const stock: StockLine[] = stockRows
     .filter((s) => !s.is_bundle && s.status === "active")
     .map((s) => {
@@ -147,7 +155,11 @@ export async function getTodayData(now = new Date()): Promise<TodayData> {
         name: s.name,
         stock: s.current_stock,
         reorderAt,
-        needsReorder: reorderAt !== null && s.current_stock <= reorderAt,
+        ...getRestockCoverage({
+          stock: s.current_stock,
+          incoming: incomingRestocks.available ? incomingBySku.get(s.sku) ?? 0 : null,
+          reorderAt,
+        }),
         imageUrl: images[`${s.sku}:single`] ?? null,
       }
     })
