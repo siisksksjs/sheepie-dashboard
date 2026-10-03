@@ -3,11 +3,13 @@ import Link from "next/link"
 import { ArrowRight } from "lucide-react"
 import { OrderSky } from "@/components/today/order-sky"
 import { ProductKpis } from "@/components/today/product-kpis"
+import { RestockAlerts } from "@/components/today/restock-alerts"
 import { ListingThumb } from "@/components/listing-thumb"
 import { PlatformBadge } from "@/components/shell/platform-badge"
 import { PLATFORMS } from "@/components/shell/platforms"
 import { PaceBar, Stat } from "@/components/ui/page"
 import { getTodayData } from "@/lib/queries/today"
+import { getRestockCoverage } from "@/lib/restock/coverage"
 import { cn, formatCurrency } from "@/lib/utils"
 
 export const metadata: Metadata = { title: "Today · Sheepie" }
@@ -33,10 +35,6 @@ export default async function TodayPage() {
     else groups.push({ sku: rec.sku, name: rec.name, routes: [rec] })
     return groups
   }, [])
-
-  const low = stock
-    .filter((s) => s.needsReorder)
-    .sort((a, b) => a.stock / Math.max(1, a.reorderAt ?? 1) - b.stock / Math.max(1, b.reorderAt ?? 1))
 
   return (
     <div className="space-y-4">
@@ -113,29 +111,7 @@ export default async function TodayPage() {
         </section>
 
         <section className="glass flex flex-col rounded-[22px] p-5 sm:p-6">
-          <h2 className="font-display text-[19px] font-semibold">Needs you</h2>
-          {low.length === 0 ? (
-            <p className="mt-1.5 text-[14px] text-muted-foreground">Nothing right now — every product is above its reorder point.</p>
-          ) : (
-            <ul className="mt-3 space-y-2.5">
-              {low.slice(0, 3).map((s, i) => (
-                <li key={s.sku} className={cn("flex items-center gap-3 rounded-[18px] border p-3", i === 0 ? "border-[#e3a24a]/45 bg-[#e3a24a]/10" : "border-primary/10 bg-white/45")}>
-                  <ListingThumb src={s.imageUrl} name={s.name} sku={s.sku} size={48} />
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold leading-snug">Reorder {s.name}</p>
-                    <p className="num text-[13px] text-muted-foreground">
-                      {s.stock} left · reorder at {s.reorderAt}
-                    </p>
-                  </div>
-                  {i === 0 && (
-                    <Link href="/restock" className="rounded-full bg-primary px-3.5 py-2 text-[12.5px] font-bold text-white">
-                      Restock
-                    </Link>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
+          <RestockAlerts stock={stock} />
           <div className="mt-auto pt-6">
             <div className="mb-1 flex items-baseline justify-between">
               <h3 className="text-[14px] font-bold">Stock</h3>
@@ -149,7 +125,10 @@ export default async function TodayPage() {
               return (
                 <div key={s.sku} className="grid grid-cols-[32px_1fr_minmax(0,1.2fr)_56px] items-center gap-3 border-b border-primary/[0.07] py-2 last:border-0">
                   <ListingThumb src={s.imageUrl} name={s.name} sku={s.sku} size={32} className="rounded-[9px]" />
-                  <span className="truncate text-[13px] font-semibold">{s.name}</span>
+                  <div className="min-w-0">
+                    <span className="block truncate text-[13px] font-semibold">{s.name}</span>
+                    {s.incoming !== null && s.incoming > 0 && <Link href={`/restock?sku=${encodeURIComponent(s.sku)}#in-transit`} className="num block truncate text-[11px] font-semibold text-muted-foreground hover:text-primary">{s.incoming} on the way</Link>}
+                  </div>
                   <div className="h-2 overflow-hidden rounded-full bg-primary/[0.08]">
                     <div className={cn("h-full rounded-full", s.needsReorder ? "bg-[#e3a24a]" : "bg-primary")} style={{ width: `${Math.max(w * 100, s.stock > 0 ? 3 : 0)}%` }} />
                   </div>
@@ -166,25 +145,32 @@ export default async function TodayPage() {
           <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="font-display text-[19px] font-semibold">Reorder guide</h2>
             <p className="text-[12.5px] text-muted-foreground">
-              From average daily sales on in-stock days since {reorder.startDate.toISOString().slice(0, 10)}, and learned shipping times.
+              Gaps include available and in-transit stock. Sales since {reorder.startDate.toISOString().slice(0, 10)} and learned shipping times set the reorder levels.
             </p>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
-            {groupedReorderRecommendations.map((group) => (
-              <div key={group.sku} className="glass-inset rounded-[18px] p-4">
-                <p className="font-semibold">{group.name}</p>
-                <ul className="mt-2 space-y-1.5">
-                  {group.routes.map((rec) => (
-                    <li key={`${rec.sku}-${rec.mode}`} className="num flex flex-wrap items-baseline justify-between gap-x-3 text-[13px]">
-                      <span className="text-muted-foreground">
-                        {rec.mode} · {rec.avgDaily.toFixed(2)}/day · {rec.leadTimeLabel}
-                      </span>
-                      <span className="font-semibold">{rec.reorderMin === rec.reorderMax ? `${rec.reorderMin} units` : `${rec.reorderMin}–${rec.reorderMax} units`}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+            {groupedReorderRecommendations.map((group) => {
+              const productStock = stock.find((row) => row.sku === group.sku)
+              return (
+                <div key={group.sku} className="glass-inset rounded-[18px] p-4">
+                  <p className="font-semibold">{group.name}</p>
+                  {productStock && <p className="num mt-1 text-xs text-muted-foreground">{productStock.stock} available · {productStock.incoming === null ? "incoming unknown" : `${productStock.incoming} on the way`}</p>}
+                  <ul className="mt-2 space-y-1.5">
+                    {group.routes.map((rec) => {
+                      const gap = productStock ? getRestockCoverage({ stock: productStock.stock, incoming: productStock.incoming, reorderAt: rec.reorderMax }).additionalUnits : null
+                      return (
+                        <li key={`${rec.sku}-${rec.mode}`} className="num flex flex-wrap items-baseline justify-between gap-x-3 text-[13px]">
+                          <span className="text-muted-foreground">
+                            {rec.mode} · {rec.avgDaily.toFixed(2)}/day · {rec.leadTimeLabel}
+                          </span>
+                          <span className="font-semibold">{gap === null ? "Check incoming stock" : gap === 0 ? "Level covered" : `${gap} more to level ${rec.reorderMax}`}</span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )
+            })}
           </div>
         </section>
       )}

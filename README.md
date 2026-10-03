@@ -87,6 +87,7 @@ dashboard-sheepie/
 - Photo-based product catalog and accessible platform logos and names
 - Inventory Ledger with search, movement filters and a reviewed KOL sample workflow
 - Restock tracking, arrival confirmation and learned lead-time guidance
+- Reorder alerts subtract incoming purchases per SKU, with links to shipments or a prefilled restock form
 - Sales reports, monthly KPI targets and bio traffic/behavior analytics
 - Customer returns distinguish resaleable goods from defective dead stock
 

@@ -2,39 +2,48 @@
 
 import { cache } from "react"
 import { createClient } from "@/lib/supabase/server"
-import type { InventoryPurchaseBatch, InventoryPurchaseBatchItem, Product } from "@/lib/types/database.types"
+import { fetchAllRows } from "@/lib/supabase/fetch-all"
+import type { InventoryPurchaseBatch, InventoryPurchaseBatchItem, Product, RestockStatus } from "@/lib/types/database.types"
 
 export type RestockBatchItem = InventoryPurchaseBatchItem & { product_name: string; variant: string | null }
 export type RestockBatch = InventoryPurchaseBatch & { items: RestockBatchItem[] }
 
 /** Restock batches with their line items, newest first. */
-export const getInventoryPurchaseBatches = cache(async (filters?: { limit?: number }): Promise<RestockBatch[]> => {
+export const getInventoryPurchaseBatches = cache(async (filters?: { limit?: number; status?: RestockStatus; throwOnError?: boolean }): Promise<RestockBatch[]> => {
   const supabase = await createClient()
 
-  let batchQuery = supabase
-    .from("inventory_purchase_batches")
-    .select("*")
-    .order("entry_date", { ascending: false })
-    .order("created_at", { ascending: false })
-  if (filters?.limit) batchQuery = batchQuery.limit(filters.limit)
+  const buildBatchQuery = () => {
+    let query = supabase
+      .from("inventory_purchase_batches")
+      .select("*")
+      .order("entry_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .order("id")
+    if (filters?.status) query = query.eq("restock_status", filters.status)
+    if (filters?.limit) query = query.limit(filters.limit)
+    return query
+  }
 
   const [{ data: batches, error }, { data: products }] = await Promise.all([
-    batchQuery,
+    filters?.limit ? buildBatchQuery() : fetchAllRows<InventoryPurchaseBatch>(buildBatchQuery),
     supabase.from("products").select("sku, name, variant"),
   ])
   if (error) {
     console.error("Error fetching restock batches:", error)
+    if (filters?.throwOnError) throw new Error("Could not load incoming restocks.")
     return []
   }
   const typedBatches = (batches || []) as InventoryPurchaseBatch[]
   if (typedBatches.length === 0) return []
 
-  const { data: items, error: itemsError } = await supabase
+  const { data: items, error: itemsError } = await fetchAllRows<InventoryPurchaseBatchItem>(() => supabase
     .from("inventory_purchase_batch_items")
     .select("*")
     .in("batch_id", typedBatches.map((batch) => batch.id))
+    .order("id"))
   if (itemsError) {
     console.error("Error fetching restock batch items:", itemsError)
+    if (filters?.throwOnError) throw new Error("Could not load incoming restock items.")
     return []
   }
 
@@ -48,3 +57,14 @@ export const getInventoryPurchaseBatches = cache(async (filters?: { limit?: numb
   }
   return typedBatches.map((batch) => ({ ...batch, items: itemsByBatch.get(batch.id) || [] }))
 })
+
+export async function getIncomingRestocks() {
+  try {
+    return {
+      available: true,
+      batches: await getInventoryPurchaseBatches({ status: "in_transit", throwOnError: true }),
+    }
+  } catch {
+    return { available: false, batches: [] as RestockBatch[] }
+  }
+}
