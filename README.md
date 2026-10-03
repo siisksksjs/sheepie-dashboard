@@ -82,7 +82,7 @@ dashboard-sheepie/
 
 ## Features
 
-- Today overview with hourly orders, product photos, monthly goals and low-stock guidance
+- Today overview with hourly orders, product photos, monthly goals, per-product KPI progress and low-stock guidance
 - Quick log of usual orders with review, platform filters, favorites and 10-second undo
 - Photo-based product catalog and accessible platform logos and names
 - Inventory Ledger with search, movement filters and a reviewed KOL sample workflow

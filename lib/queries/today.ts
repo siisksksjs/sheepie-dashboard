@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { fetchAllRows } from "@/lib/supabase/fetch-all"
-import { getKpiWorkspace } from "@/lib/actions/kpi"
+import { getKpiWorkspace, type KpiProductRow } from "@/lib/actions/kpi"
 import { getReorderRecommendations } from "@/lib/actions/orders"
 import { getStockOnHand } from "@/lib/actions/inventory"
 import { getListingImageMap } from "@/lib/actions/quick-log"
@@ -43,6 +43,7 @@ export type TodayData = {
     targetUnits: number
     actualUnits: number
   }
+  productKpis: Array<KpiProductRow & { imageUrl: string | null }>
   stock: StockLine[]
   reorder: Awaited<ReturnType<typeof getReorderRecommendations>>
   byChannel: { channel: Channel; orders: number; gmv: number }[]
@@ -165,6 +166,10 @@ export async function getTodayData(now = new Date()): Promise<TodayData> {
       targetUnits: kpi.totals.target_units,
       actualUnits: kpi.totals.actual_units,
     },
+    productKpis: kpi.rows.map((row) => ({
+      ...row,
+      imageUrl: images[`${row.sku}:single`] ?? null,
+    })),
     stock,
     reorder,
     byChannel: [...channelMap.values()].sort((a, b) => b.gmv - a.gmv),
