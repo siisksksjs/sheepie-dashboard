@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { createSyncDeps } from "./deps"
@@ -43,6 +45,14 @@ describe("createSyncDeps", () => {
       } catch (error) {
         expect(String(error)).not.toContain("partner_key_secret")
       }
+    }
+  })
+})
+
+describe("service-role modules", () => {
+  it("cannot be bundled into client code", () => {
+    for (const path of ["lib/supabase/service.ts", "lib/shopee/deps.ts"]) {
+      expect(readFileSync(path, "utf8"), path).toMatch(/^import "server-only"$/m)
     }
   })
 })

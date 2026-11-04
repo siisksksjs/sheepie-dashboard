@@ -1,3 +1,5 @@
+import "server-only"
+
 import { createServiceClient } from "@/lib/supabase/service"
 import { createShopeeClient } from "./client"
 import { createShopeeStore } from "./store"
