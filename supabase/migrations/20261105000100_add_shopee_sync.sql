@@ -401,3 +401,71 @@ $$;
 
 REVOKE ALL ON FUNCTION public.apply_shopee_order(jsonb, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.apply_shopee_order(jsonb, text) TO service_role;
+
+-- What the settings page may know about the connection: everything except the
+-- tokens. Always one row; connected is false when nothing is stored yet.
+-- SECURITY DEFINER: marketplace_connections is closed to authenticated.
+CREATE OR REPLACE FUNCTION public.get_shopee_connection_status()
+RETURNS TABLE (
+  connected boolean,
+  shop_id bigint,
+  refresh_expires_at timestamptz,
+  sync_start_at timestamptz,
+  last_synced_until timestamptz,
+  consecutive_failures integer,
+  last_sync_error text
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT
+    c.shop_id IS NOT NULL AND c.access_token IS NOT NULL,
+    c.shop_id,
+    c.refresh_expires_at,
+    c.sync_start_at,
+    c.last_synced_until,
+    coalesce(c.consecutive_failures, 0),
+    c.last_sync_error
+  FROM (SELECT 1) AS one
+  LEFT JOIN public.marketplace_connections c ON c.channel = 'shopee';
+$$;
+
+REVOKE ALL ON FUNCTION public.get_shopee_connection_status() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_shopee_connection_status() TO authenticated;
+
+-- The go-live switch: from sync_start_at on, Shopee orders sync instead of
+-- being logged by hand. Set once and never moved; returns the stored value.
+-- SECURITY DEFINER: marketplace_connections is closed to authenticated.
+CREATE OR REPLACE FUNCTION public.start_shopee_sync()
+RETURNS timestamptz
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  started_at timestamptz;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Please sign in before starting the Shopee sync.';
+  END IF;
+
+  UPDATE public.marketplace_connections
+  SET sync_start_at = now()
+  WHERE channel = 'shopee' AND sync_start_at IS NULL
+    AND shop_id IS NOT NULL AND access_token IS NOT NULL;
+
+  SELECT c.sync_start_at INTO started_at
+  FROM public.marketplace_connections c
+  WHERE c.channel = 'shopee' AND c.shop_id IS NOT NULL AND c.access_token IS NOT NULL;
+
+  IF started_at IS NULL THEN
+    RAISE EXCEPTION 'Shopee is not connected.';
+  END IF;
+  RETURN started_at;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.start_shopee_sync() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.start_shopee_sync() TO authenticated;

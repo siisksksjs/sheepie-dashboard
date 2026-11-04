@@ -510,5 +510,141 @@ if (!databaseUrl) {
       }
       expect(await orders(f.sn)).toHaveLength(0)
     })
+
+    // Runs `run` as a signed-in dashboard user (sub '' means signed out).
+    async function asAuthenticated<T>(
+      run: () => Promise<T>,
+      sub: string = userId
+    ) {
+      await db.query("set role authenticated")
+      await db.query("select set_config('request.jwt.claim.sub', $1, false)", [
+        sub
+      ])
+      try {
+        return await run()
+      } finally {
+        await db.query("reset role")
+      }
+    }
+    async function resetConnection(syncStartAt: string | null = null) {
+      await db.query("delete from marketplace_connections")
+      await db.query(
+        `insert into marketplace_connections(channel, shop_id, access_token, refresh_token,
+           access_expires_at, refresh_expires_at, sync_start_at, last_synced_until,
+           consecutive_failures, last_sync_error)
+         values ('shopee', 555, 'ACCESS-SECRET', 'REFRESH-SECRET', '2026-11-05T00:00:00Z',
+           '2026-12-04T00:00:00Z', $1, '2026-11-04T09:45:00Z', 2, 'Shopee API error: timeout')`,
+        [syncStartAt]
+      )
+    }
+    const connectionStatus = () =>
+      asAuthenticated(
+        async () =>
+          (await db.query("select * from public.get_shopee_connection_status()"))
+            .rows
+      )
+    const startSync = (sub?: string) =>
+      asAuthenticated(
+        async () =>
+          (await db.query("select public.start_shopee_sync() as at")).rows[0]
+            .at as Date,
+        sub
+      )
+    async function storedSyncStart() {
+      return (
+        await db.query("select sync_start_at from marketplace_connections")
+      ).rows[0].sync_start_at as Date | null
+    }
+
+    it("status hides tokens", async () => {
+      await db.query("delete from marketplace_connections")
+      expect(await connectionStatus()).toEqual([
+        {
+          connected: false,
+          shop_id: null,
+          refresh_expires_at: null,
+          sync_start_at: null,
+          last_synced_until: null,
+          consecutive_failures: 0,
+          last_sync_error: null
+        }
+      ])
+
+      await resetConnection("2026-11-04T08:00:00Z")
+      const rows = await connectionStatus()
+      expect(rows).toHaveLength(1)
+      expect(Object.keys(rows[0]).sort()).toEqual(
+        [
+          "connected",
+          "shop_id",
+          "refresh_expires_at",
+          "sync_start_at",
+          "last_synced_until",
+          "consecutive_failures",
+          "last_sync_error"
+        ].sort()
+      )
+      expect(rows[0]).toMatchObject({
+        connected: true,
+        shop_id: "555",
+        consecutive_failures: 2,
+        last_sync_error: "Shopee API error: timeout"
+      })
+      expect(rows[0].refresh_expires_at.toISOString()).toBe(
+        "2026-12-04T00:00:00.000Z"
+      )
+      expect(rows[0].sync_start_at.toISOString()).toBe(
+        "2026-11-04T08:00:00.000Z"
+      )
+      expect(rows[0].last_synced_until.toISOString()).toBe(
+        "2026-11-04T09:45:00.000Z"
+      )
+      expect(JSON.stringify(rows)).not.toMatch(/ACCESS-SECRET|REFRESH-SECRET/)
+
+      // The tokens stay unreachable directly, and anon cannot call the status.
+      await asAuthenticated(() =>
+        expect(
+          db.query("select access_token from marketplace_connections")
+        ).rejects.toThrow(/permission denied/)
+      )
+      await db.query("set role anon")
+      try {
+        await expect(
+          db.query("select * from public.get_shopee_connection_status()")
+        ).rejects.toThrow(/permission denied/)
+      } finally {
+        await db.query("reset role")
+      }
+    })
+
+    it("start_shopee_sync only sets once", async () => {
+      await resetConnection()
+      const first = await startSync()
+      expect(first).toBeInstanceOf(Date)
+      expect((await storedSyncStart())?.toISOString()).toBe(first.toISOString())
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect((await startSync()).toISOString()).toBe(first.toISOString())
+      expect((await storedSyncStart())?.toISOString()).toBe(first.toISOString())
+
+      // An existing start time is never moved.
+      await resetConnection("2026-11-01T00:00:00Z")
+      expect((await startSync()).toISOString()).toBe("2026-11-01T00:00:00.000Z")
+
+      await resetConnection()
+      await expect(startSync("")).rejects.toThrow(/sign in/i)
+      expect(await storedSyncStart()).toBeNull()
+      await db.query("set role anon")
+      try {
+        await expect(
+          db.query("select public.start_shopee_sync()")
+        ).rejects.toThrow(/permission denied/)
+      } finally {
+        await db.query("reset role")
+      }
+
+      await db.query("delete from marketplace_connections")
+      await expect(startSync()).rejects.toThrow(/not connected/i)
+    })
   })
 }
