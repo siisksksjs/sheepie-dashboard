@@ -28,12 +28,12 @@ function text(value: unknown): string {
 /** Checks a mapping from the settings form. Shopee uses model_id 0 for items without variants. */
 export function validateListingMapping(input: Record<string, unknown>): Validation {
   if (!isShopeeId(input.item_id, 1) || !isShopeeId(input.model_id, 0)) {
-    return { ok: false, error: "Shopee 商品编号无效" }
+    return { ok: false, error: "This Shopee item ID is not valid." }
   }
   const sku = text(input.sku)
-  if (!sku) return { ok: false, error: "请选择 SKU" }
+  if (!sku) return { ok: false, error: "Choose a SKU." }
   const packSize = typeof input.pack_size === "string" ? input.pack_size : ""
-  if (!isValidPackSize(packSize)) return { ok: false, error: "请选择有效的包装数量" }
+  if (!isValidPackSize(packSize)) return { ok: false, error: "Choose a valid pack size." }
 
   return {
     ok: true,
@@ -98,13 +98,17 @@ export function collectUnmappedItems(rows: QueueRow[], mapped: MappedKey[]): Unm
   return [...found.values()]
 }
 
-/** "上次同步" wording for `last_synced_until`. */
+/** "Last synced" wording for `last_synced_until`. */
 export function formatSyncAge(lastSyncedUntil: string | null, now: Date): string {
-  if (!lastSyncedUntil) return "从未同步"
+  if (!lastSyncedUntil) return "Never synced"
   const minutes = Math.floor((now.getTime() - new Date(lastSyncedUntil).getTime()) / 60_000)
-  if (minutes < 1) return "刚刚"
-  if (minutes < 60) return `${minutes} 分钟前`
+  if (minutes < 1) return "Just now"
+  if (minutes < 60) return ago(minutes, "minute")
   const hours = Math.floor(minutes / 60)
-  if (hours < 48) return `${hours} 小时前`
-  return `${Math.floor(hours / 24)} 天前`
+  if (hours < 48) return ago(hours, "hour")
+  return ago(Math.floor(hours / 24), "day")
+}
+
+function ago(count: number, unit: string) {
+  return `${count} ${unit}${count === 1 ? "" : "s"} ago`
 }

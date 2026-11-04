@@ -9,7 +9,7 @@ const LINKS = [
   { href: "/reports", label: "Reports", detail: "Sales, profit and channels", icon: BarChart3 },
   { href: "/kpi", label: "KPI", detail: "Monthly targets by product", icon: Goal },
   { href: "/bio-analytics", label: "Bio analytics", detail: "Link-in-bio traffic and clicks", icon: MousePointerClick },
-  { href: "/more/shopee", label: "Shopee 同步", detail: "连接、商品对应、待处理订单", icon: RefreshCw },
+  { href: "/more/shopee", label: "Shopee sync", detail: "Connection, product mapping, pending orders", icon: RefreshCw },
 ]
 
 export default function MorePage() {

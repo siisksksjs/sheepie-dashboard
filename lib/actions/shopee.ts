@@ -41,7 +41,7 @@ export type ShopeeSettings = {
 
 type ActionResult = { success: true; message?: string } | { success: false; error: string }
 
-const SIGN_IN_AGAIN = "请重新登录"
+const SIGN_IN_AGAIN = "Sign in again to continue."
 
 async function signedInClient() {
   const supabase = await createClient()
@@ -72,7 +72,7 @@ export async function getShopeeSettings(): Promise<ShopeeSettings> {
     supabase.from("products").select("sku, name, variant, status").order("name"),
   ])
   for (const result of [statusResult, mapResult, queueResult, productsResult]) {
-    if (result.error) throw new Error(`读取 Shopee 设置失败：${result.error.message}`)
+    if (result.error) throw new Error(`Loading Shopee settings failed: ${result.error.message}`)
   }
 
   const rawStatus = (statusResult.data as (Omit<ShopeeConnectionStatus, "shop_id"> & { shop_id: number | string | null })[])[0]
@@ -121,29 +121,29 @@ export async function startShopeeSync(): Promise<ActionResult> {
   if (error) {
     return {
       success: false,
-      error: /not connected/i.test(error.message) ? "请先连接 Shopee" : "开始自动同步失败，请再试一次",
+      error: /not connected/i.test(error.message) ? "Connect Shopee first." : "Auto-sync could not start. Try again.",
     }
   }
 
   revalidatePath(PAGE)
-  return { success: true, message: "自动同步已开始" }
+  return { success: true, message: "Auto-sync started." }
 }
 
 function describePoll(result: PollResult): ActionResult {
   switch (result.status) {
     case "ok": {
       const s = result.summary
-      const parts = s ? [`新增 ${s.created}`, `更新 ${s.updated}`, `待处理 ${s.queued}`] : []
-      return { success: true, message: `同步完成${parts.length ? `：${parts.join("，")}` : ""}` }
+      const parts = s ? [`${s.created} new`, `${s.updated} updated`, `${s.queued} pending`] : []
+      return { success: true, message: `Sync finished${parts.length ? `: ${parts.join(", ")}` : ""}.` }
     }
     case "not_connected":
-      return { success: false, error: "还没连接 Shopee" }
+      return { success: false, error: "Shopee is not connected yet." }
     case "not_started":
-      return { success: false, error: "还没开始自动同步" }
+      return { success: false, error: "Auto-sync has not been started yet." }
     case "needs_reconnect":
-      return { success: false, error: "需要重新连接 Shopee" }
+      return { success: false, error: "Shopee needs reconnecting." }
     case "failed":
-      return { success: false, error: `同步失败：${result.error ?? "未知错误"}` }
+      return { success: false, error: `Sync failed: ${result.error ?? "Unknown error"}` }
   }
 }
 
@@ -157,7 +157,7 @@ export async function syncShopeeNow(): Promise<ActionResult> {
   } catch (error) {
     // Client, store and env errors never carry keys or tokens.
     console.error(`Shopee sync now failed: ${error instanceof Error ? error.message : "Unknown error"}`)
-    return { success: false, error: "同步失败，请稍后再试" }
+    return { success: false, error: "Sync failed. Try again in a moment." }
   }
 
   revalidatePath(PAGE)
@@ -180,16 +180,16 @@ export async function saveListingMapping(input: {
 
   const { error } = await supabase.from("shopee_listing_map").upsert(checked.value, { onConflict: "item_id,model_id" })
   if (error) {
-    return { success: false, error: error.code === "23503" ? "找不到这个 SKU" : `保存失败：${error.message}` }
+    return { success: false, error: error.code === "23503" ? "That SKU does not exist." : `Saving failed: ${error.message}` }
   }
 
   revalidatePath(PAGE)
-  return { success: true, message: "已保存，下次同步会重试这些订单" }
+  return { success: true, message: "Saved. Waiting orders retry on the next sync." }
 }
 
 export async function resolveSyncQueueItem(orderSn: string): Promise<ActionResult> {
   const sn = typeof orderSn === "string" ? orderSn.trim() : ""
-  if (!sn) return { success: false, error: "订单编号无效" }
+  if (!sn) return { success: false, error: "This order number is not valid." }
 
   const supabase = await signedInClient()
   if (!supabase) return { success: false, error: SIGN_IN_AGAIN }
@@ -199,8 +199,8 @@ export async function resolveSyncQueueItem(orderSn: string): Promise<ActionResul
     .update({ resolved_at: new Date().toISOString() })
     .eq("order_sn", sn)
     .is("resolved_at", null)
-  if (error) return { success: false, error: `操作失败：${error.message}` }
+  if (error) return { success: false, error: `Could not mark it handled: ${error.message}` }
 
   revalidatePath(PAGE)
-  return { success: true, message: "已标记为处理完毕" }
+  return { success: true, message: "Marked as handled." }
 }

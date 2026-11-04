@@ -14,7 +14,7 @@ function QueueRow({ item }: { item: ShopeeQueueItem }) {
   function resolve() {
     startResolving(async () => {
       const result = await resolveSyncQueueItem(item.order_sn)
-      if (result.success) toast.success(result.message ?? "已处理")
+      if (result.success) toast.success(result.message ?? "Marked as handled.")
       else toast.error(result.error)
     })
   }
@@ -25,19 +25,21 @@ function QueueRow({ item }: { item: ShopeeQueueItem }) {
     <li className="px-5 py-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="num font-semibold">#{item.order_sn}</span>
-        {isReturn ? <Badge variant="warning">退货待处理</Badge> : <Badge variant="destructive">同步出错</Badge>}
+        {isReturn ? <Badge variant="warning">Return to review</Badge> : <Badge variant="destructive">Sync error</Badge>}
       </div>
       <p className="mt-1 break-words text-[13.5px] text-muted-foreground">
-        {isReturn ? "买家在 Shopee 申请了退货或退款。请到订单页选择退回的货能不能再卖。" : item.message ?? "同步这张订单时出错了。"}
+        {isReturn
+          ? "The buyer asked Shopee for a return or refund. Open the order and choose whether the goods can be resold."
+          : item.message ?? "Something went wrong syncing this order."}
       </p>
       <div className="mt-3 flex gap-2">
         {isReturn && item.order_id && (
           <Button asChild size="sm">
-            <Link href={`/orders/${item.order_id}`}>去处理</Link>
+            <Link href={`/orders/${item.order_id}`}>Review order</Link>
           </Button>
         )}
         <Button size="sm" variant="outline" onClick={resolve} disabled={resolving}>
-          {resolving ? "处理中…" : "已处理"}
+          {resolving ? "Saving…" : "Mark handled"}
         </Button>
       </div>
     </li>
@@ -47,7 +49,7 @@ function QueueRow({ item }: { item: ShopeeQueueItem }) {
 export function SyncQueueList({ queue }: { queue: ShopeeQueueItem[] }) {
   return (
     <section>
-      <h2 className="font-display text-[19px] font-semibold">待处理订单</h2>
+      <h2 className="font-display text-[19px] font-semibold">Pending orders</h2>
       {queue.length > 0 ? (
         <ul className="glass mt-3 divide-y divide-primary/[0.07] overflow-hidden rounded-[22px]">
           {queue.map((item) => (
@@ -55,7 +57,7 @@ export function SyncQueueList({ queue }: { queue: ShopeeQueueItem[] }) {
           ))}
         </ul>
       ) : (
-        <p className="mt-1 text-[13.5px] text-muted-foreground">没有待处理的订单。</p>
+        <p className="mt-1 text-[13.5px] text-muted-foreground">No pending orders.</p>
       )}
     </section>
   )

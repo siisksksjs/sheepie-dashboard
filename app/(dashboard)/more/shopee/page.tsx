@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/ui/page"
 import { getShopeeSettings } from "@/lib/actions/shopee"
 import { formatSyncAge } from "@/lib/shopee/settings-actions"
 
-export const metadata = { title: "Shopee 同步 · Sheepie" }
+export const metadata = { title: "Shopee sync · Sheepie" }
 
 export default async function ShopeeSettingsPage({
   searchParams,
@@ -20,7 +20,7 @@ export default async function ShopeeSettingsPage({
 
   return (
     <div className="mx-auto max-w-[720px] space-y-6">
-      <PageHeader title="Shopee 同步" description="连接 Shopee 店铺，配好商品对应，处理同步不了的订单。" />
+      <PageHeader title="Shopee sync" description="Connect the Shopee shop, map its products to SKUs, and handle orders the sync could not." />
       <ConnectionCard
         status={status}
         syncAge={formatSyncAge(status.last_synced_until, now)}

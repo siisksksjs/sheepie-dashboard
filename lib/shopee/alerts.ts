@@ -11,16 +11,16 @@ const SETTINGS_URL = "https://dashboard.sheepiesleep.com/more/shopee"
 
 const MESSAGES: Record<ShopeeAlert, { subject: string; sentence: string }> = {
   needs_reconnect: {
-    subject: "Sheepie Dashboard：Shopee 需要重新连接",
-    sentence: "Shopee 的授权已经失效，订单暂时无法同步，请到设置页重新连接。",
+    subject: "Sheepie Dashboard: Shopee needs reconnecting",
+    sentence: "Shopee access has expired, so orders cannot sync until you reconnect Shopee on the settings page.",
   },
   repeated_failures: {
-    subject: "Sheepie Dashboard：Shopee 同步连续失败",
-    sentence: "Shopee 订单同步已经连续失败多次，请到设置页查看最近的错误信息。",
+    subject: "Sheepie Dashboard: Shopee sync keeps failing",
+    sentence: "The Shopee order sync has failed several times in a row; check the latest error on the settings page.",
   },
   push_silent: {
-    subject: "Sheepie Dashboard：Shopee 推送 24 小时没有进来",
-    sentence: "过去 24 小时内 Shopee 的订单都是靠定时拉单补进来的，实时推送可能已经中断，请到设置页检查。",
+    subject: "Sheepie Dashboard: no Shopee push received in 24 hours",
+    sentence: "For the past 24 hours every Shopee order arrived through the scheduled sync rather than live push, so push may have stopped; check the settings page.",
   },
 }
 

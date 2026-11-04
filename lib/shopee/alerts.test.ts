@@ -101,7 +101,7 @@ describe("sendShopeeAlert", () => {
     const body = JSON.parse(init.body as string)
     expect(body.from).toBe("Sheepie <alerts@example.com>")
     expect(body.to).toEqual(["a@x.com", "b@x.com"])
-    expect(body.subject).toBe("Sheepie Dashboard：Shopee 需要重新连接")
+    expect(body.subject).toBe("Sheepie Dashboard: Shopee needs reconnecting")
     expect(body.html).toContain("https://dashboard.sheepiesleep.com/more/shopee")
     expect(store.markAlerted).toHaveBeenCalledWith(NOW)
   })
@@ -118,9 +118,9 @@ describe("sendShopeeAlert", () => {
       subjects[alert] = JSON.parse(init.body as string).subject
     }
     expect(subjects).toEqual({
-      needs_reconnect: "Sheepie Dashboard：Shopee 需要重新连接",
-      repeated_failures: "Sheepie Dashboard：Shopee 同步连续失败",
-      push_silent: "Sheepie Dashboard：Shopee 推送 24 小时没有进来",
+      needs_reconnect: "Sheepie Dashboard: Shopee needs reconnecting",
+      repeated_failures: "Sheepie Dashboard: Shopee sync keeps failing",
+      push_silent: "Sheepie Dashboard: no Shopee push received in 24 hours",
     })
   })
 

@@ -28,22 +28,22 @@ describe("validateListingMapping", () => {
 
   it("rejects an invalid pack size", () => {
     for (const pack_size of ["bundle_5", "", "Single", undefined]) {
-      expect(validateListingMapping({ ...valid, pack_size })).toEqual({ ok: false, error: "请选择有效的包装数量" })
+      expect(validateListingMapping({ ...valid, pack_size })).toEqual({ ok: false, error: "Choose a valid pack size." })
     }
   })
 
   it("rejects an empty sku", () => {
     for (const sku of ["", "   ", undefined, null]) {
-      expect(validateListingMapping({ ...valid, sku })).toEqual({ ok: false, error: "请选择 SKU" })
+      expect(validateListingMapping({ ...valid, sku })).toEqual({ ok: false, error: "Choose a SKU." })
     }
   })
 
   it("rejects missing or invalid Shopee ids", () => {
     for (const item_id of [0, -1, 1.5, Number.NaN, "12", undefined]) {
-      expect(validateListingMapping({ ...valid, item_id })).toEqual({ ok: false, error: "Shopee 商品编号无效" })
+      expect(validateListingMapping({ ...valid, item_id })).toEqual({ ok: false, error: "This Shopee item ID is not valid." })
     }
     for (const model_id of [-1, 1.5, "0", undefined]) {
-      expect(validateListingMapping({ ...valid, model_id })).toEqual({ ok: false, error: "Shopee 商品编号无效" })
+      expect(validateListingMapping({ ...valid, model_id })).toEqual({ ok: false, error: "This Shopee item ID is not valid." })
     }
   })
 })
@@ -90,13 +90,15 @@ describe("formatSyncAge", () => {
   const now = new Date("2026-11-04T10:00:00Z")
 
   it("says never synced when there is no cursor", () => {
-    expect(formatSyncAge(null, now)).toBe("从未同步")
+    expect(formatSyncAge(null, now)).toBe("Never synced")
   })
 
   it("counts minutes, then hours, then days", () => {
-    expect(formatSyncAge("2026-11-04T09:59:40Z", now)).toBe("刚刚")
-    expect(formatSyncAge("2026-11-04T09:45:00Z", now)).toBe("15 分钟前")
-    expect(formatSyncAge("2026-11-04T07:00:00Z", now)).toBe("3 小时前")
-    expect(formatSyncAge("2026-11-01T10:00:00Z", now)).toBe("3 天前")
+    expect(formatSyncAge("2026-11-04T09:59:40Z", now)).toBe("Just now")
+    expect(formatSyncAge("2026-11-04T09:45:00Z", now)).toBe("15 minutes ago")
+    expect(formatSyncAge("2026-11-04T07:00:00Z", now)).toBe("3 hours ago")
+    expect(formatSyncAge("2026-11-01T10:00:00Z", now)).toBe("3 days ago")
+    expect(formatSyncAge("2026-11-04T09:59:00Z", now)).toBe("1 minute ago")
+    expect(formatSyncAge("2026-11-04T09:00:00Z", now)).toBe("1 hour ago")
   })
 })
