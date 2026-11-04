@@ -486,6 +486,41 @@ describe("pollShopeeOrders", () => {
     expect(shopee.listOrderSns.mock.calls[0][0]).toEqual({ shopId: 555, accessToken: "access_new" })
   })
 
+  it("retries saving refreshed tokens: first save fails, second succeeds, poll is ok", async () => {
+    const { state, store } = makeStore(connection({ accessExpiresAt: new Date(NOW.getTime() + 10 * 60_000) }))
+    store.saveTokens.mockRejectedValueOnce(new Error("Shopee store saveTokens failed: timeout"))
+    const shopee = makeShopee()
+    const sleep = vi.fn(async () => {})
+
+    const result = await pollShopeeOrders({ ...deps(store, shopee), sleep }, { allowRefresh: true })
+
+    expect(result.status).toBe("ok")
+    expect(shopee.refreshTokens).toHaveBeenCalledTimes(1)
+    expect(store.saveTokens).toHaveBeenCalledTimes(2)
+    expect(sleep.mock.calls).toEqual([[200]])
+    expect(store.recordFailure).not.toHaveBeenCalled()
+    expect(state.connection?.refreshToken).toBe("refresh_new")
+    expect(shopee.listOrderSns.mock.calls[0][0]).toEqual({ shopId: 555, accessToken: "access_new" })
+  })
+
+  it("gives up saving refreshed tokens after 3 attempts and reports failed", async () => {
+    const { store } = makeStore(connection({ accessExpiresAt: new Date(NOW.getTime() + 10 * 60_000) }))
+    store.saveTokens.mockRejectedValue(new Error("Shopee store saveTokens failed: timeout"))
+    const shopee = makeShopee()
+    const sleep = vi.fn(async () => {})
+
+    const result = await pollShopeeOrders({ ...deps(store, shopee), sleep }, { allowRefresh: true })
+
+    expect(result).toMatchObject({ status: "failed", consecutiveFailures: 1 })
+    expect(result.error).toContain("Shopee store saveTokens failed: timeout")
+    expect(result.error).not.toContain("access_new")
+    expect(result.error).not.toContain("refresh_new")
+    expect(store.saveTokens).toHaveBeenCalledTimes(3)
+    expect(sleep.mock.calls).toEqual([[200], [500]])
+    expect(shopee.refreshTokens).toHaveBeenCalledTimes(1)
+    expect(shopee.listOrderSns).not.toHaveBeenCalled()
+  })
+
   it("refresh failure reports needsReconnect", async () => {
     const { state, store } = makeStore(
       connection({ accessExpiresAt: new Date(NOW.getTime() + 10 * 60_000), consecutiveFailures: 0 })

@@ -1,6 +1,12 @@
 import { triggerNotificationSender } from "@/lib/notifications/trigger-sender"
 import { buildShopeeOrderPayload, type ListingMap } from "./build-order"
-import { ShopeeApiError, type ShopeeAuth, type ShopeeOrderDetail, type createShopeeClient } from "./client"
+import {
+  ShopeeApiError,
+  type ShopeeAuth,
+  type ShopeeOrderDetail,
+  type ShopeeTokens,
+  type createShopeeClient,
+} from "./client"
 import { mapShopeeStatus } from "./status"
 import type { ApplyResult, ShopeeConnection, ShopeeStore } from "./store"
 
@@ -8,11 +14,15 @@ import type { ApplyResult, ShopeeConnection, ShopeeStore } from "./store"
 const TOKEN_REFRESH_THRESHOLD_MS = 60 * 60 * 1000
 /** Each poll re-reads this much before the last cursor to catch boundary orders. */
 const POLL_OVERLAP_MS = 60 * 60 * 1000
+/** Waits before the 2nd and 3rd attempt to save freshly refreshed tokens. */
+const SAVE_TOKENS_BACKOFF_MS = [200, 500]
 
 export type SyncDeps = {
   shopee: ReturnType<typeof createShopeeClient>
   store: ShopeeStore
   now: () => Date
+  /** Waits between token-save retries (default: a real timer). */
+  sleep?: (ms: number) => Promise<void>
 }
 
 export type SyncSummary = {
@@ -60,6 +70,26 @@ function isShopeeRejection(error: unknown): boolean {
 /** Error text for logs, the queue and last_sync_error. Client errors never carry keys or tokens. */
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Shopee has already rotated the refresh token by now, so losing the new pair
+ * means reconnecting by hand: retry a brief database hiccup before giving up.
+ */
+async function saveRefreshedTokens(shopId: number, tokens: ShopeeTokens, deps: SyncDeps): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await deps.store.saveTokens(shopId, tokens)
+      return
+    } catch (error) {
+      if (attempt >= SAVE_TOKENS_BACKOFF_MS.length) throw error
+      await (deps.sleep ?? wait)(SAVE_TOKENS_BACKOFF_MS[attempt])
+    }
+  }
 }
 
 type OrderOutcome = { kind: "applied"; result: ApplyResult } | { kind: "queued" } | { kind: "skipped" }
@@ -185,7 +215,7 @@ export async function pollShopeeOrders(deps: SyncDeps, opts: { allowRefresh: boo
     try {
       if (!conn.refreshToken) throw new ShopeeApiError("missing_refresh_token", "Shopee connection has no refresh token")
       const tokens = await shopee.refreshTokens(conn.refreshToken, conn.shopId)
-      await store.saveTokens(conn.shopId, tokens)
+      await saveRefreshedTokens(conn.shopId, tokens, deps)
       conn = { ...conn, ...tokens }
     } catch (error) {
       const message = errorMessage(error)
