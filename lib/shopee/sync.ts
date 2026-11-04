@@ -48,6 +48,15 @@ function authOf(conn: ReadyConnection): ShopeeAuth {
   return { shopId: conn.shopId, accessToken: conn.accessToken }
 }
 
+/**
+ * True only when Shopee itself rejected the request (an API error code), so the
+ * grant is gone. Network and HTTP/gateway failures (`http_*`, which the client
+ * also uses for non-JSON bodies) are temporary and retry on the next poll.
+ */
+function isShopeeRejection(error: unknown): boolean {
+  return error instanceof ShopeeApiError && !error.code.startsWith("http_")
+}
+
 /** Error text for logs, the queue and last_sync_error. Client errors never carry keys or tokens. */
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -172,8 +181,7 @@ export async function pollShopeeOrders(deps: SyncDeps, opts: { allowRefresh: boo
     } catch (error) {
       const message = errorMessage(error)
       const consecutiveFailures = await store.recordFailure(message)
-      // Only a Shopee rejection means the grant is gone; network errors retry next poll.
-      const status = error instanceof ShopeeApiError ? "needs_reconnect" : "failed"
+      const status = isShopeeRejection(error) ? "needs_reconnect" : "failed"
       return { status, consecutiveFailures, error: message }
     }
   }

@@ -484,6 +484,24 @@ describe("pollShopeeOrders", () => {
     expect(state.connection?.refreshToken).toBe("refresh_live_secret")
   })
 
+  it("shopee 5xx during refresh is failed not needs_reconnect", async () => {
+    for (const code of ["http_502", "http_503"]) {
+      const { state, store } = makeStore(
+        connection({ accessExpiresAt: new Date(NOW.getTime() + 10 * 60_000), consecutiveFailures: 0 })
+      )
+      const shopee = makeShopee()
+      const message = `Shopee API /api/v2/auth/access_token/get: HTTP ${code.slice(5)} with a non-JSON body`
+      shopee.refreshTokens.mockRejectedValue(new ShopeeApiError(code, message))
+
+      const result = await pollShopeeOrders(deps(store, shopee), { allowRefresh: true })
+
+      expect(result).toEqual({ status: "failed", consecutiveFailures: 1, error: message })
+      expect(store.recordFailure).toHaveBeenCalledWith(message)
+      expect(shopee.listOrderSns).not.toHaveBeenCalled()
+      expect(state.connection?.refreshToken).toBe("refresh_live_secret")
+    }
+  })
+
   it("network error during refresh is failed not needs_reconnect", async () => {
     const { state, store } = makeStore(
       connection({ accessExpiresAt: new Date(NOW.getTime() + 10 * 60_000), consecutiveFailures: 2 })
