@@ -83,6 +83,12 @@ describe("createShopeeStore queue", () => {
 })
 
 describe("createShopeeStore alert helpers", () => {
+  it("markAlerted(null) clears last_alert_at", async () => {
+    const { supabase, updates } = fakeSupabase()
+    await createShopeeStore(supabase).markAlerted(null)
+    expect(updates[0].values).toEqual({ last_alert_at: null })
+  })
+
   it("countRecentSyncedVia counts shopee_api orders since the cutoff by synced_via", async () => {
     const calls: unknown[][] = []
     const rows = [{ synced_via: "push" }, { synced_via: "poll" }, { synced_via: "poll" }, { synced_via: null }]

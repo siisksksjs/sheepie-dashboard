@@ -43,6 +43,8 @@ export function pickShopeeAlert(input: {
 export type AlertDeps = {
   supabase: SupabaseClient
   store: Pick<ShopeeStore, "markAlerted">
+  /** The connection's `last_alert_at` before this send; restored if the send fails. */
+  previousAlertAt?: Date | null
   fetchImpl?: typeof fetch
   now?: () => Date
 }
@@ -51,7 +53,12 @@ function uniqueEmails(users: Array<{ email?: string | null }>): string[] {
   return Array.from(new Set(users.map((user) => user.email).filter((email): email is string => Boolean(email))))
 }
 
-/** Emails every dashboard user about `alert` through Resend, then records `last_alert_at`. */
+/**
+ * Emails every dashboard user about `alert` through Resend. The 24-hour window is
+ * claimed in `last_alert_at` BEFORE sending, so a failed write after an accepted
+ * email can never make the same alert repeat every cron run. If the send fails the
+ * claim is released (best effort); worst case is one missed alert, never spam.
+ */
 export async function sendShopeeAlert(alert: ShopeeAlert, deps: AlertDeps): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY
   const from = process.env.EMAIL_FROM
@@ -66,17 +73,27 @@ export async function sendShopeeAlert(alert: ShopeeAlert, deps: AlertDeps): Prom
   const { subject, sentence } = MESSAGES[alert]
   const html = `<p>${sentence}</p><p><a href="${SETTINGS_URL}">${SETTINGS_URL}</a></p>`
 
-  const response = await (deps.fetchImpl ?? fetch)("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ from, to: recipients, subject, html }),
-  })
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 200)
-    throw new Error(`Resend failed with ${response.status}${detail ? `: ${detail}` : ""}`)
-  }
-
+  // If the claim fails nothing is sent.
   await deps.store.markAlerted((deps.now ?? (() => new Date()))())
+  try {
+    const response = await (deps.fetchImpl ?? fetch)("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ from, to: recipients, subject, html }),
+    })
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 200)
+      throw new Error(`Resend failed with ${response.status}${detail ? `: ${detail}` : ""}`)
+    }
+  } catch (sendError) {
+    try {
+      await deps.store.markAlerted(deps.previousAlertAt ?? null)
+    } catch (releaseError) {
+      const message = releaseError instanceof Error ? releaseError.message : "Unknown error"
+      console.error(`Shopee alert claim could not be released: ${message}`)
+    }
+    throw sendError
+  }
 }
 
 /**
@@ -104,6 +121,6 @@ export async function checkShopeeAlerts(
   })
   if (!alert) return null
 
-  await sendShopeeAlert(alert, deps)
+  await sendShopeeAlert(alert, { ...deps, previousAlertAt: conn.lastAlertAt })
   return alert
 }

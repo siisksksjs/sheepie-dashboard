@@ -50,8 +50,8 @@ export interface ShopeeStore {
   applyOrder(payload: ShopeeOrderPayload, via: "push" | "poll"): Promise<ApplyResult>
   /** Shopee API orders created since `since`, counted by how they arrived. */
   countRecentSyncedVia(since: Date): Promise<{ push: number; poll: number }>
-  /** Records that an alert email went out, so the same alert is not repeated within 24 hours. */
-  markAlerted(at: Date): Promise<void>
+  /** Sets `last_alert_at` (null clears it), so the same alert is not repeated within 24 hours. */
+  markAlerted(at: Date | null): Promise<void>
 }
 
 const CHANNEL = "shopee"
@@ -261,7 +261,7 @@ export function createShopeeStore(supabase: SupabaseClient): ShopeeStore {
     async markAlerted(at) {
       const { error } = await supabase
         .from("marketplace_connections")
-        .update({ last_alert_at: at.toISOString() })
+        .update({ last_alert_at: at ? at.toISOString() : null })
         .eq("channel", CHANNEL)
       if (error) fail("markAlerted", error)
     },

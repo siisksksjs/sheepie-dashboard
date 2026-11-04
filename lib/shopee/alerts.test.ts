@@ -154,7 +154,7 @@ describe("sendShopeeAlert", () => {
     expect(store.markAlerted).not.toHaveBeenCalled()
   })
 
-  it("throws on a Resend failure without leaking the key and does not mark", async () => {
+  it("throws on a Resend failure without leaking the key and releases the claim", async () => {
     vi.stubEnv("RESEND_API_KEY", "re_secret_key")
     vi.stubEnv("EMAIL_FROM", "alerts@example.com")
     const { supabase } = fakeSupabase({ data: { users: [{ email: "a@x.com" }] }, error: null })
@@ -165,7 +165,49 @@ describe("sendShopeeAlert", () => {
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toContain("429")
     expect((error as Error).message).not.toContain("re_secret_key")
-    expect(store.markAlerted).not.toHaveBeenCalled()
+    expect(store.markAlerted).toHaveBeenLastCalledWith(null)
+  })
+
+  it("does not send when claiming the alert window fails", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test")
+    vi.stubEnv("EMAIL_FROM", "alerts@example.com")
+    const { supabase } = fakeSupabase({ data: { users: [{ email: "a@x.com" }] }, error: null })
+    const store = fakeStore({ markAlerted: vi.fn(async () => Promise.reject(new Error("db down"))) })
+    const fetchImpl = okFetch()
+
+    await expect(sendShopeeAlert("push_silent", { supabase, store, fetchImpl })).rejects.toThrow("db down")
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("send failure releases the claim back to the previous last_alert_at so the next run retries", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test")
+    vi.stubEnv("EMAIL_FROM", "alerts@example.com")
+    const { supabase } = fakeSupabase({ data: { users: [{ email: "a@x.com" }] }, error: null })
+    const store = fakeStore()
+    const previousAlertAt = new Date(NOW.getTime() - 48 * HOUR)
+    const fetchImpl = vi.fn(async () => new Response("boom", { status: 500 }))
+
+    await expect(
+      sendShopeeAlert("push_silent", { supabase, store, fetchImpl, previousAlertAt, now: () => NOW })
+    ).rejects.toThrow("Resend failed with 500")
+    expect(vi.mocked(store.markAlerted).mock.calls).toEqual([[NOW], [previousAlertAt]])
+  })
+
+  it("send failure still surfaces the send error when the release also fails", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test")
+    vi.stubEnv("EMAIL_FROM", "alerts@example.com")
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    const { supabase } = fakeSupabase({ data: { users: [{ email: "a@x.com" }] }, error: null })
+    const markAlerted = vi.fn(async (at: Date | null) => {
+      if (at === null) throw new Error("release failed")
+    })
+    const store = fakeStore({ markAlerted })
+    const fetchImpl = vi.fn(async () => new Response("boom", { status: 500 }))
+
+    await expect(sendShopeeAlert("push_silent", { supabase, store, fetchImpl, now: () => NOW })).rejects.toThrow(
+      "Resend failed with 500"
+    )
+    vi.restoreAllMocks()
   })
 
   it("throws when listing users fails", async () => {
@@ -248,6 +290,36 @@ describe("checkShopeeAlerts", () => {
     const recent = setup(connection({ lastAlertAt: new Date(NOW.getTime() - HOUR) }))
     expect(await checkShopeeAlerts({ status: "needs_reconnect", consecutiveFailures: 0 }, recent.deps)).toBeNull()
     expect(recent.fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("a sent alert is not resent on the next run, whatever else fails afterwards", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test")
+    vi.stubEnv("EMAIL_FROM", "alerts@example.com")
+    const { supabase } = fakeSupabase({ data: { users: [{ email: "a@x.com" }] }, error: null })
+    let lastAlertAt: Date | null = null
+    const store = fakeStore({
+      getConnection: vi.fn(async () => connection({ lastAlertAt })),
+      markAlerted: vi.fn(async (at: Date | null) => {
+        lastAlertAt = at
+      }),
+    })
+    const fetchImpl = okFetch()
+    let clock = NOW
+    const deps = { supabase, store, fetchImpl, now: () => clock }
+    const failed = { status: "needs_reconnect", consecutiveFailures: 0 } as const
+
+    expect(await checkShopeeAlerts(failed, deps)).toBe("needs_reconnect")
+    clock = new Date(NOW.getTime() + 15 * 60 * 1000)
+    expect(await checkShopeeAlerts(failed, deps)).toBeNull()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it("passes the connection's previous last_alert_at so a failed send restores it", async () => {
+    const previous = new Date(NOW.getTime() - 30 * HOUR)
+    const { deps, store } = setup(connection({ lastAlertAt: previous }))
+    deps.fetchImpl = vi.fn(async () => new Response("no", { status: 503 }))
+    await expect(checkShopeeAlerts({ status: "needs_reconnect", consecutiveFailures: 0 }, deps)).rejects.toThrow()
+    expect(store.markAlerted).toHaveBeenLastCalledWith(previous)
   })
 
   it("returns null when the connection row is gone", async () => {
