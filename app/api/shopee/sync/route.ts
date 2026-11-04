@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 
+import { createServiceClient } from "@/lib/supabase/service"
+import { checkShopeeAlerts } from "@/lib/shopee/alerts"
 import { createSyncDeps } from "@/lib/shopee/deps"
 import { secretsMatch } from "@/lib/shopee/secret-compare"
 import { pollShopeeOrders } from "@/lib/shopee/sync"
@@ -21,7 +23,15 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await pollShopeeOrders(createSyncDeps(), { allowRefresh: true })
+    const deps = createSyncDeps()
+    const result = await pollShopeeOrders(deps, { allowRefresh: true })
+    try {
+      await checkShopeeAlerts(result, { supabase: createServiceClient(), store: deps.store, now: deps.now })
+    } catch (alertError) {
+      // An alert problem must never fail the sync. Messages never carry keys or tokens.
+      const message = alertError instanceof Error ? alertError.message : "Unknown error"
+      console.error(`Shopee alert failed: ${message}`)
+    }
     return NextResponse.json(result, { headers: NO_STORE })
   } catch (error) {
     // Config or store failures outside the poll's own error handling. Messages never carry keys or tokens.

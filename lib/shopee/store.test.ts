@@ -81,3 +81,38 @@ describe("createShopeeStore queue", () => {
     }
   })
 })
+
+describe("createShopeeStore alert helpers", () => {
+  it("countRecentSyncedVia counts shopee_api orders since the cutoff by synced_via", async () => {
+    const calls: unknown[][] = []
+    const rows = [{ synced_via: "push" }, { synced_via: "poll" }, { synced_via: "poll" }, { synced_via: null }]
+    const builder = {
+      select: (...args: unknown[]) => (calls.push(["select", ...args]), builder),
+      eq: (...args: unknown[]) => (calls.push(["eq", ...args]), builder),
+      gte: (...args: unknown[]) => (calls.push(["gte", ...args]), builder),
+      then: (resolve: (value: { data: unknown[]; error: null }) => unknown) => resolve({ data: rows, error: null }),
+    }
+    const supabase = {
+      from: (table: string) => (calls.push(["from", table]), builder),
+    } as unknown as SupabaseClient
+    const since = new Date("2026-11-03T08:00:00.000Z")
+
+    expect(await createShopeeStore(supabase).countRecentSyncedVia(since)).toEqual({ push: 1, poll: 2 })
+    expect(calls).toContainEqual(["from", "orders"])
+    expect(calls).toContainEqual(["eq", "source", "shopee_api"])
+    expect(calls).toContainEqual(["gte", "created_at", since.toISOString()])
+  })
+
+  it("markAlerted sets last_alert_at on the shopee connection", async () => {
+    const { supabase, updates } = fakeSupabase()
+    const at = new Date("2026-11-04T08:00:00.000Z")
+    await createShopeeStore(supabase).markAlerted(at)
+    expect(updates).toEqual([
+      {
+        table: "marketplace_connections",
+        values: { last_alert_at: at.toISOString() },
+        filters: [["eq", "channel", "shopee"]],
+      },
+    ])
+  })
+})

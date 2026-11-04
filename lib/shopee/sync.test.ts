@@ -112,6 +112,8 @@ function makeStore(conn: ShopeeConnection | null) {
       if (result instanceof Error) throw result
       return result
     }),
+    countRecentSyncedVia: vi.fn(async () => ({ push: 0, poll: 0 })),
+    markAlerted: vi.fn(async () => {}),
   } satisfies ShopeeStore
 
   return { state, store }

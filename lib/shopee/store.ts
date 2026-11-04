@@ -48,6 +48,10 @@ export interface ShopeeStore {
   openRetryableSns(): Promise<string[]>
   findOrder(sn: string): Promise<{ id: string; status: OrderStatus } | null>
   applyOrder(payload: ShopeeOrderPayload, via: "push" | "poll"): Promise<ApplyResult>
+  /** Shopee API orders created since `since`, counted by how they arrived. */
+  countRecentSyncedVia(since: Date): Promise<{ push: number; poll: number }>
+  /** Records that an alert email went out, so the same alert is not repeated within 24 hours. */
+  markAlerted(at: Date): Promise<void>
 }
 
 const CHANNEL = "shopee"
@@ -237,6 +241,29 @@ export function createShopeeStore(supabase: SupabaseClient): ShopeeStore {
         orderId: result.order_id,
         ledgerEntries: Number(result.ledger_entries ?? 0),
       }
+    },
+
+    async countRecentSyncedVia(since) {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("synced_via")
+        .eq("source", "shopee_api")
+        .gte("created_at", since.toISOString())
+      if (error) fail("countRecentSyncedVia", error)
+      const counts = { push: 0, poll: 0 }
+      for (const row of (data ?? []) as { synced_via: "push" | "poll" | null }[]) {
+        if (row.synced_via === "push") counts.push += 1
+        else if (row.synced_via === "poll") counts.poll += 1
+      }
+      return counts
+    },
+
+    async markAlerted(at) {
+      const { error } = await supabase
+        .from("marketplace_connections")
+        .update({ last_alert_at: at.toISOString() })
+        .eq("channel", CHANNEL)
+      if (error) fail("markAlerted", error)
     },
   }
 }
