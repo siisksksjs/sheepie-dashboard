@@ -31,6 +31,9 @@ export type ShopeeOrderDetail = {
   }[]
 }
 
+/** `order_selling_price` and `escrow_amount` from get_escrow_detail's `order_income`. */
+export type ShopeeEscrow = { sellingPrice: number; escrowAmount: number }
+
 export class ShopeeApiError extends Error {
   code: string
 
@@ -210,6 +213,28 @@ export function createShopeeClient(opts: {
         details.push(...(page.order_list ?? []))
       }
       return details
+    },
+
+    /**
+     * Shopee's income figures for one order, in IDR. An estimate until the
+     * order is COMPLETED, final after. A response without both numbers is a
+     * temporary (`http_malformed`) failure.
+     */
+    async getEscrowDetail(tok: ShopeeAuth, orderSn: string): Promise<ShopeeEscrow> {
+      const path = "/api/v2/payment/get_escrow_detail"
+      const json = await call("GET", path, tok, { params: { order_sn: orderSn } })
+      const income = (json.response as { order_income?: Record<string, unknown> | null } | undefined)?.order_income
+      const sellingPrice = income?.order_selling_price
+      const escrowAmount = income?.escrow_amount
+      if (
+        typeof sellingPrice !== "number" ||
+        !Number.isFinite(sellingPrice) ||
+        typeof escrowAmount !== "number" ||
+        !Number.isFinite(escrowAmount)
+      ) {
+        throw new ShopeeApiError("http_malformed", `Shopee API ${path}: malformed escrow response`)
+      }
+      return { sellingPrice, escrowAmount }
     },
   }
 }

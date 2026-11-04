@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { ShopeeApiError, createShopeeClient } from "./client"
+import { signApiRequest } from "./signing"
 
 const PARTNER_KEY = "super_secret_partner_key"
 const NOW_MS = 1730700000_000
@@ -179,6 +180,67 @@ describe("getOrderDetails", () => {
   })
 })
 
+describe("getEscrowDetail", () => {
+  it("makes a shop-level signed GET for one order and parses the income numbers", async () => {
+    const { calls, fetchImpl } = fakeFetch(() => ({
+      error: "",
+      response: { order_sn: "SN1", order_income: { order_selling_price: 838000, escrow_amount: 675240, buyer_total_amount: 0 } },
+    }))
+
+    const result = await makeClient(fetchImpl).getEscrowDetail(auth, "SN1")
+
+    expect(result).toEqual({ sellingPrice: 838000, escrowAmount: 675240 })
+    expect(calls).toHaveLength(1)
+    const { url, init } = calls[0]
+    expect(url.pathname).toBe("/api/v2/payment/get_escrow_detail")
+    expect(init?.method).toBe("GET")
+    expect(init?.body).toBeUndefined()
+    expect(url.searchParams.get("order_sn")).toBe("SN1")
+    expect(url.searchParams.get("partner_id")).toBe("2042739")
+    expect(url.searchParams.get("timestamp")).toBe("1730700000")
+    expect(url.searchParams.get("access_token")).toBe("tok_abc")
+    expect(url.searchParams.get("shop_id")).toBe("123456789")
+    expect(url.searchParams.get("sign")).toBe(
+      signApiRequest({
+        partnerId: 2042739,
+        partnerKey: PARTNER_KEY,
+        path: "/api/v2/payment/get_escrow_detail",
+        timestamp: 1730700000,
+        accessToken: "tok_abc",
+        shopId: 123456789,
+      })
+    )
+  })
+
+  it("rejects a response without finite income numbers as http_malformed", async () => {
+    const malformed = [
+      {},
+      { response: {} },
+      { response: { order_income: null } },
+      { response: { order_income: { escrow_amount: 70470 } } },
+      { response: { order_income: { order_selling_price: 88000 } } },
+      { response: { order_income: { order_selling_price: "88000", escrow_amount: 70470 } } },
+      { response: { order_income: { order_selling_price: 88000, escrow_amount: null } } },
+    ]
+    for (const body of malformed) {
+      const { fetchImpl } = fakeFetch(() => body)
+      const err = await makeClient(fetchImpl)
+        .getEscrowDetail(auth, "SN1")
+        .catch((e: unknown) => e)
+      expect(err, JSON.stringify(body)).toBeInstanceOf(ShopeeApiError)
+      expect((err as ShopeeApiError).code).toBe("http_malformed")
+      expect((err as ShopeeApiError).message).not.toContain(auth.accessToken)
+    }
+  })
+
+  it("passes Shopee API errors through", async () => {
+    const { fetchImpl } = fakeFetch(() => ({ error: "error_not_found", message: "order not found" }))
+    await expect(makeClient(fetchImpl).getEscrowDetail(auth, "SN1")).rejects.toMatchObject({
+      code: "error_not_found",
+    })
+  })
+})
+
 describe("errors", () => {
   it("api error throws ShopeeApiError with code (even on HTTP 200)", async () => {
     const { fetchImpl } = fakeFetch(() => ({ error: "invalid_acceess_token", message: "Invalid access_token" }))
@@ -206,6 +268,9 @@ describe("secrets", () => {
     const { calls, fetchImpl } = fakeFetch((call) => {
       if (call.url.pathname.includes("token")) return { access_token: "a", refresh_token: "r", expire_in: 100 }
       if (call.url.pathname.includes("get_order_list")) return { response: { order_list: [], more: false } }
+      if (call.url.pathname.includes("get_escrow_detail")) {
+        return { response: { order_income: { order_selling_price: 1, escrow_amount: 1 } } }
+      }
       return { response: { order_list: [] } }
     })
     const client = makeClient(fetchImpl)
@@ -214,6 +279,7 @@ describe("secrets", () => {
     await client.refreshTokens("r", 1)
     await client.listOrderSns(auth, { from: 0, to: 100 })
     await client.getOrderDetails(auth, ["A"])
+    await client.getEscrowDetail(auth, "A")
     for (const url of [authUrl, ...calls.map((c) => c.url.toString())]) {
       expect(url).not.toContain(PARTNER_KEY)
     }
