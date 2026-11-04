@@ -4,10 +4,10 @@ import type { OrderStatus } from "@/lib/types/database.types"
 import type { ListingMap, ShopeeOrderPayload } from "./build-order"
 import {
   ShopeeApiError,
+  createShopeeClient,
   type ShopeeAuth,
   type ShopeeOrderDetail,
   type ShopeeTokens,
-  type createShopeeClient,
 } from "./client"
 import type { ApplyResult, ShopeeConnection, ShopeeStore } from "./store"
 import { pollShopeeOrders, syncShopeeOrders, type SyncDeps } from "./sync"
@@ -525,6 +525,32 @@ describe("pollShopeeOrders", () => {
       expect(shopee.listOrderSns).not.toHaveBeenCalled()
       expect(state.connection?.refreshToken).toBe("refresh_live_secret")
     }
+  })
+
+  it("malformed refresh response keeps stored tokens and poll status is 'failed'", async () => {
+    const { state, store } = makeStore(
+      connection({ accessExpiresAt: new Date(NOW.getTime() + 10 * 60_000), consecutiveFailures: 0 })
+    )
+    // A real client: Shopee answers 200 with no error but an empty access token.
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify({ error: "", access_token: "", refresh_token: "refresh_new", expire_in: 14400 }))
+    )
+    const shopee = createShopeeClient({
+      partnerId: 2042739,
+      partnerKey: "partner_key_secret",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      now: () => NOW.getTime(),
+    })
+
+    const result = await pollShopeeOrders({ store, shopee, now: () => NOW }, { allowRefresh: true })
+
+    expect(result.status).toBe("failed")
+    expect(result.consecutiveFailures).toBe(1)
+    expect(result.error).not.toContain("refresh_new")
+    expect(store.saveTokens).not.toHaveBeenCalled()
+    expect(state.connection?.accessToken).toBe("access_live_secret")
+    expect(state.connection?.refreshToken).toBe("refresh_live_secret")
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
   it("network error during refresh is failed not needs_reconnect", async () => {

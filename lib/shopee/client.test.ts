@@ -64,6 +64,38 @@ describe("tokens", () => {
     expect(tokens.accessToken).toBe("a2")
     expect(tokens.refreshToken).toBe("r2")
   })
+
+  it("defaults expiry to 4 hours when expire_in is absent", async () => {
+    const { fetchImpl } = fakeFetch(() => ({ access_token: "a2", refresh_token: "r2" }))
+    const tokens = await makeClient(fetchImpl).refreshTokens("r1", 123456789)
+    expect(tokens.accessExpiresAt.getTime()).toBe(NOW_MS + (14400 - 300) * 1000)
+  })
+
+  it("rejects a token response without usable tokens or expiry as http_malformed", async () => {
+    const malformed = [
+      {},
+      { access_token: "", refresh_token: "r2", expire_in: 14400 },
+      { access_token: "a2", refresh_token: "", expire_in: 14400 },
+      { access_token: "a2", expire_in: 14400 },
+      { access_token: 123, refresh_token: "r2", expire_in: 14400 },
+      { access_token: "a2", refresh_token: null, expire_in: 14400 },
+      { access_token: "a2", refresh_token: "r2", expire_in: "soon" },
+      { access_token: "a2", refresh_token: "r2", expire_in: null },
+    ]
+    for (const body of malformed) {
+      const { fetchImpl } = fakeFetch(() => body)
+      for (const call of [
+        (c: ReturnType<typeof makeClient>) => c.refreshTokens("r1", 1),
+        (c: ReturnType<typeof makeClient>) => c.getTokens("code", 1),
+      ]) {
+        const err = await call(makeClient(fetchImpl)).catch((e: unknown) => e)
+        expect(err, JSON.stringify(body)).toBeInstanceOf(ShopeeApiError)
+        expect((err as ShopeeApiError).code).toBe("http_malformed")
+        expect((err as ShopeeApiError).message).not.toContain("a2")
+        expect((err as ShopeeApiError).message).not.toContain("r2")
+      }
+    }
+  })
 })
 
 describe("listOrderSns", () => {

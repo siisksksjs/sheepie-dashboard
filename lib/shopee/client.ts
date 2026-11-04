@@ -113,12 +113,29 @@ export function createShopeeClient(opts: {
     return json
   }
 
-  function toTokens(json: ShopeeResponse): ShopeeTokens {
+  /**
+   * Shopee can answer 200 without an error but also without usable tokens.
+   * Saving those would silently break the connection, so they count as a
+   * temporary (`http_*`) failure and the stored tokens stay.
+   */
+  function toTokens(path: string, json: ShopeeResponse): ShopeeTokens {
+    const { access_token: accessToken, refresh_token: refreshToken, expire_in: rawExpireIn } = json
+    const expireIn = rawExpireIn === undefined ? 14400 : rawExpireIn
+    if (
+      typeof accessToken !== "string" ||
+      accessToken === "" ||
+      typeof refreshToken !== "string" ||
+      refreshToken === "" ||
+      typeof expireIn !== "number" ||
+      !Number.isFinite(expireIn)
+    ) {
+      // Never echo the body: it may hold a token.
+      throw new ShopeeApiError("http_malformed", `Shopee API ${path}: malformed token response`)
+    }
     const nowMs = now()
-    const expireIn = Number(json.expire_in ?? 14400)
     return {
-      accessToken: String(json.access_token),
-      refreshToken: String(json.refresh_token),
+      accessToken,
+      refreshToken,
       accessExpiresAt: new Date(nowMs + (expireIn - ACCESS_EXPIRY_MARGIN_SECONDS) * 1000),
       refreshExpiresAt: new Date(nowMs + REFRESH_TOKEN_LIFETIME_MS),
     }
@@ -130,17 +147,19 @@ export function createShopeeClient(opts: {
     },
 
     async getTokens(code: string, shopId: number): Promise<ShopeeTokens> {
-      const json = await call("POST", "/api/v2/auth/token/get", null, {
+      const path = "/api/v2/auth/token/get"
+      const json = await call("POST", path, null, {
         body: { code, shop_id: shopId, partner_id: partnerId },
       })
-      return toTokens(json)
+      return toTokens(path, json)
     },
 
     async refreshTokens(refreshToken: string, shopId: number): Promise<ShopeeTokens> {
-      const json = await call("POST", "/api/v2/auth/access_token/get", null, {
+      const path = "/api/v2/auth/access_token/get"
+      const json = await call("POST", path, null, {
         body: { refresh_token: refreshToken, shop_id: shopId, partner_id: partnerId },
       })
-      return toTokens(json)
+      return toTokens(path, json)
     },
 
     async listOrderSns(tok: ShopeeAuth, range: { from: number; to: number }): Promise<string[]> {
