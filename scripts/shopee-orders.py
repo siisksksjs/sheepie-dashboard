@@ -1,19 +1,21 @@
 """Pull Sheepie's Shopee orders through the Shopee Open Platform API (v2).
 
-  python3 scripts/shopee-orders.py auth                          # one-time: open the shop authorization page
-  python3 scripts/shopee-orders.py token '<redirected URL>'      # then: exchange the code Shopee redirected with
   python3 scripts/shopee-orders.py orders 2026-10-25 2026-11-04 out.csv
 
-Reads SHOPEE_PARTNER_ID / SHOPEE_PARTNER_KEY from .env.local. Tokens are kept in .shopee/token.json
-(gitignored, chmod 600) and refreshed automatically. Never prints keys or tokens.
+The access token comes from the deployed dashboard (GET /api/shopee/token). Only the dashboard's cron
+refreshes tokens, so this script never authorizes or refreshes anything itself.
+Authorize Shopee in the dashboard: More -> Shopee sync.
+
+Reads from .env.local: SHOPEE_PARTNER_KEY (signing), SHOPEE_SYNC_SECRET (dashboard token endpoint),
+SHOPEE_PARTNER_ID (optional) and DASHBOARD_URL (optional, default https://dashboard.sheepiesleep.com;
+set it to a preview deploy to test). Never prints keys or tokens.
 """
-import hashlib, hmac, json, os, secrets, subprocess, sys, time, urllib.parse, urllib.request, csv
+import hashlib, hmac, json, os, sys, time, urllib.error, urllib.parse, urllib.request, csv
 from datetime import datetime, timedelta, timezone
 
 HOST = "https://partner.shopeemobile.com"
-REDIRECT = os.environ.get("SHOPEE_REDIRECT", "https://dashboard.sheepiesleep.com/favicon.ico")  # must match the app's redirect domain
+DEFAULT_DASHBOARD_URL = "https://dashboard.sheepiesleep.com"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TOKEN_FILE = os.path.join(ROOT, ".shopee", "token.json")
 WIB = timezone(timedelta(hours=7))
 
 
@@ -26,10 +28,14 @@ def load_env():
     pid, key = env.get("SHOPEE_PARTNER_ID", "2042739"), env.get("SHOPEE_PARTNER_KEY")
     if not key:
         sys.exit("SHOPEE_PARTNER_KEY is missing from .env.local")
-    return int(pid), key
+    sync_secret = env.get("SHOPEE_SYNC_SECRET")
+    if not sync_secret:
+        sys.exit("SHOPEE_SYNC_SECRET is missing from .env.local (same value as the dashboard's SHOPEE_SYNC_SECRET)")
+    dashboard_url = (os.environ.get("DASHBOARD_URL") or env.get("DASHBOARD_URL") or DEFAULT_DASHBOARD_URL).rstrip("/")
+    return int(pid), key, sync_secret, dashboard_url
 
 
-PARTNER_ID, PARTNER_KEY = load_env()
+PARTNER_ID = PARTNER_KEY = SYNC_SECRET = DASHBOARD_URL = None
 
 
 def sign(path, ts, access_token="", shop_id=""):
@@ -58,43 +64,23 @@ def call(method, path, params=None, body=None, tok=None):
     return r
 
 
-def save_token(r, shop_id):
-    os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
-    tok = {"shop_id": int(shop_id), "access_token": r["access_token"], "refresh_token": r["refresh_token"],
-           "expires_at": int(time.time()) + int(r.get("expire_in", 14400)) - 300}
-    json.dump(tok, open(TOKEN_FILE, "w"))
-    os.chmod(TOKEN_FILE, 0o600)
-    return tok
-
-
-def auth():
-    path = "/api/v2/shop/auth_partner"
-    ts = int(time.time())
-    url = HOST + path + "?" + urllib.parse.urlencode({"partner_id": PARTNER_ID, "timestamp": ts,
-                                                      "sign": sign(path, ts), "redirect": REDIRECT})
-    subprocess.run(["open", url])
-    print("Opened Shopee authorization. After approving, run:\n  python3 scripts/shopee-orders.py token '<the URL Shopee redirected to>'")
-
-
-def exchange(redirected_url):
-    q = urllib.parse.parse_qs(urllib.parse.urlparse(redirected_url).query)
-    if "code" not in q or "shop_id" not in q:
-        sys.exit("That URL has no code/shop_id")
-    shop_id = int(q["shop_id"][0])
-    r = call("POST", "/api/v2/auth/token/get", body={"code": q["code"][0], "shop_id": shop_id, "partner_id": PARTNER_ID})
-    save_token(r, shop_id)
-    print("Authorized shop", shop_id)
-
-
 def token():
-    if not os.path.exists(TOKEN_FILE):
-        sys.exit("Not authorized yet: run `python3 scripts/shopee-orders.py auth` first")
-    tok = json.load(open(TOKEN_FILE))
-    if time.time() >= tok["expires_at"]:
-        r = call("POST", "/api/v2/auth/access_token/get",
-                 body={"refresh_token": tok["refresh_token"], "shop_id": tok["shop_id"], "partner_id": PARTNER_ID})
-        tok = save_token(r, tok["shop_id"])
-    return tok
+    """Current access token from the dashboard. Read-only: the dashboard cron owns refreshing."""
+    req = urllib.request.Request(DASHBOARD_URL + "/api/shopee/token",
+                                 headers={"x-shopee-sync-secret": SYNC_SECRET, "User-Agent": "sheepie-shopee-orders/1.0"})
+    try:
+        r = json.loads(urllib.request.urlopen(req, timeout=30).read())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            sys.exit("Shopee is not connected yet. Authorize Shopee in the dashboard: More -> Shopee sync")
+        if e.code == 401:
+            sys.exit("The dashboard rejected SHOPEE_SYNC_SECRET (401). Check it matches the dashboard's value")
+        sys.exit(f"Dashboard token endpoint failed: HTTP {e.code}")
+    except (urllib.error.URLError, TimeoutError, ValueError) as e:
+        sys.exit(f"Could not reach the dashboard token endpoint at {DASHBOARD_URL}: {type(e).__name__}")
+    if not r.get("access_token") or not r.get("shop_id"):
+        sys.exit("The dashboard returned no access token. Authorize Shopee in the dashboard: More -> Shopee sync")
+    return {"shop_id": int(r["shop_id"]), "access_token": r["access_token"]}
 
 
 def orders(start, end, out):
@@ -131,8 +117,7 @@ def orders(start, end, out):
 
 
 if __name__ == "__main__":
-    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-    if cmd == "auth": auth()
-    elif cmd == "token": exchange(sys.argv[2])
-    elif cmd == "orders": orders(*sys.argv[2:5])
-    else: sys.exit(__doc__)
+    if len(sys.argv) != 5 or sys.argv[1] != "orders":
+        sys.exit(__doc__)
+    PARTNER_ID, PARTNER_KEY, SYNC_SECRET, DASHBOARD_URL = load_env()
+    orders(*sys.argv[2:5])
