@@ -125,6 +125,7 @@ describe("handleShopeePush", () => {
   it("bad signature returns 401 and does not sync", async () => {
     const { deps, store, shopee } = makeDeps(connection(), [detail("SN1", "PROCESSED")])
     const rawBody = orderPush()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
 
     for (const authorization of [null, "", sign(rawBody, "wrong_key"), sign(rawBody + " ")]) {
       const result = await handleShopeePush({ rawBody, authorization }, deps)
@@ -132,6 +133,9 @@ describe("handleShopeePush", () => {
       expect(result.body.ok).toBe(false)
     }
 
+    // One safe line per rejection: no body, no header value.
+    expect(warn.mock.calls).toEqual(Array(4).fill(["Shopee push rejected: invalid signature"]))
+    warn.mockRestore()
     expect(store.getConnection).not.toHaveBeenCalled()
     expect(shopee.getOrderDetails).not.toHaveBeenCalled()
     expect(store.applyOrder).not.toHaveBeenCalled()
@@ -140,10 +144,13 @@ describe("handleShopeePush", () => {
   it("rejects every push when the push key is empty", async () => {
     const { deps, store } = makeDeps(connection(), [detail("SN1", "PROCESSED")])
     const rawBody = orderPush()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
 
     const result = await handleShopeePush({ rawBody, authorization: sign(rawBody, "") }, { ...deps, pushKey: "" })
 
     expect(result.status).toBe(401)
+    expect(warn).toHaveBeenCalledWith("Shopee push rejected: invalid signature")
+    warn.mockRestore()
     expect(store.getConnection).not.toHaveBeenCalled()
   })
 

@@ -55,7 +55,11 @@ export async function handleShopeePush(
       authorization: input.authorization,
       pushKey: deps.pushKey,
     })
-  if (!signed) return { status: 401, body: { ok: false, reason: "invalid_signature" } }
+  if (!signed) {
+    // Never log the body or the header value.
+    console.warn("Shopee push rejected: invalid signature")
+    return { status: 401, body: { ok: false, reason: "invalid_signature" } }
+  }
 
   const push = parseOrderStatusPush(input.rawBody)
   if (!push) return IGNORED
