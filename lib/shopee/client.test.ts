@@ -129,6 +129,18 @@ describe("listOrderSns", () => {
     expect(p[0].get("shop_id")).toBe("123456789")
   })
 
+  it("throws http_malformed_cursor when more is true but next_cursor is empty", async () => {
+    for (const page of [{ more: true, next_cursor: "" }, { more: true }]) {
+      const { calls, fetchImpl } = fakeFetch(() => ({ error: "", response: { order_list: [{ order_sn: "A" }], ...page } }))
+      const err = await makeClient(fetchImpl)
+        .listOrderSns(auth, { from: 0, to: 100 })
+        .catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(ShopeeApiError)
+      expect((err as ShopeeApiError).code).toBe("http_malformed_cursor")
+      expect(calls).toHaveLength(1)
+    }
+  })
+
   it("returns an empty list for an empty range", async () => {
     const { calls, fetchImpl } = fakeFetch(() => ({}))
     expect(await makeClient(fetchImpl).listOrderSns(auth, { from: 100, to: 100 })).toEqual([])

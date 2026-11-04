@@ -183,7 +183,14 @@ export function createShopeeClient(opts: {
             next_cursor?: string
           }
           for (const order of page.order_list ?? []) seen.add(order.order_sn)
-          if (!page.more || !page.next_cursor) break
+          if (!page.more) break
+          if (!page.next_cursor) {
+            // Stopping here would silently drop the rest of the window.
+            throw new ShopeeApiError(
+              "http_malformed_cursor",
+              "Shopee API /api/v2/order/get_order_list: more pages but no next_cursor"
+            )
+          }
           cursor = page.next_cursor
         }
       }
