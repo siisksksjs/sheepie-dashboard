@@ -269,3 +269,135 @@ $$;
 
 REVOKE ALL ON FUNCTION public.update_order_status_with_inventory(uuid, text, text, text, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.update_order_status_with_inventory(uuid, text, text, text, text, text) TO authenticated;
+
+-- The only write path for Shopee orders, used by both push and the poller, so
+-- the same order may arrive twice or at the same moment. Everything happens in
+-- one transaction under the order row lock; an update no newer than the stored
+-- external_updated_at is ignored, which makes retries and overlaps harmless.
+-- SECURITY DEFINER: it calls _apply_order_inventory, which no API role may
+-- execute directly. Only service_role may execute this function.
+CREATE OR REPLACE FUNCTION public.apply_shopee_order(p_order jsonb, p_via text)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  sn text := p_order->>'order_sn';
+  next_status text := p_order->>'status';
+  external_updated timestamptz := (p_order->>'external_updated_at')::timestamptz;
+  order_label text;
+  current_order public.orders%ROWTYPE;
+  new_order_id uuid;
+  was_active boolean;
+  is_active boolean;
+  movement text;
+  result_count integer := 0;
+  changelog_id uuid;
+BEGIN
+  IF nullif(btrim(coalesce(sn, '')), '') IS NULL THEN
+    RAISE EXCEPTION 'Shopee order is missing order_sn.';
+  END IF;
+  IF next_status IS NULL OR next_status NOT IN ('paid', 'shipped', 'cancelled') THEN
+    RAISE EXCEPTION 'Invalid Shopee order status.';
+  END IF;
+  IF p_via IS NULL OR p_via NOT IN ('push', 'poll') THEN
+    RAISE EXCEPTION 'Invalid Shopee sync source.';
+  END IF;
+  IF external_updated IS NULL THEN
+    RAISE EXCEPTION 'Shopee order is missing external_updated_at.';
+  END IF;
+  order_label := 'Order ' || sn;
+
+  SELECT * INTO current_order FROM public.orders WHERE order_id = sn FOR UPDATE;
+
+  IF NOT FOUND THEN
+    IF next_status = 'cancelled' THEN
+      RETURN jsonb_build_object('action', 'skipped', 'order_id', NULL, 'ledger_entries', 0);
+    END IF;
+
+    INSERT INTO public.orders (
+      order_id, channel, order_date, status, source,
+      external_status, external_created_at, external_updated_at, synced_via
+    ) VALUES (
+      sn, 'shopee', ((p_order->>'order_date')::date)::timestamp AT TIME ZONE 'UTC', next_status, 'shopee_api',
+      p_order->>'external_status', (p_order->>'external_created_at')::timestamptz, external_updated, p_via
+    )
+    ON CONFLICT (order_id) DO NOTHING
+    RETURNING id INTO new_order_id;
+
+    IF new_order_id IS NOT NULL THEN
+      INSERT INTO public.order_line_items (order_id, sku, quantity, pack_size, selling_price, cost_per_unit_snapshot)
+      SELECT new_order_id, line.sku, line.quantity, line.pack_size, line.selling_price,
+        (SELECT p.cost_per_unit FROM public.products p WHERE p.sku = line.sku)
+      FROM jsonb_to_recordset(coalesce(p_order->'lines', '[]'::jsonb))
+        AS line(sku text, pack_size text, quantity integer, selling_price numeric);
+
+      result_count := public._apply_order_inventory(
+        new_order_id, 'OUT_SALE', 'Order ' || sn || ' - Paid (Shopee sync)', false, NULL);
+
+      INSERT INTO public.changelog_entries (area, source, action_summary, entity_type, entity_id, entity_label)
+      VALUES ('orders', 'automatic', 'Synced from Shopee', 'order', new_order_id::text, order_label)
+      RETURNING id INTO changelog_id;
+      INSERT INTO public.changelog_items (entry_id, field_name, old_value, new_value, display_order)
+      VALUES (changelog_id, 'Status', NULL, next_status, 0);
+
+      RETURN jsonb_build_object('action', 'created', 'order_id', new_order_id, 'ledger_entries', result_count);
+    END IF;
+
+    -- Another request created it between our lookup and insert. Its insert has
+    -- committed by now (ON CONFLICT waited for it), so lock it and treat it as
+    -- an existing order.
+    SELECT * INTO current_order FROM public.orders WHERE order_id = sn FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Order % vanished during Shopee sync.', sn; END IF;
+  END IF;
+
+  IF current_order.external_updated_at IS NOT NULL AND external_updated <= current_order.external_updated_at THEN
+    RETURN jsonb_build_object('action', 'unchanged', 'order_id', current_order.id, 'ledger_entries', 0);
+  END IF;
+
+  UPDATE public.orders
+  SET external_status = p_order->>'external_status', external_updated_at = external_updated
+  WHERE id = current_order.id;
+
+  -- A return is a staff decision about stock condition; Shopee never overrides it.
+  IF current_order.status = 'returned' OR current_order.status = next_status THEN
+    RETURN jsonb_build_object('action', 'updated', 'order_id', current_order.id, 'ledger_entries', 0);
+  END IF;
+
+  -- Same stock rules as update_order_status_with_inventory, with a cancellation
+  -- always treated as saleable stock coming back ('restock').
+  was_active := current_order.status IN ('paid', 'shipped');
+  is_active := next_status IN ('paid', 'shipped');
+  IF was_active AND NOT is_active THEN
+    movement := 'RETURN';
+  ELSIF NOT was_active AND is_active THEN
+    IF current_order.return_disposition = 'dead_stock' THEN
+      RAISE EXCEPTION 'Dead stock cannot be restored as saleable stock. Use a reviewed stock adjustment if this was a mistake.';
+    END IF;
+    movement := 'OUT_SALE';
+  END IF;
+
+  IF movement IS NOT NULL THEN
+    result_count := public._apply_order_inventory(
+      current_order.id, movement, 'Order ' || sn || ' - ' || initcap(next_status) || ' (Shopee sync)', false, NULL);
+  END IF;
+
+  UPDATE public.orders
+  SET status = next_status,
+    return_disposition = CASE WHEN is_active THEN NULL ELSE coalesce(current_order.return_disposition, 'restock') END,
+    return_note = CASE WHEN is_active THEN NULL ELSE current_order.return_note END
+  WHERE id = current_order.id;
+
+  INSERT INTO public.changelog_entries (area, source, action_summary, entity_type, entity_id, entity_label)
+  VALUES ('orders', 'automatic', 'Updated order status (Shopee sync)', 'order', current_order.id::text, order_label)
+  RETURNING id INTO changelog_id;
+  INSERT INTO public.changelog_items (entry_id, field_name, old_value, new_value, display_order)
+  VALUES (changelog_id, 'Status', current_order.status, next_status, 0);
+
+  RETURN jsonb_build_object('action', 'updated', 'order_id', current_order.id, 'ledger_entries', result_count);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.apply_shopee_order(jsonb, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.apply_shopee_order(jsonb, text) TO service_role;
