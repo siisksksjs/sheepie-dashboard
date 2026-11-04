@@ -37,7 +37,11 @@ export interface ShopeeStore {
   recordFailure(message: string): Promise<number>
   resetFailures(): Promise<void>
   loadListingMap(): Promise<ListingMap>
-  /** Upserts on order_sn; a re-queued order is reopened. */
+  /**
+   * Upserts on order_sn. Re-queued unmapped_item / error rows reopen.
+   * return_review takes over a stale unmapped_item / error row, otherwise only
+   * inserts: an existing return_review row is never changed or reopened.
+   */
   queue(sn: string, reason: ShopeeQueueReason, detail: Record<string, unknown>, orderId?: string): Promise<void>
   /** Resolves only `unmapped_item` / `error` rows; `return_review` is a staff decision. */
   resolveQueue(sn: string): Promise<void>
@@ -163,17 +167,34 @@ export function createShopeeStore(supabase: SupabaseClient): ShopeeStore {
     },
 
     async queue(sn, reason, detail, orderId) {
-      const { error } = await supabase.from("shopee_sync_queue").upsert(
-        {
-          order_sn: sn,
-          reason,
-          detail,
-          ...(orderId ? { order_id: orderId } : {}),
-          last_seen_at: new Date().toISOString(),
-          resolved_at: null,
-        },
-        { onConflict: "order_sn" }
-      )
+      const row = {
+        order_sn: sn,
+        reason,
+        detail,
+        ...(orderId ? { order_id: orderId } : {}),
+        last_seen_at: new Date().toISOString(),
+      }
+      if (reason !== "return_review") {
+        // A re-queued unmapped_item / error row reopens.
+        const { error } = await supabase
+          .from("shopee_sync_queue")
+          .upsert({ ...row, resolved_at: null }, { onConflict: "order_sn" })
+        if (error) fail("queue", error)
+        return
+      }
+
+      // A stale unmapped_item / error row for this order becomes the review...
+      const { error: convertError } = await supabase
+        .from("shopee_sync_queue")
+        .update({ ...row, resolved_at: null })
+        .eq("order_sn", sn)
+        .in("reason", RETRYABLE_REASONS)
+      if (convertError) fail("queue", convertError)
+      // ...otherwise insert-if-absent, so an existing return_review row (and a
+      // staff resolution of it) is never touched.
+      const { error } = await supabase
+        .from("shopee_sync_queue")
+        .upsert(row, { onConflict: "order_sn", ignoreDuplicates: true })
       if (error) fail("queue", error)
     },
 

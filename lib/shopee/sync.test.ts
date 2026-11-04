@@ -92,6 +92,8 @@ function makeStore(conn: ShopeeConnection | null) {
     }),
     loadListingMap: vi.fn(async () => state.listing),
     queue: vi.fn(async (sn: string, reason: string, detail: unknown, orderId?: string) => {
+      // Mirrors createShopeeStore: return_review never touches an existing return_review row.
+      if (reason === "return_review" && state.queue.get(sn)?.reason === "return_review") return
       state.queue.set(sn, { reason, detail, orderId, resolvedAt: null })
     }),
     resolveQueue: vi.fn(async (sn: string) => {
@@ -253,6 +255,41 @@ describe("syncShopeeOrders", () => {
     expect(store.queue).toHaveBeenCalledTimes(1)
     expect(store.queue).toHaveBeenCalledWith("A", "return_review", {}, "order-a")
     expect(store.applyOrder).not.toHaveBeenCalled()
+  })
+
+  it("returned order is not queued for return review", async () => {
+    const { state, store } = makeStore(connection())
+    state.orders.set("A", { id: "order-a", status: "returned" })
+    const shopee = makeShopee([detail("A", "TO_RETURN")])
+
+    const summary = await syncShopeeOrders(["A"], "poll", deps(store, shopee))
+
+    expect(summary).toMatchObject({ queued: 0, skipped: 1 })
+    expect(store.queue).not.toHaveBeenCalled()
+  })
+
+  it("skipping an order resolves its stale error row", async () => {
+    const { state, store } = makeStore(connection())
+    const beforeStart = Math.floor(SYNC_START.getTime() / 1000) - 1
+    for (const sn of ["OLD", "RTS", "HOLD", "GONE", "RET"]) {
+      state.queue.set(sn, { reason: sn === "HOLD" ? "unmapped_item" : "error", detail: {}, resolvedAt: null })
+    }
+    state.applyResult = () => ({ action: "skipped", orderId: null, ledgerEntries: 0 })
+    const shopee = makeShopee([
+      detail("OLD", "PROCESSED", { create_time: beforeStart }),
+      detail("RTS", "READY_TO_SHIP"),
+      detail("HOLD", "IN_CANCEL"),
+      detail("GONE", "CANCELLED"),
+      detail("RET", "TO_RETURN"),
+    ])
+
+    const summary = await syncShopeeOrders(["OLD", "RTS", "HOLD", "GONE", "RET"], "poll", deps(store, shopee))
+
+    expect(summary).toEqual({ created: 0, updated: 0, queued: 0, skipped: 5, ledgerEntries: 0 })
+    for (const sn of ["OLD", "RTS", "HOLD", "GONE", "RET"]) {
+      expect(store.resolveQueue).toHaveBeenCalledWith(sn)
+      expect(state.queue.get(sn)?.resolvedAt).toEqual(NOW)
+    }
   })
 
   it("expired access token throws without refreshing", async () => {
@@ -441,6 +478,23 @@ describe("pollShopeeOrders", () => {
       error: "Shopee API /api/v2/auth/access_token/get: error_auth - Invalid refresh_token",
     })
     expect(store.recordFailure).toHaveBeenCalledTimes(1)
+    expect(store.saveTokens).not.toHaveBeenCalled()
+    expect(shopee.listOrderSns).not.toHaveBeenCalled()
+    expect(store.saveCursor).not.toHaveBeenCalled()
+    expect(state.connection?.refreshToken).toBe("refresh_live_secret")
+  })
+
+  it("network error during refresh is failed not needs_reconnect", async () => {
+    const { state, store } = makeStore(
+      connection({ accessExpiresAt: new Date(NOW.getTime() + 10 * 60_000), consecutiveFailures: 2 })
+    )
+    const shopee = makeShopee()
+    shopee.refreshTokens.mockRejectedValue(new TypeError("fetch failed"))
+
+    const result = await pollShopeeOrders(deps(store, shopee), { allowRefresh: true })
+
+    expect(result).toEqual({ status: "failed", consecutiveFailures: 3, error: "fetch failed" })
+    expect(store.recordFailure).toHaveBeenCalledWith("fetch failed")
     expect(store.saveTokens).not.toHaveBeenCalled()
     expect(shopee.listOrderSns).not.toHaveBeenCalled()
     expect(store.saveCursor).not.toHaveBeenCalled()

@@ -1,8 +1,8 @@
 import { triggerNotificationSender } from "@/lib/notifications/trigger-sender"
-import { buildShopeeOrderPayload } from "./build-order"
-import { ShopeeApiError, type ShopeeAuth, type createShopeeClient } from "./client"
+import { buildShopeeOrderPayload, type ListingMap } from "./build-order"
+import { ShopeeApiError, type ShopeeAuth, type ShopeeOrderDetail, type createShopeeClient } from "./client"
 import { mapShopeeStatus } from "./status"
-import type { ShopeeConnection, ShopeeStore } from "./store"
+import type { ApplyResult, ShopeeConnection, ShopeeStore } from "./store"
 
 /** The cron poll refreshes the access token once less than this is left. */
 const TOKEN_REFRESH_THRESHOLD_MS = 60 * 60 * 1000
@@ -53,6 +53,39 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+type OrderOutcome = { kind: "applied"; result: ApplyResult } | { kind: "queued" } | { kind: "skipped" }
+
+async function syncOne(
+  detail: ShopeeOrderDetail,
+  conn: ReadyConnection,
+  listingMap: ListingMap,
+  via: "push" | "poll",
+  deps: SyncDeps
+): Promise<OrderOutcome> {
+  const { store } = deps
+  const sn = detail.order_sn
+  if (detail.create_time * 1000 < conn.syncStartAt.getTime()) return { kind: "skipped" }
+
+  const action = mapShopeeStatus(detail.order_status)
+  if (action.kind === "not_yet" || action.kind === "hold") return { kind: "skipped" }
+
+  if (action.kind === "return_review") {
+    const order = await store.findOrder(sn)
+    // Not in the dashboard, or staff already recorded the return: nothing to review.
+    if (!order || order.status === "returned") return { kind: "skipped" }
+    await store.queue(sn, "return_review", {}, order.id)
+    return { kind: "queued" }
+  }
+
+  const built = buildShopeeOrderPayload(detail, action.status, listingMap)
+  if (built.kind === "unmapped") {
+    await store.queue(sn, "unmapped_item", { items: built.items })
+    return { kind: "queued" }
+  }
+
+  return { kind: "applied", result: await store.applyOrder(built.payload, via) }
+}
+
 async function syncWithConnection(
   conn: ReadyConnection,
   sns: string[],
@@ -74,41 +107,19 @@ async function syncWithConnection(
   for (const detail of details) {
     const sn = detail.order_sn
     try {
-      if (detail.create_time * 1000 < conn.syncStartAt.getTime()) {
-        summary.skipped++
-        continue
+      const outcome = await syncOne(detail, conn, listingMap, via, deps)
+      if (outcome.kind === "applied") {
+        if (outcome.result.action === "created") summary.created++
+        else if (outcome.result.action === "updated") summary.updated++
+        else summary.skipped++
+        summary.ledgerEntries += outcome.result.ledgerEntries
+      } else {
+        summary[outcome.kind]++
       }
-
-      const action = mapShopeeStatus(detail.order_status)
-      if (action.kind === "not_yet" || action.kind === "hold") {
-        summary.skipped++
-        continue
+      if (outcome.kind !== "queued") {
+        // Applied or deliberately skipped: any stale unmapped/error row is done.
+        await store.resolveQueue(sn)
       }
-
-      if (action.kind === "return_review") {
-        const order = await store.findOrder(sn)
-        if (order) {
-          await store.queue(sn, "return_review", {}, order.id)
-          summary.queued++
-        } else {
-          summary.skipped++
-        }
-        continue
-      }
-
-      const built = buildShopeeOrderPayload(detail, action.status, listingMap)
-      if (built.kind === "unmapped") {
-        await store.queue(sn, "unmapped_item", { items: built.items })
-        summary.queued++
-        continue
-      }
-
-      const result = await store.applyOrder(built.payload, via)
-      if (result.action === "created") summary.created++
-      else if (result.action === "updated") summary.updated++
-      else summary.skipped++
-      summary.ledgerEntries += result.ledgerEntries
-      await store.resolveQueue(sn)
     } catch (error) {
       await store.queue(sn, "error", { message: errorMessage(error) })
       summary.queued++
@@ -154,14 +165,16 @@ export async function pollShopeeOrders(deps: SyncDeps, opts: { allowRefresh: boo
   const expiresAt = conn.accessExpiresAt?.getTime() ?? 0
   if (opts.allowRefresh && expiresAt - now.getTime() < TOKEN_REFRESH_THRESHOLD_MS) {
     try {
-      if (!conn.refreshToken) throw new Error("Shopee connection has no refresh token")
+      if (!conn.refreshToken) throw new ShopeeApiError("missing_refresh_token", "Shopee connection has no refresh token")
       const tokens = await shopee.refreshTokens(conn.refreshToken, conn.shopId)
       await store.saveTokens(conn.shopId, tokens)
       conn = { ...conn, ...tokens }
     } catch (error) {
       const message = errorMessage(error)
       const consecutiveFailures = await store.recordFailure(message)
-      return { status: "needs_reconnect", consecutiveFailures, error: message }
+      // Only a Shopee rejection means the grant is gone; network errors retry next poll.
+      const status = error instanceof ShopeeApiError ? "needs_reconnect" : "failed"
+      return { status, consecutiveFailures, error: message }
     }
   }
 
