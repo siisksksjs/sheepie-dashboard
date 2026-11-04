@@ -26,9 +26,8 @@
 ## 不做的事
 
 1. 不改 10 月以前已经手动录好的订单，也不去对应或合并它们。
-2. 第一版不自动填 `channel_fees`（放到第二阶段）。
-3. 不拉买家个人资料（PII 开关保持关闭）。
-4. 不从 dashboard 反向操作 Shopee（比如安排出货、改库存）。
+2. 不拉买家个人资料（PII 开关保持关闭）。
+3. 不从 dashboard 反向操作 Shopee（比如安排出货、改库存）。
 
 ## 状态对应
 
@@ -235,6 +234,6 @@ Vercel 需要新增的环境变量：`SHOPEE_PARTNER_ID`、`SHOPEE_PARTNER_KEY`�
 
 ## 第二阶段以后
 
-1. 订单 `COMPLETED` 后，调用 `get_escrow_detail`，用实际数字填 `channel_fees`（`order_selling_price - escrow_amount`），取代现在按百分比估算的费用。10 月的估算比实际多算了收入，例如 Lumi 估算 179,145，实际到账 166,320。差额主要是 affiliate 佣金（`order_ams_commission_fee`）：10 月有 43 单，合计 Rp422k。
+1. （已提前到第一版）建单和每次状态更新时调用 `get_escrow_detail`，`channel_fees = order_selling_price − escrow_amount`；还没完成的单是 Shopee 的预估，`COMPLETED` 后是最终数字。查询失败不影响同步，下次状态变化再试。
 2. 显示"Shopee 待安排出货 N 单"，只显示，不扣库存。
 3. Tokopedia / TikTok Shop 用同一套结构：`marketplace_connections`、对应表、待处理清单、`apply_*_order`。
