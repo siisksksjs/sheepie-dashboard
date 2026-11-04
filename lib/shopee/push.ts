@@ -1,10 +1,19 @@
 import { verifyPushSignature } from "./signing"
-import { syncShopeeOrders, type SyncDeps } from "./sync"
+import { syncShopeeOrders, type ShopeeFailedOrder, type SyncDeps } from "./sync"
 
 /** Shopee `order_status_push`. */
 const ORDER_STATUS_PUSH_CODE = 3
 
-export type ShopeePushDeps = SyncDeps & { pushKey: string; callbackUrl: string }
+export type ShopeePushDeps = SyncDeps & {
+  pushKey: string
+  callbackUrl: string
+  /**
+   * Orders whose unmapped/error queue row this push newly opened. Called at most
+   * once, before the response; it should only schedule the email (the route
+   * uses `after()`), and a throw from it never changes the response.
+   */
+  onFailedOrders?: (failed: ShopeeFailedOrder[]) => void
+}
 
 export type ShopeePushResult = {
   status: 200 | 401
@@ -35,6 +44,15 @@ function parseOrderStatusPush(rawBody: string): OrderStatusPush | null {
 /** Error text for the queue and logs. Client and store errors never carry keys or tokens. */
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error"
+}
+
+function reportFailedOrders(failed: ShopeeFailedOrder[], deps: ShopeePushDeps): void {
+  if (failed.length === 0 || !deps.onFailedOrders) return
+  try {
+    deps.onFailedOrders(failed)
+  } catch (error) {
+    console.error(`Shopee push: failure email could not be scheduled: ${errorMessage(error)}`)
+  }
 }
 
 /**
@@ -76,12 +94,14 @@ export async function handleShopeePush(
       console.error(`Shopee push: could not record the push time: ${errorMessage(error)}`)
     }
 
-    await syncShopeeOrders([push.ordersn], "push", deps)
+    const summary = await syncShopeeOrders([push.ordersn], "push", deps)
+    reportFailedOrders(summary.failedOrders, deps)
     return { status: 200, body: { ok: true } }
   } catch (error) {
     const message = errorMessage(error)
     try {
-      await deps.store.queue(push.ordersn, "error", { message })
+      const { opened } = await deps.store.queue(push.ordersn, "error", { message })
+      if (opened) reportFailedOrders([{ orderSn: push.ordersn, reason: "error", message }], deps)
     } catch {
       // The 15-minute poll re-reads recent orders, so this one is not lost.
       console.error(`Shopee push: could not queue order ${push.ordersn} after a sync failure`)

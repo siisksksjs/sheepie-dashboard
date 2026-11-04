@@ -276,4 +276,86 @@ describe("handleShopeePush", () => {
     expect(errorLog).toHaveBeenCalledWith("Shopee push: could not record the push time: db down")
     errorLog.mockRestore()
   })
+
+  describe("newly failed orders", () => {
+    it("a push whose sync queues a new error hands it to onFailedOrders", async () => {
+      const { deps, store } = makeDeps(connection({ accessExpiresAt: new Date(NOW.getTime() - 1000) }))
+      const onFailedOrders = vi.fn()
+      const rawBody = orderPush()
+
+      const result = await handleShopeePush({ rawBody, authorization: sign(rawBody) }, { ...deps, onFailedOrders })
+
+      expect(result).toEqual({ status: 200, body: { ok: false, reason: "queued_for_retry" } })
+      expect(store.queue).toHaveBeenCalledWith("SN1", "error", { message: "Shopee access token has expired" })
+      expect(onFailedOrders).toHaveBeenCalledTimes(1)
+      expect(onFailedOrders).toHaveBeenCalledWith([
+        { orderSn: "SN1", reason: "error", message: "Shopee access token has expired" },
+      ])
+    })
+
+    it("an order the sync itself queues (apply error) is handed over too", async () => {
+      const { deps, store } = makeDeps(connection(), [detail("SN1", "PROCESSED")])
+      store.applyOrder.mockRejectedValueOnce(new Error("Bundle SLP-001 has no component composition."))
+      const onFailedOrders = vi.fn()
+      const rawBody = orderPush()
+
+      const result = await handleShopeePush({ rawBody, authorization: sign(rawBody) }, { ...deps, onFailedOrders })
+
+      expect(result).toEqual({ status: 200, body: { ok: true } })
+      expect(onFailedOrders).toHaveBeenCalledWith([
+        { orderSn: "SN1", reason: "error", message: "Bundle SLP-001 has no component composition." },
+      ])
+    })
+
+    it("an order already open in the queue is not handed over again", async () => {
+      const { deps, store } = makeDeps(connection({ accessExpiresAt: new Date(NOW.getTime() - 1000) }))
+      store.queue.mockResolvedValue({ opened: false })
+      const onFailedOrders = vi.fn()
+      const rawBody = orderPush()
+
+      await handleShopeePush({ rawBody, authorization: sign(rawBody) }, { ...deps, onFailedOrders })
+
+      expect(store.queue).toHaveBeenCalledTimes(1)
+      expect(onFailedOrders).not.toHaveBeenCalled()
+    })
+
+    it("a successful push hands nothing over", async () => {
+      const { deps } = makeDeps(connection(), [detail("SN1", "PROCESSED")])
+      const onFailedOrders = vi.fn()
+      const rawBody = orderPush()
+
+      await handleShopeePush({ rawBody, authorization: sign(rawBody) }, { ...deps, onFailedOrders })
+
+      expect(onFailedOrders).not.toHaveBeenCalled()
+    })
+
+    it("onFailedOrders throwing does not change the push response", async () => {
+      const { deps } = makeDeps(connection({ accessExpiresAt: new Date(NOW.getTime() - 1000) }))
+      const onFailedOrders = vi.fn(() => {
+        throw new Error("Resend failed with 500")
+      })
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {})
+      const rawBody = orderPush()
+
+      const result = await handleShopeePush({ rawBody, authorization: sign(rawBody) }, { ...deps, onFailedOrders })
+
+      expect(result).toEqual({ status: 200, body: { ok: false, reason: "queued_for_retry" } })
+      expect(errorLog).toHaveBeenCalledWith("Shopee push: failure email could not be scheduled: Resend failed with 500")
+      errorLog.mockRestore()
+    })
+
+    it("hands nothing over when queueing the failed order also fails", async () => {
+      const { deps, store } = makeDeps(connection())
+      store.getConnection.mockRejectedValueOnce(new Error("db down"))
+      store.queue.mockRejectedValueOnce(new Error("db still down"))
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {})
+      const onFailedOrders = vi.fn()
+      const rawBody = orderPush()
+
+      await handleShopeePush({ rawBody, authorization: sign(rawBody) }, { ...deps, onFailedOrders })
+
+      expect(onFailedOrders).not.toHaveBeenCalled()
+      errorLog.mockRestore()
+    })
+  })
 })
