@@ -15,8 +15,9 @@ CREATE TABLE marketplace_connections (
   consecutive_failures INTEGER NOT NULL DEFAULT 0,
   last_sync_error TEXT,
   last_alert_at TIMESTAMPTZ,
-  -- Which alert last_alert_at belongs to: each kind has its own 24-hour quiet window.
-  last_alert_kind TEXT CHECK (last_alert_kind IN ('needs_reconnect', 'repeated_failures', 'push_silent')),
+  -- Which warning last_alert_at belongs to (24-hour quiet window). Sync failures
+  -- email on every failure and are not tracked here.
+  last_alert_kind TEXT CHECK (last_alert_kind IN ('push_silent')),
   -- Last verified order-status push for our shop; the push_silent alert watches it.
   last_push_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()

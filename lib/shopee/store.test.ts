@@ -238,7 +238,7 @@ describe("createShopeeStore alert helpers", () => {
       consecutive_failures: 0,
       last_sync_error: null,
       last_alert_at: "2026-11-04T07:00:00.000Z",
-      last_alert_kind: "needs_reconnect",
+      last_alert_kind: "push_silent",
       last_push_at: "2026-11-04T06:00:00.000Z",
       updated_at: "2026-11-04T08:00:00.000Z",
     }
@@ -254,7 +254,7 @@ describe("createShopeeStore alert helpers", () => {
     expect(conn).toMatchObject({
       shopId: 555,
       lastAlertAt: new Date("2026-11-04T07:00:00.000Z"),
-      lastAlertKind: "needs_reconnect",
+      lastAlertKind: "push_silent",
       lastPushAt: new Date("2026-11-04T06:00:00.000Z"),
     })
   })
