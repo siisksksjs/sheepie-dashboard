@@ -4,6 +4,7 @@ import { getOrders } from "@/lib/actions/orders"
 import { getListingImageMap } from "@/lib/actions/quick-log"
 import { getShopeeSyncSummary } from "@/lib/actions/shopee"
 import { OrdersListClient } from "@/components/orders/orders-list-client"
+import { ShopeeSyncNowButton } from "@/components/orders/shopee-sync-now-button"
 import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/ui/page"
 import { formatSyncAge } from "@/lib/shopee/settings-actions"
@@ -34,7 +35,10 @@ export default async function OrdersPage() {
       />
       {summary?.connected && (
         <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] text-muted-foreground">
-          <span>Shopee last synced: {formatSyncAge(summary.lastSyncedUntil, new Date())}</span>
+          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>Shopee last synced: {formatSyncAge(summary.lastSyncedUntil, new Date())}</span>
+            {summary.syncStartAt && <ShopeeSyncNowButton />}
+          </span>
           {summary.pendingCount > 0 && (
             <Link href="/more/shopee" className="font-bold text-primary hover:underline">
               {summary.pendingCount === 1 ? "1 Shopee order needs attention →" : `${summary.pendingCount} Shopee orders need attention →`}

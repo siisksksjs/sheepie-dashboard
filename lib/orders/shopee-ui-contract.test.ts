@@ -29,6 +29,20 @@ describe("Shopee order sync UI", () => {
     expect(source).toContain("Check it in Shopee Seller Centre")
   })
 
+  it("puts Sync now next to the sync line only when connected and live", () => {
+    const page = read("app/(dashboard)/orders/page.tsx")
+    expect(page).toContain("<ShopeeSyncNowButton />")
+    expect(page).toMatch(/summary\.syncStartAt && <ShopeeSyncNowButton \/>/)
+
+    const button = read("components/orders/shopee-sync-now-button.tsx")
+    expect(button).toContain('"use client"')
+    expect(button).toContain("syncShopeeNow()")
+    expect(button).toContain("router.refresh()")
+    expect(button).toContain("toast.success")
+    expect(button).toContain("toast.error")
+    expect(button).toContain("Sync now")
+  })
+
   it("reads the lean sync summary through the signed-in client", () => {
     const source = read("lib/actions/shopee.ts")
     expect(source).toContain("export async function getShopeeSyncSummary")
