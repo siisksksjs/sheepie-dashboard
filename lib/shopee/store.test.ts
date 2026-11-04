@@ -259,3 +259,40 @@ describe("createShopeeStore alert helpers", () => {
     })
   })
 })
+
+describe("createShopeeStore setChannelFees", () => {
+  function fakeOrdersUpdate(error: { message: string } | null = null) {
+    const calls: unknown[][] = []
+    const builder = {
+      update: (...args: unknown[]) => (calls.push(["update", ...args]), builder),
+      eq: (...args: unknown[]) => (calls.push(["eq", ...args]), builder),
+      or: (...args: unknown[]) => (calls.push(["or", ...args]), builder),
+      then: (resolve: (value: { error: { message: string } | null }) => unknown) => resolve({ error }),
+    }
+    const supabase = {
+      from: (table: string) => (calls.push(["from", table]), builder),
+    } as unknown as SupabaseClient
+    return { supabase, calls }
+  }
+
+  it("sets channel_fees on the order only when it is empty or different", async () => {
+    const { supabase, calls } = fakeOrdersUpdate()
+
+    await createShopeeStore(supabase).setChannelFees("order-uuid", 162760)
+
+    expect(calls).toEqual([
+      ["from", "orders"],
+      ["update", { channel_fees: 162760 }],
+      ["eq", "id", "order-uuid"],
+      // Skips an identical value, so the row (and its realtime event) is untouched.
+      ["or", "channel_fees.is.null,channel_fees.neq.162760"],
+    ])
+  })
+
+  it("throws when the update fails", async () => {
+    const { supabase } = fakeOrdersUpdate({ message: "db down" })
+    await expect(createShopeeStore(supabase).setChannelFees("order-uuid", 1)).rejects.toThrow(
+      "Shopee store setChannelFees failed: db down"
+    )
+  })
+})

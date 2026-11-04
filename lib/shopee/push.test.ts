@@ -73,6 +73,7 @@ function makeDeps(conn: ShopeeConnection | null, details: ShopeeOrderDetail[] = 
     openRetryableSns: vi.fn(async () => []),
     findOrder: vi.fn(async () => null),
     applyOrder: vi.fn(async () => ({ action: "created" as const, orderId: "order-uuid", ledgerEntries: 1 })),
+    setChannelFees: vi.fn(async () => {}),
     countRecentSyncedVia: vi.fn(async () => ({ push: 0, poll: 0 })),
     markAlerted: vi.fn(async () => {}),
     markPushReceived: vi.fn(async () => {}),

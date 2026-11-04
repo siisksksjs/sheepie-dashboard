@@ -70,6 +70,7 @@ function makeStore(conn: ShopeeConnection | null) {
     queue: new Map<string, QueueRow>(),
     listing: new Map([["1:10", { sku: "SLP-001", pack_size: "single" }]]) as ListingMap,
     orders: new Map<string, { id: string; status: OrderStatus }>(),
+    channelFees: new Map<string, number>(),
     applyResult: (payload: ShopeeOrderPayload): ApplyResult | Error => {
       void payload
       return { action: "created", orderId: "order-uuid", ledgerEntries: 1 }
@@ -115,6 +116,9 @@ function makeStore(conn: ShopeeConnection | null) {
       const result = state.applyResult(payload)
       if (result instanceof Error) throw result
       return result
+    }),
+    setChannelFees: vi.fn(async (orderId: string, fees: number) => {
+      state.channelFees.set(orderId, fees)
     }),
     countRecentSyncedVia: vi.fn(async () => ({ push: 0, poll: 0 })),
     markAlerted: vi.fn(async () => {}),

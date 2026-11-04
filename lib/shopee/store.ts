@@ -60,6 +60,8 @@ export interface ShopeeStore {
   openRetryableSns(): Promise<string[]>
   findOrder(sn: string): Promise<{ id: string; status: OrderStatus } | null>
   applyOrder(payload: ShopeeOrderPayload, via: "push" | "poll"): Promise<ApplyResult>
+  /** Sets the order's `channel_fees` (IDR); an identical stored value is left untouched. */
+  setChannelFees(orderId: string, fees: number): Promise<void>
   /** Shopee API orders created since `since`, counted by how they arrived. */
   countRecentSyncedVia(since: Date): Promise<{ push: number; poll: number }>
   /**
@@ -270,6 +272,15 @@ export function createShopeeStore(supabase: SupabaseClient): ShopeeStore {
         orderId: result.order_id,
         ledgerEntries: Number(result.ledger_entries ?? 0),
       }
+    },
+
+    async setChannelFees(orderId, fees) {
+      const { error } = await supabase
+        .from("orders")
+        .update({ channel_fees: fees })
+        .eq("id", orderId)
+        .or(`channel_fees.is.null,channel_fees.neq.${fees}`)
+      if (error) fail("setChannelFees", error)
     },
 
     async countRecentSyncedVia(since) {
