@@ -132,6 +132,11 @@ export type Order = {
   status: OrderStatus
   return_disposition?: ReturnDisposition | null
   return_note?: string | null
+  source: 'manual' | 'shopee_api'
+  external_status: string | null
+  external_created_at: string | null
+  external_updated_at: string | null
+  synced_via: 'push' | 'poll' | null
   channel_fees: number | null
   notes: string | null
   created_at: string
