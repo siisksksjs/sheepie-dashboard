@@ -23,6 +23,12 @@ describe("shopee sync schedule migration", () => {
     expect(source).toMatch(/jsonb_build_object\('source', 'cron'\)/)
   })
 
+  it("gives the sync route 60 seconds before pg_net times out", async () => {
+    const source = await readFile(path, "utf8")
+
+    expect(source).toMatch(/timeout_milliseconds := 60000/)
+  })
+
   it("reads the secret from Vault instead of hard-coding it", async () => {
     const source = await readFile(path, "utf8")
 

@@ -23,7 +23,9 @@ SELECT cron.schedule(
       'content-type', 'application/json',
       'x-shopee-sync-secret', (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'shopee_sync_secret')
     ),
-    body := jsonb_build_object('source', 'cron')
+    body := jsonb_build_object('source', 'cron'),
+    -- pg_net's 5-second default is too short for a poll that pages through Shopee.
+    timeout_milliseconds := 60000
   );
   $$
 );
