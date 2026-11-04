@@ -26,12 +26,22 @@ export type SyncDeps = {
   sleep?: (ms: number) => Promise<void>
 }
 
+/** An order whose unmapped_item / error queue row was newly opened (not a retry of an open row). */
+export type ShopeeFailedOrder = {
+  orderSn: string
+  reason: "error" | "unmapped_item"
+  message?: string
+  items?: { item_name: string; model_name: string }[]
+}
+
 export type SyncSummary = {
   created: number
   updated: number
   queued: number
   skipped: number
   ledgerEntries: number
+  /** Only orders that newly failed in this run, so each failure is emailed once. */
+  failedOrders: ShopeeFailedOrder[]
 }
 
 export type PollResult = {
@@ -44,7 +54,7 @@ export type PollResult = {
 type ReadyConnection = ShopeeConnection & { shopId: number; accessToken: string; syncStartAt: Date }
 
 function emptySummary(): SyncSummary {
-  return { created: 0, updated: 0, queued: 0, skipped: 0, ledgerEntries: 0 }
+  return { created: 0, updated: 0, queued: 0, skipped: 0, ledgerEntries: 0, failedOrders: [] }
 }
 
 function isConnected(conn: ShopeeConnection | null): conn is ShopeeConnection & { shopId: number; accessToken: string } {
@@ -93,7 +103,10 @@ async function saveRefreshedTokens(shopId: number, tokens: ShopeeTokens, deps: S
   }
 }
 
-type OrderOutcome = { kind: "applied"; result: ApplyResult } | { kind: "queued" } | { kind: "skipped" }
+type OrderOutcome =
+  | { kind: "applied"; result: ApplyResult }
+  | { kind: "queued"; failed?: ShopeeFailedOrder }
+  | { kind: "skipped" }
 
 async function syncOne(
   detail: ShopeeOrderDetail,
@@ -125,21 +138,31 @@ async function syncOne(
 
   const built = buildShopeeOrderPayload(detail, action.status, listingMap)
   if (built.kind === "unmapped") {
-    await store.queue(sn, "unmapped_item", { items: built.items })
-    return { kind: "queued" }
+    const { opened } = await store.queue(sn, "unmapped_item", { items: built.items })
+    if (!opened) return { kind: "queued" }
+    const items = built.items.map(({ item_name, model_name }) => ({ item_name, model_name }))
+    return { kind: "queued", failed: { orderSn: sn, reason: "unmapped_item", items } }
   }
 
   return { kind: "applied", result: await store.applyOrder(built.payload, via) }
 }
 
+/** Queues the order as `error`, adding it to `summary.failedOrders` when the row newly opened. */
+async function queueError(sn: string, message: string, summary: SyncSummary, store: ShopeeStore): Promise<void> {
+  const { opened } = await store.queue(sn, "error", { message })
+  summary.queued++
+  if (opened) summary.failedOrders.push({ orderSn: sn, reason: "error", message })
+}
+
+/** Fills `summary` as it goes, so a caller that catches a later throw still sees the orders that failed. */
 async function syncWithConnection(
   conn: ReadyConnection,
   sns: string[],
   via: "push" | "poll",
-  deps: SyncDeps
+  deps: SyncDeps,
+  summary: SyncSummary = emptySummary()
 ): Promise<SyncSummary> {
   const { shopee, store } = deps
-  const summary = emptySummary()
   if (sns.length === 0) return summary
 
   if (!conn.accessExpiresAt || conn.accessExpiresAt.getTime() <= deps.now().getTime()) {
@@ -155,8 +178,7 @@ async function syncWithConnection(
   const returned = new Set(details.map((detail) => detail.order_sn))
   for (const sn of sns) {
     if (returned.has(sn)) continue
-    await store.queue(sn, "error", { message: "Shopee returned no detail" })
-    summary.queued++
+    await queueError(sn, "Shopee returned no detail", summary, store)
   }
 
   for (const detail of details) {
@@ -170,14 +192,14 @@ async function syncWithConnection(
         summary.ledgerEntries += outcome.result.ledgerEntries
       } else {
         summary[outcome.kind]++
+        if (outcome.kind === "queued" && outcome.failed) summary.failedOrders.push(outcome.failed)
       }
       if (outcome.kind !== "queued") {
         // Applied or deliberately skipped: any stale unmapped/error row is done.
         await store.resolveQueue(sn)
       }
     } catch (error) {
-      await store.queue(sn, "error", { message: errorMessage(error) })
-      summary.queued++
+      await queueError(sn, errorMessage(error), summary, store)
     }
   }
 
@@ -236,6 +258,7 @@ export async function pollShopeeOrders(deps: SyncDeps, opts: { allowRefresh: boo
     return { status: "not_started", consecutiveFailures: conn.consecutiveFailures }
   }
 
+  const summary = emptySummary()
   try {
     const from = new Date((conn.lastSyncedUntil ?? conn.syncStartAt).getTime() - POLL_OVERLAP_MS)
     const to = now
@@ -244,7 +267,7 @@ export async function pollShopeeOrders(deps: SyncDeps, opts: { allowRefresh: boo
       to: Math.floor(to.getTime() / 1000),
     })
     const retries = await store.openRetryableSns()
-    const summary = await syncWithConnection(conn, [...new Set([...listed, ...retries])], "poll", deps)
+    await syncWithConnection(conn, [...new Set([...listed, ...retries])], "poll", deps, summary)
 
     await store.saveCursor(to)
     await store.resetFailures()
@@ -252,6 +275,12 @@ export async function pollShopeeOrders(deps: SyncDeps, opts: { allowRefresh: boo
   } catch (error) {
     const message = errorMessage(error)
     const consecutiveFailures = await store.recordFailure(message)
-    return { status: "failed", consecutiveFailures, error: message }
+    // Orders queued before the failure were newly opened in this run and must still be reported.
+    return {
+      status: "failed",
+      consecutiveFailures,
+      error: message,
+      ...(summary.failedOrders.length > 0 ? { summary } : {}),
+    }
   }
 }
