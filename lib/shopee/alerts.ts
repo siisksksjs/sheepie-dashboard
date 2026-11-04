@@ -221,3 +221,31 @@ export async function checkShopeeAlerts(
   await sendShopeeAlert(alert, { ...deps, previousAlertAt: conn.lastAlertAt, previousAlertKind: conn.lastAlertKind })
   return alert
 }
+
+/**
+ * Runs one email send, logging a single safe line instead of throwing: an email
+ * problem must never fail a sync or a push. Messages never carry keys or tokens.
+ */
+export async function sendSafely(label: string, send: () => Promise<unknown>): Promise<void> {
+  try {
+    await send()
+  } catch (error) {
+    console.error(`${label}: ${error instanceof Error ? error.message : "Unknown error"}`)
+  }
+}
+
+/**
+ * Every email due after a cron poll, each isolated from the others: the sync
+ * failure email, then one email for the newly failed orders, then the
+ * push_silent check. Never throws.
+ */
+export async function sendPollEmails(
+  result: PollResult,
+  deps: AlertDeps & { store: Pick<ShopeeStore, "markAlerted" | "getConnection" | "countRecentSyncedVia"> }
+): Promise<void> {
+  await sendSafely("Shopee sync failure email failed", () => sendSyncFailureEmail(result, deps))
+  await sendSafely("Shopee order failure email failed", () =>
+    sendOrderFailureEmail(result.summary?.failedOrders ?? [], deps)
+  )
+  await sendSafely("Shopee alert failed", () => checkShopeeAlerts(result, deps))
+}

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 
 import { createSyncDeps } from "@/lib/shopee/deps"
+import { emailFailedOrdersLater } from "@/lib/shopee/failure-emails"
 import { collectUnmappedItems, validateListingMapping, type ListingMappingInput, type UnmappedItem } from "@/lib/shopee/settings-actions"
 import { pollShopeeOrders, type PollResult } from "@/lib/shopee/sync"
 import { createClient } from "@/lib/supabase/server"
@@ -188,6 +189,9 @@ export async function syncShopeeNow(): Promise<ActionResult> {
     console.error(`Shopee sync now failed: ${error instanceof Error ? error.message : "Unknown error"}`)
     return { success: false, error: "Sync failed. Try again in a moment." }
   }
+  // Each newly failed order is emailed once, however the sync ran; the cron only
+  // emails rows it opens itself. The failed run is on screen, so no sync email.
+  emailFailedOrdersLater(result.summary?.failedOrders ?? [])
 
   revalidatePath(PAGE)
   return describePoll(result)

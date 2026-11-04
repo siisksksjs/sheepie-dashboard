@@ -5,6 +5,8 @@ import {
   checkShopeeAlerts,
   pickShopeeAlert,
   sendOrderFailureEmail,
+  sendPollEmails,
+  sendSafely,
   sendShopeeAlert,
   sendSyncFailureEmail,
   type ShopeeAlert,
@@ -489,5 +491,81 @@ describe("sendOrderFailureEmail", () => {
     expect(body.html).not.toContain("<b>SN")
     expect(body.html).toContain("&lt;script&gt;x&lt;/script&gt; (A &amp; B)")
     expect(body.html).toContain("&lt;b&gt;SN&lt;/b&gt;")
+  })
+})
+
+describe("sendSafely", () => {
+  it("logs one line instead of throwing", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {})
+    await expect(sendSafely("Shopee test email failed", async () => Promise.reject(new Error("boom")))).resolves.toBe(
+      undefined
+    )
+    await sendSafely("Shopee test email failed", () => {
+      throw "not an error"
+    })
+    expect(errorLog.mock.calls).toEqual([["Shopee test email failed: boom"], ["Shopee test email failed: Unknown error"]])
+    errorLog.mockRestore()
+  })
+})
+
+describe("sendPollEmails", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  function pollSetup(conn: ShopeeConnection | null = connection(), counts = { push: 0, poll: 0 }) {
+    const email = emailSetup()
+    const store = fakeStore({
+      getConnection: vi.fn(async () => conn),
+      countRecentSyncedVia: vi.fn(async () => counts),
+    })
+    return { fetchImpl: email.fetchImpl, store, deps: { ...email.deps, store, now: () => NOW } }
+  }
+
+  const failedOrders: ShopeeFailedOrder[] = [{ orderSn: "A1", reason: "error", message: "apply failed" }]
+  const summary = { created: 0, updated: 0, queued: 1, skipped: 0, ledgerEntries: 0, failedOrders }
+
+  it("a failed poll that also queued orders sends the sync email and the order email", async () => {
+    const { fetchImpl, deps } = pollSetup()
+    await sendPollEmails({ status: "failed", consecutiveFailures: 1, error: "db down", summary }, deps)
+    expect(sentBodies(fetchImpl).map((body) => body.subject)).toEqual([
+      "Sheepie Dashboard: Shopee sync failed",
+      "Sheepie Dashboard: 1 Shopee order failed to sync",
+    ])
+  })
+
+  it("an ok poll sends only the order email for newly failed orders, then checks push_silent", async () => {
+    const { fetchImpl, deps } = pollSetup(connection(), { push: 0, poll: 2 })
+    await sendPollEmails({ status: "ok", consecutiveFailures: 0, summary }, deps)
+    expect(sentBodies(fetchImpl).map((body) => body.subject)).toEqual([
+      "Sheepie Dashboard: 1 Shopee order failed to sync",
+      "Sheepie Dashboard: no Shopee push received in 24 hours",
+    ])
+  })
+
+  it("an ok poll with no new failures sends nothing", async () => {
+    const { fetchImpl, deps } = pollSetup()
+    await sendPollEmails({ status: "ok", consecutiveFailures: 0, summary: { ...summary, failedOrders: [] } }, deps)
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("one email failing does not stop the others and never throws", async () => {
+    const { deps } = pollSetup(connection(), { push: 0, poll: 2 })
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {})
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("down", { status: 500 }))
+      .mockResolvedValue(new Response("{}", { status: 200 }))
+
+    await expect(
+      sendPollEmails(
+        { status: "failed", consecutiveFailures: 2, error: "db down", summary },
+        { ...deps, fetchImpl: fetchImpl as unknown as typeof fetch }
+      )
+    ).resolves.toBeUndefined()
+
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+    expect(errorLog.mock.calls).toEqual([["Shopee sync failure email failed: Resend failed with 500: down"]])
   })
 })

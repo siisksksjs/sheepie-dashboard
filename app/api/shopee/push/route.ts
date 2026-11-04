@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
 
 import { createSyncDeps } from "@/lib/shopee/deps"
+import { emailFailedOrdersLater } from "@/lib/shopee/failure-emails"
 import { handleShopeePush } from "@/lib/shopee/push"
 import type { SyncDeps } from "@/lib/shopee/sync"
 
@@ -27,7 +28,12 @@ export async function POST(request: NextRequest) {
 
   const result = await handleShopeePush(
     { rawBody: await request.text(), authorization: request.headers.get("authorization") },
-    { ...deps, pushKey, callbackUrl: process.env.SHOPEE_PUSH_CALLBACK_URL || DEFAULT_CALLBACK_URL }
+    {
+      ...deps,
+      pushKey,
+      callbackUrl: process.env.SHOPEE_PUSH_CALLBACK_URL || DEFAULT_CALLBACK_URL,
+      onFailedOrders: emailFailedOrdersLater,
+    }
   )
   return NextResponse.json(result.body, { status: result.status })
 }
