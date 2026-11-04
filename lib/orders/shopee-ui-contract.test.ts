@@ -22,6 +22,13 @@ describe("Shopee order sync UI", () => {
     expect(source).toContain("summary?.connected")
   })
 
+  it("shows a return to review without a dashboard order by its order number, with no order link", () => {
+    const source = read("components/shopee/sync-queue-list.tsx")
+    expect(source).toContain("#{item.order_sn}")
+    expect(source).toContain("isReturn && item.order_id")
+    expect(source).toContain("Check it in Shopee Seller Centre")
+  })
+
   it("reads the lean sync summary through the signed-in client", () => {
     const source = read("lib/actions/shopee.ts")
     expect(source).toContain("export async function getShopeeSyncSummary")

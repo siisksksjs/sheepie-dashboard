@@ -21,17 +21,22 @@ function QueueRow({ item }: { item: ShopeeQueueItem }) {
 
   const isReturn = item.reason === "return_review"
 
+  function describe(): string {
+    if (!isReturn) return item.message ?? "Something went wrong syncing this order."
+    if (item.order_id) {
+      return "The buyer asked Shopee for a return or refund. Open the order and choose whether the goods can be resold."
+    }
+    // The return came before the order ever reached the dashboard, so there is no order to open.
+    return `${item.message ?? "Return requested before the order was synced"}. Check it in Shopee Seller Centre, then mark it handled.`
+  }
+
   return (
     <li className="px-5 py-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="num font-semibold">#{item.order_sn}</span>
         {isReturn ? <Badge variant="warning">Return to review</Badge> : <Badge variant="destructive">Sync error</Badge>}
       </div>
-      <p className="mt-1 break-words text-[13.5px] text-muted-foreground">
-        {isReturn
-          ? "The buyer asked Shopee for a return or refund. Open the order and choose whether the goods can be resold."
-          : item.message ?? "Something went wrong syncing this order."}
-      </p>
+      <p className="mt-1 break-words text-[13.5px] text-muted-foreground">{describe()}</p>
       <div className="mt-3 flex gap-2">
         {isReturn && item.order_id && (
           <Button asChild size="sm">

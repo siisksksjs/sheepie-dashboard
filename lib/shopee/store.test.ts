@@ -66,6 +66,22 @@ describe("createShopeeStore queue", () => {
     ])
   })
 
+  it("return_review without a dashboard order leaves order_id unset", async () => {
+    const { supabase, upserts, updates } = fakeSupabase()
+
+    await createShopeeStore(supabase).queue("B", "return_review", {
+      message: "Return requested before the order was synced",
+    })
+
+    expect(upserts[0].values).toMatchObject({
+      order_sn: "B",
+      reason: "return_review",
+      detail: { message: "Return requested before the order was synced" },
+    })
+    expect(upserts[0].values).not.toHaveProperty("order_id")
+    expect(updates[0].values).not.toHaveProperty("order_id")
+  })
+
   it("re-queued unmapped and error rows reopen", async () => {
     const { supabase, upserts } = fakeSupabase()
     const store = createShopeeStore(supabase)

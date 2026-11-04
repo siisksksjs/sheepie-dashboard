@@ -249,17 +249,38 @@ describe("syncShopeeOrders", () => {
     expect(triggerNotificationSender).not.toHaveBeenCalled()
   })
 
-  it("queues returns for existing orders only", async () => {
+  it("queues returns for review, linking the dashboard order when there is one", async () => {
     const { state, store } = makeStore(connection())
     state.orders.set("A", { id: "order-a", status: "shipped" })
     const shopee = makeShopee([detail("A", "TO_RETURN"), detail("B", "TO_RETURN")])
 
     const summary = await syncShopeeOrders(["A", "B"], "poll", deps(store, shopee))
 
-    expect(summary).toMatchObject({ queued: 1, skipped: 1 })
-    expect(store.queue).toHaveBeenCalledTimes(1)
+    expect(summary).toMatchObject({ queued: 2, skipped: 0 })
+    expect(store.queue).toHaveBeenCalledTimes(2)
     expect(store.queue).toHaveBeenCalledWith("A", "return_review", {}, "order-a")
+    expect(store.queue).toHaveBeenCalledWith("B", "return_review", {
+      message: "Return requested before the order was synced",
+    })
     expect(store.applyOrder).not.toHaveBeenCalled()
+  })
+
+  it("return on first sight is queued for review and its open queue row is not resolved", async () => {
+    const { state, store } = makeStore(connection())
+    // B failed earlier and never reached the dashboard; now the buyer wants a return.
+    state.queue.set("B", { reason: "error", detail: { message: "timeout" }, resolvedAt: null })
+    const shopee = makeShopee([detail("B", "TO_RETURN")])
+
+    const summary = await syncShopeeOrders(["B"], "poll", deps(store, shopee))
+
+    expect(summary).toMatchObject({ queued: 1, skipped: 0 })
+    expect(store.resolveQueue).not.toHaveBeenCalled()
+    expect(state.queue.get("B")).toEqual({
+      reason: "return_review",
+      detail: { message: "Return requested before the order was synced" },
+      orderId: undefined,
+      resolvedAt: null,
+    })
   })
 
   it("returned order is not queued for return review", async () => {
@@ -279,6 +300,8 @@ describe("syncShopeeOrders", () => {
     for (const sn of ["OLD", "RTS", "HOLD", "GONE", "RET"]) {
       state.queue.set(sn, { reason: sn === "HOLD" ? "unmapped_item" : "error", detail: {}, resolvedAt: null })
     }
+    // Staff already recorded this return, so there is nothing to review.
+    state.orders.set("RET", { id: "order-ret", status: "returned" })
     state.applyResult = () => ({ action: "skipped", orderId: null, ledgerEntries: 0 })
     const shopee = makeShopee([
       detail("OLD", "PROCESSED", { create_time: beforeStart }),

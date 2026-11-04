@@ -14,6 +14,7 @@ import type { ApplyResult, ShopeeConnection, ShopeeStore } from "./store"
 const TOKEN_REFRESH_THRESHOLD_MS = 60 * 60 * 1000
 /** Each poll re-reads this much before the last cursor to catch boundary orders. */
 const POLL_OVERLAP_MS = 60 * 60 * 1000
+const RETURN_BEFORE_SYNC = "Return requested before the order was synced"
 /** Waits before the 2nd and 3rd attempt to save freshly refreshed tokens. */
 const SAVE_TOKENS_BACKOFF_MS = [200, 500]
 
@@ -110,8 +111,14 @@ async function syncOne(
 
   if (action.kind === "return_review") {
     const order = await store.findOrder(sn)
-    // Not in the dashboard, or staff already recorded the return: nothing to review.
-    if (!order || order.status === "returned") return { kind: "skipped" }
+    if (!order) {
+      // First sight is already a return (e.g. it failed or was unmapped until now):
+      // staff still need to see it, so it takes over any open queue row.
+      await store.queue(sn, "return_review", { message: RETURN_BEFORE_SYNC })
+      return { kind: "queued" }
+    }
+    // Staff already recorded the return: nothing to review.
+    if (order.status === "returned") return { kind: "skipped" }
     await store.queue(sn, "return_review", {}, order.id)
     return { kind: "queued" }
   }
