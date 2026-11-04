@@ -113,6 +113,15 @@ async function syncWithConnection(
   const details = await shopee.getOrderDetails(authOf(conn), sns)
   const listingMap = await store.loadListingMap()
 
+  // get_order_detail can silently omit orders. Queue those so the next poll
+  // retries them instead of losing them once the cursor moves past.
+  const returned = new Set(details.map((detail) => detail.order_sn))
+  for (const sn of sns) {
+    if (returned.has(sn)) continue
+    await store.queue(sn, "error", { message: "Shopee returned no detail" })
+    summary.queued++
+  }
+
   for (const detail of details) {
     const sn = detail.order_sn
     try {

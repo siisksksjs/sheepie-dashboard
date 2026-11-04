@@ -394,6 +394,26 @@ describe("pollShopeeOrders", () => {
     expect(state.connection?.consecutiveFailures).toBe(0)
   })
 
+  it("sn missing from order detail is queued as error", async () => {
+    const { state, store } = makeStore(connection())
+    // Shopee lists A and B, but get_order_detail only returns A.
+    const shopee = makeShopee([detail("A", "PROCESSED")])
+    shopee.listOrderSns.mockResolvedValue(["A", "B"])
+
+    const result = await pollShopeeOrders(deps(store, shopee), { allowRefresh: true })
+
+    expect(result).toEqual({
+      status: "ok",
+      consecutiveFailures: 0,
+      summary: { created: 1, updated: 0, queued: 1, skipped: 0, ledgerEntries: 1 },
+    })
+    expect(store.queue).toHaveBeenCalledWith("B", "error", { message: "Shopee returned no detail" })
+    expect(store.applyOrder.mock.calls.map(([payload]) => payload.order_sn)).toEqual(["A"])
+    expect(store.saveCursor).toHaveBeenCalledWith(NOW)
+    expect(await store.openRetryableSns()).toEqual(["B"])
+    expect(state.queue.get("B")?.resolvedAt).toBeNull()
+  })
+
   it("first poll window starts one hour before sync_start_at", async () => {
     const { store } = makeStore(connection({ lastSyncedUntil: null }))
     const shopee = makeShopee()
