@@ -24,10 +24,18 @@ export function ShopeeLiveRefresh() {
       refreshTimer = setTimeout(() => router.refresh(), REFRESH_DEBOUNCE_MS)
     }
 
+    let cancelled = false
     let supabase: ReturnType<typeof createClient> | undefined
     let channel: ReturnType<ReturnType<typeof createClient>["channel"]> | undefined
-    try {
+
+    const subscribe = async () => {
       supabase = createClient()
+      // A session restored from cookies fires INITIAL_SESSION, which supabase-js does not pass
+      // to Realtime, so the channel would join as anon and RLS would drop every orders event.
+      const { data } = await supabase.auth.getSession()
+      if (cancelled) return
+      if (data.session) await supabase.realtime.setAuth(data.session.access_token)
+      if (cancelled) return
       channel = supabase
         .channel("shopee-orders-live")
         .on(
@@ -41,11 +49,14 @@ export function ShopeeLiveRefresh() {
         )
         .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders", filter: "source=eq.shopee_api" }, scheduleRefresh)
         .subscribe()
-    } catch {
-      // Realtime unavailable: pages still refresh on navigation.
     }
 
+    subscribe().catch(() => {
+      // Realtime unavailable: pages still refresh on navigation.
+    })
+
     return () => {
+      cancelled = true
       clearTimeout(refreshTimer)
       try {
         if (supabase && channel) void supabase.removeChannel(channel)
