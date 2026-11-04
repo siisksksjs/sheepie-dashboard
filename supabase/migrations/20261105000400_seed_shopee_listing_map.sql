@@ -1,7 +1,7 @@
 -- Initial Shopee listing → SKU mapping, built from the shop's listings on 2026-11-04
 -- (83 item/model pairs, listed and unlisted). Rules: Blue → Lumi-001, Apricot → Lumi-002,
 -- "Bundle of N" → bundle_N, kit options → the matching kit SKU (Apricot kits use the -Apricot SKU).
--- Assumed Blue where the listing has no colour: the CalmiCloud listing's "Silence Darkness Kit",
+-- Blue where the listing has no colour (confirmed by the owner, 2026-11-04): the CalmiCloud listing's "Silence Darkness Kit",
 -- the "Night Comfort Kit" listing and the "Deep Sleep Kit" listing.
 -- Not mapped (no matching SKU): Travel Bundle, Deep Sleep Bundle Ramadan (both unlisted).
 -- Only rows whose SKU exists are inserted, and existing mappings are never overwritten,
