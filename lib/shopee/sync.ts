@@ -144,7 +144,26 @@ async function syncOne(
     return { kind: "queued", failed: { orderSn: sn, reason: "unmapped_item", items } }
   }
 
-  return { kind: "applied", result: await store.applyOrder(built.payload, via) }
+  const result = await store.applyOrder(built.payload, via)
+  const changed = result.action === "created" || result.action === "updated"
+  if (changed && result.orderId && action.status !== "cancelled") {
+    await refreshChannelFees(sn, result.orderId, conn, deps)
+  }
+  return { kind: "applied", result }
+}
+
+/**
+ * Sets the order's channel fees from Shopee's income figures: an estimate until
+ * COMPLETED, final after (each status change refreshes it). Never throws: a
+ * failed lookup leaves the fees as they are until the order's next status change.
+ */
+async function refreshChannelFees(sn: string, orderId: string, conn: ReadyConnection, deps: SyncDeps): Promise<void> {
+  try {
+    const { sellingPrice, escrowAmount } = await deps.shopee.getEscrowDetail(authOf(conn), sn)
+    await deps.store.setChannelFees(orderId, Math.max(0, Math.round(sellingPrice - escrowAmount)))
+  } catch (error) {
+    console.warn(`Shopee sync: could not update channel fees for order ${sn}: ${errorMessage(error)}`)
+  }
 }
 
 /** Queues the order as `error`, adding it to `summary.failedOrders` when the row newly opened. */

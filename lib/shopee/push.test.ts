@@ -92,6 +92,7 @@ function makeDeps(conn: ShopeeConnection | null, details: ShopeeOrderDetail[] = 
     ),
     listOrderSns: vi.fn(async () => []),
     getOrderDetails: vi.fn(async (_auth: unknown, sns: string[]) => details.filter((d) => sns.includes(d.order_sn))),
+    getEscrowDetail: vi.fn(async () => ({ sellingPrice: 99000, escrowAmount: 79000 })),
   }
 
   const deps: SyncDeps & { pushKey: string; callbackUrl: string } = {

@@ -6,6 +6,7 @@ import {
   ShopeeApiError,
   createShopeeClient,
   type ShopeeAuth,
+  type ShopeeEscrow,
   type ShopeeOrderDetail,
   type ShopeeTokens,
 } from "./client"
@@ -146,6 +147,10 @@ function makeShopee(details: ShopeeOrderDetail[] = []) {
     getOrderDetails: vi.fn(async (_auth: unknown, sns: string[]) =>
       details.filter((d) => sns.includes(d.order_sn))
     ),
+    getEscrowDetail: vi.fn<(auth: ShopeeAuth, orderSn: string) => Promise<ShopeeEscrow>>(async () => ({
+      sellingPrice: 198000,
+      escrowAmount: 158000,
+    })),
   }
   return shopee
 }
@@ -738,5 +743,156 @@ describe("newly failed orders", () => {
     expect(result.status).toBe("failed")
     expect(result.error).toBe("db down")
     expect(result.summary?.failedOrders).toEqual([{ orderSn: "A", reason: "error", message: "apply A failed" }])
+  })
+})
+
+describe("channel fees", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+  })
+
+  it("a created paid order gets Shopee's fees: selling price minus escrow", async () => {
+    const { state, store } = makeStore(connection())
+    const shopee = makeShopee([detail("A", "PROCESSED")])
+    shopee.getEscrowDetail.mockResolvedValue({ sellingPrice: 88000, escrowAmount: 70470 })
+
+    const summary = await syncShopeeOrders(["A"], "push", deps(store, shopee))
+
+    expect(summary.created).toBe(1)
+    expect(shopee.getEscrowDetail).toHaveBeenCalledTimes(1)
+    expect(shopee.getEscrowDetail).toHaveBeenCalledWith({ shopId: 555, accessToken: "access_live_secret" }, "A")
+    expect(store.setChannelFees).toHaveBeenCalledWith("order-uuid", 17530)
+    expect(state.channelFees.get("order-uuid")).toBe(17530)
+  })
+
+  it("a status change refreshes the fees", async () => {
+    const { store, state } = makeStore(connection())
+    state.channelFees.set("order-a", 162760)
+    state.applyResult = () => ({ action: "updated", orderId: "order-a", ledgerEntries: 0 })
+    const shopee = makeShopee([detail("A", "COMPLETED")])
+    shopee.getEscrowDetail.mockResolvedValue({ sellingPrice: 838000, escrowAmount: 671050 })
+
+    const summary = await syncShopeeOrders(["A"], "poll", deps(store, shopee))
+
+    expect(summary.updated).toBe(1)
+    expect(store.setChannelFees).toHaveBeenCalledWith("order-a", 166950)
+    expect(state.channelFees.get("order-a")).toBe(166950)
+  })
+
+  it("rounds to whole rupiah and never goes below zero", async () => {
+    for (const [escrow, fees] of [
+      [{ sellingPrice: 88000, escrowAmount: 70469.6 }, 17530],
+      [{ sellingPrice: 88000, escrowAmount: 90000 }, 0],
+    ] as const) {
+      const { store } = makeStore(connection())
+      const shopee = makeShopee([detail("A", "PROCESSED")])
+      shopee.getEscrowDetail.mockResolvedValue(escrow)
+
+      await syncShopeeOrders(["A"], "poll", deps(store, shopee))
+
+      expect(store.setChannelFees).toHaveBeenCalledWith("order-uuid", fees)
+    }
+  })
+
+  it("does not look up fees for unchanged, skipped, queued or cancelled orders", async () => {
+    const { state, store } = makeStore(connection())
+    state.orders.set("RET", { id: "order-ret", status: "shipped" })
+    state.applyResult = (payload) => {
+      if (payload.order_sn === "SAME") return { action: "unchanged", orderId: "order-same", ledgerEntries: 0 }
+      if (payload.order_sn === "NEW_CANCEL") return { action: "skipped", orderId: null, ledgerEntries: 0 }
+      return { action: "updated", orderId: `order-${payload.order_sn}`, ledgerEntries: 1 }
+    }
+    const unmappedItem = { ...detail("X", "PROCESSED").item_list[0], item_id: 2 }
+    const shopee = makeShopee([
+      detail("SAME", "SHIPPED"),
+      detail("NEW_CANCEL", "CANCELLED"),
+      detail("CANCEL", "CANCELLED"),
+      detail("RTS", "READY_TO_SHIP"),
+      detail("UNMAPPED", "PROCESSED", { item_list: [unmappedItem] }),
+      detail("RET", "TO_RETURN"),
+    ])
+
+    const summary = await syncShopeeOrders(
+      ["SAME", "NEW_CANCEL", "CANCEL", "RTS", "UNMAPPED", "RET"],
+      "poll",
+      deps(store, shopee)
+    )
+
+    expect(summary).toMatchObject({ updated: 1, skipped: 3, queued: 2 })
+    expect(shopee.getEscrowDetail).not.toHaveBeenCalled()
+    expect(store.setChannelFees).not.toHaveBeenCalled()
+  })
+
+  it("a failed fee lookup still creates the order and is not a sync failure", async () => {
+    for (const failure of [
+      new ShopeeApiError("http_502", "Shopee API /api/v2/payment/get_escrow_detail: HTTP 502 with a non-JSON body"),
+      new ShopeeApiError("error_not_found", "Shopee API /api/v2/payment/get_escrow_detail: error_not_found - no order"),
+      new TypeError("fetch failed"),
+    ]) {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+      const { state, store } = makeStore(connection())
+      state.queue.set("A", { reason: "error", detail: {}, resolvedAt: null })
+      const shopee = makeShopee([detail("A", "PROCESSED")])
+      shopee.listOrderSns.mockResolvedValue(["A"])
+      shopee.getEscrowDetail.mockRejectedValue(failure)
+
+      const result = await pollShopeeOrders(deps(store, shopee), { allowRefresh: false })
+
+      expect(result).toEqual({
+        status: "ok",
+        consecutiveFailures: 0,
+        summary: { created: 1, updated: 0, queued: 0, skipped: 0, ledgerEntries: 1, failedOrders: [] },
+      })
+      expect(store.queue).not.toHaveBeenCalled()
+      expect(state.queue.get("A")?.resolvedAt).toEqual(NOW)
+      expect(store.setChannelFees).not.toHaveBeenCalled()
+      expect(store.recordFailure).not.toHaveBeenCalled()
+      expect(warn).toHaveBeenCalledTimes(1)
+      const [line] = warn.mock.calls[0]
+      expect(line).toContain("A")
+      expect(line).toContain(failure.message)
+      expect(line).not.toContain("access_live_secret")
+      expect(line).not.toContain("refresh_live_secret")
+      warn.mockRestore()
+    }
+  })
+
+  it("a failed fee save is also not a sync failure", async () => {
+    const { store } = makeStore(connection())
+    store.setChannelFees.mockRejectedValue(new Error("Shopee store setChannelFees failed: db down"))
+    const shopee = makeShopee([detail("A", "PROCESSED")])
+
+    const summary = await syncShopeeOrders(["A"], "push", deps(store, shopee))
+
+    expect(summary).toEqual({ created: 1, updated: 0, queued: 0, skipped: 0, ledgerEntries: 1, failedOrders: [] })
+    expect(store.queue).not.toHaveBeenCalled()
+    expect(store.resolveQueue).toHaveBeenCalledWith("A")
+  })
+
+  it("a malformed escrow response from the real client is a failed lookup", async () => {
+    const { store } = makeStore(connection())
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.pathname === "/api/v2/order/get_order_detail") {
+        return new Response(JSON.stringify({ error: "", response: { order_list: [detail("A", "PROCESSED")] } }))
+      }
+      return new Response(JSON.stringify({ error: "", response: { order_income: { order_selling_price: 88000 } } }))
+    })
+    const shopee = createShopeeClient({
+      partnerId: 2042739,
+      partnerKey: "partner_key_secret",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      now: () => NOW.getTime(),
+    })
+
+    const summary = await syncShopeeOrders(["A"], "push", { store, shopee, now: () => NOW })
+
+    expect(summary).toEqual({ created: 1, updated: 0, queued: 0, skipped: 0, ledgerEntries: 1, failedOrders: [] })
+    expect(fetchImpl.mock.calls.map(([input]) => new URL(String(input)).pathname)).toEqual([
+      "/api/v2/order/get_order_detail",
+      "/api/v2/payment/get_escrow_detail",
+    ])
+    expect(store.setChannelFees).not.toHaveBeenCalled()
+    expect(store.queue).not.toHaveBeenCalled()
   })
 })
