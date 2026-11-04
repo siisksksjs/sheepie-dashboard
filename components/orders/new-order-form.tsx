@@ -47,6 +47,8 @@ type Props = {
   channelPrices: ProductChannelPackPrice[]
   /** Prefill from an earlier order ("change something first" in Quick log). */
   initial?: NewOrderInitial
+  /** Shopee orders sync by themselves (sync_start_at is set): ask before logging one by hand. */
+  shopeeSyncLive: boolean
 }
 
 function createEmptyLineItem(): LineItem {
@@ -97,7 +99,7 @@ function allocatePricesByDefaultRatio(
   }))
 }
 
-export function NewOrderForm({ products, packSizes, channelPrices, initial }: Props) {
+export function NewOrderForm({ products, packSizes, channelPrices, initial, shopeeSyncLive }: Props) {
   const router = useRouter()
   const [lineItems, setLineItems] = useState<LineItem[]>(() => (initial?.lineItems ?? []).map((item) => ({ ...item, id: crypto.randomUUID() })))
   const [saving, setSaving] = useState(false)
@@ -254,9 +256,19 @@ export function NewOrderForm({ products, packSizes, channelPrices, initial }: Pr
     }
 
     const formData = new FormData(e.currentTarget)
+    const channel = formData.get("channel") as Channel
+    if (
+      channel === "shopee" &&
+      shopeeSyncLive &&
+      !confirm("Shopee orders now sync automatically. Log this one manually anyway?")
+    ) {
+      setSaving(false)
+      return
+    }
+
     const result = await createOrder({
       order_id: formData.get("order_id") as string,
-      channel: formData.get("channel") as Channel,
+      channel,
       order_date: formData.get("order_date") as string,
       status: formData.get("status") as OrderStatus,
       channel_fees: formData.get("channel_fees")

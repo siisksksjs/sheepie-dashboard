@@ -31,6 +31,17 @@ type Props = {
   images: Record<string, string>
 }
 
+function ApiTag() {
+  return (
+    <span
+      title="Synced from Shopee"
+      className="ml-1.5 inline-block rounded-[5px] bg-primary/10 px-1.5 py-px align-middle text-[10px] font-bold uppercase tracking-wide text-primary"
+    >
+      API
+    </span>
+  )
+}
+
 function lineLabel(item: OrderListLineItem) {
   return `${item.quantity > 1 ? `${item.quantity}× ` : ""}${item.product_name}${item.pack_size && item.pack_size !== "single" ? ` · ${getPackSizeLabel(item.pack_size)}` : ""}`
 }
@@ -120,7 +131,8 @@ export function OrdersListClient({ orders, images }: Props) {
                   <span className="min-w-0 flex-1">
                     <span className="block text-[14px] font-bold leading-snug">{order.order_line_items.map(lineLabel).join(" + ") || "No items"}</span>
                     <span className="num mt-0.5 block text-[12px] text-muted-foreground">
-                      {PLATFORMS[order.channel as Channel].label} · {order.order_id} · {formatDate(order.order_date)}
+                      {PLATFORMS[order.channel as Channel].label} · {order.order_id}
+                      {order.source === "shopee_api" && <ApiTag />} · {formatDate(order.order_date)}
                     </span>
                   </span>
                   <Badge variant={statusBadges[order.status]}>{order.status.charAt(0).toUpperCase() + order.status.slice(1)}</Badge>
@@ -164,6 +176,7 @@ export function OrdersListClient({ orders, images }: Props) {
                       <span className="block truncate text-[14px] font-bold">{order.order_line_items.map(lineLabel).join(" + ") || "No items"}</span>
                       <span className="num block truncate text-[12px] text-muted-foreground">
                         {PLATFORMS[order.channel as Channel].label} · {order.order_id}
+                        {order.source === "shopee_api" && <ApiTag />}
                         {order.notes ? ` · ${order.notes}` : ""}
                       </span>
                     </span>

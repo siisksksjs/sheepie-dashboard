@@ -1,7 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isPublicShopeeApiPath } from "@/lib/shopee/public-paths";
+
 export async function updateSession(request: NextRequest) {
+  // Shopee push and the cron/script endpoints have no session; each route
+  // checks its own signature or secret header.
+  if (isPublicShopeeApiPath(request.nextUrl.pathname)) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });

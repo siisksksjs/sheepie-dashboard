@@ -9,6 +9,14 @@ const migration = new URL(
   "../../supabase/migrations/20261003050501_order_return_disposition.sql",
   import.meta.url
 )
+const shopeeMigration = new URL(
+  "../../supabase/migrations/20261105000100_add_shopee_sync.sql",
+  import.meta.url
+)
+const changelogMigration = new URL(
+  "../../supabase/migrations/20260316_add_changelog.sql",
+  import.meta.url
+)
 
 if (!databaseUrl) {
   describe.skip("return inventory PostgreSQL integration", () => {
@@ -29,6 +37,7 @@ if (!databaseUrl) {
         )
       await db.query(`
         CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN;
+        CREATE ROLE service_role NOLOGIN;
         CREATE SCHEMA auth; CREATE TABLE auth.users (id uuid PRIMARY KEY);
         CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
         CREATE FUNCTION auth.role() RETURNS text LANGUAGE sql STABLE AS $$ SELECT current_setting('role', true) $$;
@@ -45,11 +54,14 @@ if (!databaseUrl) {
       )
       await db.query(`
         ALTER TABLE public.order_line_items ADD COLUMN pack_size text DEFAULT 'single';
+        ALTER TABLE public.order_line_items ADD COLUMN cost_per_unit_snapshot numeric;
         GRANT USAGE ON SCHEMA public, auth TO authenticated, anon;
         GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO authenticated;
         GRANT SELECT ON auth.users TO authenticated;
       `)
+      await db.query(await readFile(changelogMigration, "utf8"))
       await db.query(await readFile(migration, "utf8"))
+      await db.query(await readFile(shopeeMigration, "utf8"))
       await db.query("set role authenticated")
       await db.query("select set_config('request.jwt.claim.sub', $1, false)", [
         userId
@@ -297,6 +309,34 @@ if (!databaseUrl) {
       } finally {
         await worker.end()
       }
+    })
+    it("keeps the shared inventory helper and Shopee sync tables locked down", async () => {
+      const f = await fixture()
+      await expect(
+        db.query(
+          "select public._apply_order_inventory($1,'OUT_SALE','x',false,$2)",
+          [f.id, userId]
+        )
+      ).rejects.toThrow(/permission denied/)
+      await expect(
+        db.query("select * from public.marketplace_connections")
+      ).rejects.toThrow(/permission denied/)
+      await db.query("reset role")
+      await db.query(
+        "insert into shopee_sync_queue(order_sn, reason) values($1,'error')",
+        [f.label]
+      )
+      await db.query("set role authenticated")
+      await db.query(
+        "update shopee_sync_queue set resolved_at = now() where order_sn = $1",
+        [f.label]
+      )
+      await expect(
+        db.query(
+          "update shopee_sync_queue set reason = 'error' where order_sn = $1",
+          [f.label]
+        )
+      ).rejects.toThrow(/permission denied/)
     })
     it("requires authenticated execution and an actual user identity", async () => {
       const f = await fixture()

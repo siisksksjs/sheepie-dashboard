@@ -1,0 +1,297 @@
+import { describe, expect, it } from "vitest"
+import { ShopeeApiError, createShopeeClient } from "./client"
+import { signApiRequest } from "./signing"
+
+const PARTNER_KEY = "super_secret_partner_key"
+const NOW_MS = 1730700000_000
+const auth = { shopId: 123456789, accessToken: "tok_abc" }
+
+type Call = { url: URL; init?: RequestInit }
+
+function fakeFetch(respond: (call: Call, index: number) => unknown, status = 200) {
+  const calls: Call[] = []
+  const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+    const call = { url: new URL(String(input)), init }
+    calls.push(call)
+    return new Response(JSON.stringify(respond(call, calls.length - 1)), { status })
+  }) as typeof fetch
+  return { calls, fetchImpl }
+}
+
+function makeClient(fetchImpl: typeof fetch) {
+  return createShopeeClient({ partnerId: 2042739, partnerKey: PARTNER_KEY, fetchImpl, now: () => NOW_MS })
+}
+
+describe("buildAuthUrl", () => {
+  it("builds a signed auth_partner url", () => {
+    const client = makeClient(fakeFetch(() => ({})).fetchImpl)
+    const url = new URL(client.buildAuthUrl("https://dashboard.sheepiesleep.com/api/shopee/callback"))
+    expect(url.origin + url.pathname).toBe("https://partner.shopeemobile.com/api/v2/shop/auth_partner")
+    expect(url.searchParams.get("partner_id")).toBe("2042739")
+    expect(url.searchParams.get("timestamp")).toBe("1730700000")
+    expect(url.searchParams.get("redirect")).toBe("https://dashboard.sheepiesleep.com/api/shopee/callback")
+    expect(url.searchParams.get("sign")).toMatch(/^[0-9a-f]{64}$/)
+  })
+})
+
+describe("tokens", () => {
+  it("getTokens posts code and maps expiry", async () => {
+    const { calls, fetchImpl } = fakeFetch(() => ({
+      error: "",
+      message: "",
+      access_token: "a1",
+      refresh_token: "r1",
+      expire_in: 14400,
+    }))
+    const tokens = await makeClient(fetchImpl).getTokens("code123", 123456789)
+    expect(calls[0].url.pathname).toBe("/api/v2/auth/token/get")
+    expect(calls[0].init?.method).toBe("POST")
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ code: "code123", shop_id: 123456789, partner_id: 2042739 })
+    expect(tokens.accessToken).toBe("a1")
+    expect(tokens.refreshToken).toBe("r1")
+    expect(tokens.accessExpiresAt.getTime()).toBe(NOW_MS + (14400 - 300) * 1000)
+    expect(tokens.refreshExpiresAt.getTime()).toBe(NOW_MS + 30 * 86400 * 1000)
+  })
+
+  it("refreshTokens posts refresh token with partner and shop id", async () => {
+    const { calls, fetchImpl } = fakeFetch(() => ({ access_token: "a2", refresh_token: "r2", expire_in: 14400 }))
+    const tokens = await makeClient(fetchImpl).refreshTokens("r1", 123456789)
+    expect(calls[0].url.pathname).toBe("/api/v2/auth/access_token/get")
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+      refresh_token: "r1",
+      shop_id: 123456789,
+      partner_id: 2042739,
+    })
+    expect(tokens.accessToken).toBe("a2")
+    expect(tokens.refreshToken).toBe("r2")
+  })
+
+  it("defaults expiry to 4 hours when expire_in is absent", async () => {
+    const { fetchImpl } = fakeFetch(() => ({ access_token: "a2", refresh_token: "r2" }))
+    const tokens = await makeClient(fetchImpl).refreshTokens("r1", 123456789)
+    expect(tokens.accessExpiresAt.getTime()).toBe(NOW_MS + (14400 - 300) * 1000)
+  })
+
+  it("rejects a token response without usable tokens or expiry as http_malformed", async () => {
+    const malformed = [
+      {},
+      { access_token: "", refresh_token: "r2", expire_in: 14400 },
+      { access_token: "a2", refresh_token: "", expire_in: 14400 },
+      { access_token: "a2", expire_in: 14400 },
+      { access_token: 123, refresh_token: "r2", expire_in: 14400 },
+      { access_token: "a2", refresh_token: null, expire_in: 14400 },
+      { access_token: "a2", refresh_token: "r2", expire_in: "soon" },
+      { access_token: "a2", refresh_token: "r2", expire_in: null },
+    ]
+    for (const body of malformed) {
+      const { fetchImpl } = fakeFetch(() => body)
+      for (const call of [
+        (c: ReturnType<typeof makeClient>) => c.refreshTokens("r1", 1),
+        (c: ReturnType<typeof makeClient>) => c.getTokens("code", 1),
+      ]) {
+        const err = await call(makeClient(fetchImpl)).catch((e: unknown) => e)
+        expect(err, JSON.stringify(body)).toBeInstanceOf(ShopeeApiError)
+        expect((err as ShopeeApiError).code).toBe("http_malformed")
+        expect((err as ShopeeApiError).message).not.toContain("a2")
+        expect((err as ShopeeApiError).message).not.toContain("r2")
+      }
+    }
+  })
+})
+
+describe("listOrderSns", () => {
+  it("splits 20 days into two calls and follows cursor", async () => {
+    const from = 1730000000
+    const to = from + 20 * 86400
+    const { calls, fetchImpl } = fakeFetch((call, i) => {
+      if (i === 0) return { error: "", response: { order_list: [{ order_sn: "A" }, { order_sn: "B" }], more: true, next_cursor: "c2" } }
+      if (i === 1) return { error: "", response: { order_list: [{ order_sn: "C" }], more: false } }
+      return { error: "", response: { order_list: [{ order_sn: "D" }], more: false } }
+    })
+    const sns = await makeClient(fetchImpl).listOrderSns(auth, { from, to })
+
+    expect(sns).toEqual(["A", "B", "C", "D"])
+    expect(calls).toHaveLength(3)
+    const p = calls.map((c) => c.url.searchParams)
+    expect(calls[0].url.pathname).toBe("/api/v2/order/get_order_list")
+    expect(calls[0].init?.method ?? "GET").toBe("GET")
+    expect(p[0].get("time_range_field")).toBe("update_time")
+    expect(p[0].get("page_size")).toBe("100")
+    expect(p[0].get("time_from")).toBe(String(from))
+    expect(p[0].get("time_to")).toBe(String(from + 15 * 86400))
+    expect(p[0].get("cursor")).toBe("")
+    expect(p[1].get("time_from")).toBe(String(from))
+    expect(p[1].get("time_to")).toBe(String(from + 15 * 86400))
+    expect(p[1].get("cursor")).toBe("c2")
+    expect(p[2].get("time_from")).toBe(String(from + 15 * 86400))
+    expect(p[2].get("time_to")).toBe(String(to))
+    expect(p[2].get("cursor")).toBe("")
+    expect(p[0].get("access_token")).toBe("tok_abc")
+    expect(p[0].get("shop_id")).toBe("123456789")
+  })
+
+  it("throws http_malformed_cursor when more is true but next_cursor is empty", async () => {
+    for (const page of [{ more: true, next_cursor: "" }, { more: true }]) {
+      const { calls, fetchImpl } = fakeFetch(() => ({ error: "", response: { order_list: [{ order_sn: "A" }], ...page } }))
+      const err = await makeClient(fetchImpl)
+        .listOrderSns(auth, { from: 0, to: 100 })
+        .catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(ShopeeApiError)
+      expect((err as ShopeeApiError).code).toBe("http_malformed_cursor")
+      expect(calls).toHaveLength(1)
+    }
+  })
+
+  it("returns an empty list for an empty range", async () => {
+    const { calls, fetchImpl } = fakeFetch(() => ({}))
+    expect(await makeClient(fetchImpl).listOrderSns(auth, { from: 100, to: 100 })).toEqual([])
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe("getOrderDetails", () => {
+  it("batches 120 sns as 50/50/20", async () => {
+    const sns = Array.from({ length: 120 }, (_, i) => `SN${i}`)
+    const { calls, fetchImpl } = fakeFetch((call) => ({
+      error: "",
+      response: {
+        order_list: (call.url.searchParams.get("order_sn_list") ?? "").split(",").map((sn) => ({
+          order_sn: sn,
+          order_status: "READY_TO_SHIP",
+          create_time: 1,
+          update_time: 2,
+          item_list: [],
+        })),
+      },
+    }))
+    const details = await makeClient(fetchImpl).getOrderDetails(auth, sns)
+
+    expect(calls.map((c) => c.url.searchParams.get("order_sn_list")!.split(",").length)).toEqual([50, 50, 20])
+    expect(calls[0].url.pathname).toBe("/api/v2/order/get_order_detail")
+    expect(calls[0].url.searchParams.get("response_optional_fields")).toBe("item_list,order_status")
+    expect(details).toHaveLength(120)
+    expect(details[119].order_sn).toBe("SN119")
+  })
+
+  it("makes no request for an empty list", async () => {
+    const { calls, fetchImpl } = fakeFetch(() => ({}))
+    expect(await makeClient(fetchImpl).getOrderDetails(auth, [])).toEqual([])
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe("getEscrowDetail", () => {
+  it("makes a shop-level signed GET for one order and parses the income numbers", async () => {
+    const { calls, fetchImpl } = fakeFetch(() => ({
+      error: "",
+      response: { order_sn: "SN1", order_income: { order_selling_price: 838000, escrow_amount: 675240, buyer_total_amount: 0 } },
+    }))
+
+    const result = await makeClient(fetchImpl).getEscrowDetail(auth, "SN1")
+
+    expect(result).toEqual({ sellingPrice: 838000, escrowAmount: 675240 })
+    expect(calls).toHaveLength(1)
+    const { url, init } = calls[0]
+    expect(url.pathname).toBe("/api/v2/payment/get_escrow_detail")
+    expect(init?.method).toBe("GET")
+    expect(init?.body).toBeUndefined()
+    expect(url.searchParams.get("order_sn")).toBe("SN1")
+    expect(url.searchParams.get("partner_id")).toBe("2042739")
+    expect(url.searchParams.get("timestamp")).toBe("1730700000")
+    expect(url.searchParams.get("access_token")).toBe("tok_abc")
+    expect(url.searchParams.get("shop_id")).toBe("123456789")
+    expect(url.searchParams.get("sign")).toBe(
+      signApiRequest({
+        partnerId: 2042739,
+        partnerKey: PARTNER_KEY,
+        path: "/api/v2/payment/get_escrow_detail",
+        timestamp: 1730700000,
+        accessToken: "tok_abc",
+        shopId: 123456789,
+      })
+    )
+  })
+
+  it("rejects a response without finite income numbers as http_malformed", async () => {
+    const malformed = [
+      {},
+      { response: {} },
+      { response: { order_income: null } },
+      { response: { order_income: { escrow_amount: 70470 } } },
+      { response: { order_income: { order_selling_price: 88000 } } },
+      { response: { order_income: { order_selling_price: "88000", escrow_amount: 70470 } } },
+      { response: { order_income: { order_selling_price: 88000, escrow_amount: null } } },
+    ]
+    for (const body of malformed) {
+      const { fetchImpl } = fakeFetch(() => body)
+      const err = await makeClient(fetchImpl)
+        .getEscrowDetail(auth, "SN1")
+        .catch((e: unknown) => e)
+      expect(err, JSON.stringify(body)).toBeInstanceOf(ShopeeApiError)
+      expect((err as ShopeeApiError).code).toBe("http_malformed")
+      expect((err as ShopeeApiError).message).not.toContain(auth.accessToken)
+    }
+  })
+
+  it("passes Shopee API errors through", async () => {
+    const { fetchImpl } = fakeFetch(() => ({ error: "error_not_found", message: "order not found" }))
+    await expect(makeClient(fetchImpl).getEscrowDetail(auth, "SN1")).rejects.toMatchObject({
+      code: "error_not_found",
+    })
+  })
+})
+
+describe("errors", () => {
+  it("api error throws ShopeeApiError with code (even on HTTP 200)", async () => {
+    const { fetchImpl } = fakeFetch(() => ({ error: "invalid_acceess_token", message: "Invalid access_token" }))
+    const err = await makeClient(fetchImpl)
+      .listOrderSns(auth, { from: 0, to: 100 })
+      .catch((e) => e)
+    expect(err).toBeInstanceOf(ShopeeApiError)
+    expect(err.code).toBe("invalid_acceess_token")
+    expect(err.message).toContain("Invalid access_token")
+  })
+
+  it("throws ShopeeApiError on error with non-2xx status", async () => {
+    const { fetchImpl } = fakeFetch(() => ({ error: "error_auth", message: "bad sign" }), 403)
+    await expect(makeClient(fetchImpl).refreshTokens("r", 1)).rejects.toMatchObject({ code: "error_auth" })
+  })
+
+  it("throws ShopeeApiError when the response is not JSON", async () => {
+    const fetchImpl = (async () => new Response("<html>bad gateway</html>", { status: 502 })) as typeof fetch
+    await expect(makeClient(fetchImpl).refreshTokens("r", 1)).rejects.toMatchObject({ code: "http_502" })
+  })
+})
+
+describe("secrets", () => {
+  it("requests never put partner key in url", async () => {
+    const { calls, fetchImpl } = fakeFetch((call) => {
+      if (call.url.pathname.includes("token")) return { access_token: "a", refresh_token: "r", expire_in: 100 }
+      if (call.url.pathname.includes("get_order_list")) return { response: { order_list: [], more: false } }
+      if (call.url.pathname.includes("get_escrow_detail")) {
+        return { response: { order_income: { order_selling_price: 1, escrow_amount: 1 } } }
+      }
+      return { response: { order_list: [] } }
+    })
+    const client = makeClient(fetchImpl)
+    const authUrl = client.buildAuthUrl("https://example.com/cb")
+    await client.getTokens("c", 1)
+    await client.refreshTokens("r", 1)
+    await client.listOrderSns(auth, { from: 0, to: 100 })
+    await client.getOrderDetails(auth, ["A"])
+    await client.getEscrowDetail(auth, "A")
+    for (const url of [authUrl, ...calls.map((c) => c.url.toString())]) {
+      expect(url).not.toContain(PARTNER_KEY)
+    }
+    for (const c of calls) expect(String(c.init?.body ?? "")).not.toContain(PARTNER_KEY)
+  })
+
+  it("error messages never contain the key or tokens", async () => {
+    const { fetchImpl } = fakeFetch(() => ({ error: "error_auth", message: "wrong sign" }))
+    const err = await makeClient(fetchImpl)
+      .listOrderSns(auth, { from: 0, to: 100 })
+      .catch((e) => e)
+    expect(err.message).not.toContain(PARTNER_KEY)
+    expect(err.message).not.toContain(auth.accessToken)
+  })
+})
