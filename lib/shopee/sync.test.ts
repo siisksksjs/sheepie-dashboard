@@ -37,6 +37,8 @@ function connection(overrides: Partial<ShopeeConnection> = {}): ShopeeConnection
     consecutiveFailures: 0,
     lastSyncError: null,
     lastAlertAt: null,
+    lastAlertKind: null,
+    lastPushAt: null,
     updatedAt: NOW,
     ...overrides,
   }
@@ -114,6 +116,7 @@ function makeStore(conn: ShopeeConnection | null) {
     }),
     countRecentSyncedVia: vi.fn(async () => ({ push: 0, poll: 0 })),
     markAlerted: vi.fn(async () => {}),
+    markPushReceived: vi.fn(async () => {}),
   } satisfies ShopeeStore
 
   return { state, store }

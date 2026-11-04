@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { checkShopeeAlerts, pickShopeeAlert, sendShopeeAlert } from "./alerts"
+import { checkShopeeAlerts, pickShopeeAlert, sendShopeeAlert, type ShopeeAlert } from "./alerts"
 import type { ShopeeConnection, ShopeeStore } from "./store"
 
 const NOW = new Date("2026-11-04T08:00:00.000Z")
@@ -10,9 +10,11 @@ const HOUR = 60 * 60 * 1000
 const healthy = {
   needsReconnect: false,
   consecutiveFailures: 0,
+  syncLive: true,
+  lastPushAt: null,
   pollCreatedLast24h: 0,
-  pushCreatedLast24h: 0,
   lastAlertAt: null,
+  lastAlertKind: null,
   now: NOW,
 }
 
@@ -30,13 +32,20 @@ describe("pickShopeeAlert", () => {
     expect(pickShopeeAlert({ ...healthy, consecutiveFailures: 3 })).toBe("repeated_failures")
   })
 
-  it("picks push_silent when polling caught orders and push created none", () => {
+  it("picks push_silent when the poll applied orders and no push arrived in 24 hours", () => {
     expect(pickShopeeAlert({ ...healthy, pollCreatedLast24h: 2 })).toBe("push_silent")
+    const lastPushAt = new Date(NOW.getTime() - 25 * HOUR)
+    expect(pickShopeeAlert({ ...healthy, pollCreatedLast24h: 2, lastPushAt })).toBe("push_silent")
   })
 
-  it("does not flag push_silent when push created orders or nothing came in", () => {
-    expect(pickShopeeAlert({ ...healthy, pollCreatedLast24h: 2, pushCreatedLast24h: 1 })).toBeNull()
-    expect(pickShopeeAlert({ ...healthy, pollCreatedLast24h: 0, pushCreatedLast24h: 0 })).toBeNull()
+  it("push received recently suppresses push_silent even if orders came via poll", () => {
+    const lastPushAt = new Date(NOW.getTime() - HOUR)
+    expect(pickShopeeAlert({ ...healthy, pollCreatedLast24h: 3, lastPushAt })).toBeNull()
+  })
+
+  it("does not flag push_silent when the poll applied nothing or sync is not live", () => {
+    expect(pickShopeeAlert({ ...healthy, pollCreatedLast24h: 0 })).toBeNull()
+    expect(pickShopeeAlert({ ...healthy, pollCreatedLast24h: 2, syncLive: false })).toBeNull()
   })
 
   it("prefers needs_reconnect over repeated_failures over push_silent", () => {
@@ -46,14 +55,43 @@ describe("pickShopeeAlert", () => {
     expect(pickShopeeAlert({ ...all, consecutiveFailures: 0 })).toBe("push_silent")
   })
 
-  it("stays quiet when an alert went out within the last 24 hours", () => {
+  it("stays quiet when the same kind went out within the last 24 hours", () => {
     const lastAlertAt = new Date(NOW.getTime() - 23 * HOUR)
-    expect(pickShopeeAlert({ ...healthy, needsReconnect: true, lastAlertAt })).toBeNull()
+    expect(pickShopeeAlert({ ...healthy, needsReconnect: true, lastAlertAt, lastAlertKind: "needs_reconnect" })).toBeNull()
+    expect(
+      pickShopeeAlert({ ...healthy, pollCreatedLast24h: 2, lastAlertAt, lastAlertKind: "push_silent" })
+    ).toBeNull()
   })
 
-  it("alerts again once the last alert is 24 hours old or older", () => {
+  it("needs_reconnect is sent even within another kind's quiet window", () => {
+    const lastAlertAt = new Date(NOW.getTime() - HOUR)
+    for (const lastAlertKind of ["repeated_failures", "push_silent"] as const) {
+      expect(pickShopeeAlert({ ...healthy, needsReconnect: true, lastAlertAt, lastAlertKind })).toBe("needs_reconnect")
+    }
+  })
+
+  it("other kinds are only quieted by their own kind", () => {
+    const lastAlertAt = new Date(NOW.getTime() - HOUR)
+    expect(
+      pickShopeeAlert({ ...healthy, consecutiveFailures: 3, lastAlertAt, lastAlertKind: "push_silent" })
+    ).toBe("repeated_failures")
+    expect(
+      pickShopeeAlert({ ...healthy, pollCreatedLast24h: 2, lastAlertAt, lastAlertKind: "repeated_failures" })
+    ).toBe("push_silent")
+  })
+
+  it("a quieted alert does not fall through to a lower-priority kind", () => {
+    const lastAlertAt = new Date(NOW.getTime() - HOUR)
+    const input = { ...healthy, consecutiveFailures: 5, pollCreatedLast24h: 2, lastAlertAt }
+    expect(pickShopeeAlert({ ...input, needsReconnect: true, lastAlertKind: "needs_reconnect" })).toBeNull()
+    expect(pickShopeeAlert({ ...input, lastAlertKind: "repeated_failures" })).toBeNull()
+  })
+
+  it("alerts again once the same kind is 24 hours old or older", () => {
     const lastAlertAt = new Date(NOW.getTime() - 24 * HOUR)
-    expect(pickShopeeAlert({ ...healthy, needsReconnect: true, lastAlertAt })).toBe("needs_reconnect")
+    expect(pickShopeeAlert({ ...healthy, needsReconnect: true, lastAlertAt, lastAlertKind: "needs_reconnect" })).toBe(
+      "needs_reconnect"
+    )
   })
 })
 
@@ -103,7 +141,7 @@ describe("sendShopeeAlert", () => {
     expect(body.to).toEqual(["a@x.com", "b@x.com"])
     expect(body.subject).toBe("Sheepie Dashboard: Shopee needs reconnecting")
     expect(body.html).toContain("https://dashboard.sheepiesleep.com/more/shopee")
-    expect(store.markAlerted).toHaveBeenCalledWith(NOW)
+    expect(store.markAlerted).toHaveBeenCalledWith(NOW, "needs_reconnect")
   })
 
   it("uses the exact subject for each alert", async () => {
@@ -165,7 +203,7 @@ describe("sendShopeeAlert", () => {
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toContain("429")
     expect((error as Error).message).not.toContain("re_secret_key")
-    expect(store.markAlerted).toHaveBeenLastCalledWith(null)
+    expect(store.markAlerted).toHaveBeenLastCalledWith(null, null)
   })
 
   it("does not send when claiming the alert window fails", async () => {
@@ -179,7 +217,7 @@ describe("sendShopeeAlert", () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
-  it("send failure releases the claim back to the previous last_alert_at so the next run retries", async () => {
+  it("send failure releases the claim back to the previous last_alert_at and kind so the next run retries", async () => {
     vi.stubEnv("RESEND_API_KEY", "re_test")
     vi.stubEnv("EMAIL_FROM", "alerts@example.com")
     const { supabase } = fakeSupabase({ data: { users: [{ email: "a@x.com" }] }, error: null })
@@ -188,9 +226,19 @@ describe("sendShopeeAlert", () => {
     const fetchImpl = vi.fn(async () => new Response("boom", { status: 500 }))
 
     await expect(
-      sendShopeeAlert("push_silent", { supabase, store, fetchImpl, previousAlertAt, now: () => NOW })
+      sendShopeeAlert("push_silent", {
+        supabase,
+        store,
+        fetchImpl,
+        previousAlertAt,
+        previousAlertKind: "repeated_failures",
+        now: () => NOW,
+      })
     ).rejects.toThrow("Resend failed with 500")
-    expect(vi.mocked(store.markAlerted).mock.calls).toEqual([[NOW], [previousAlertAt]])
+    expect(vi.mocked(store.markAlerted).mock.calls).toEqual([
+      [NOW, "push_silent"],
+      [previousAlertAt, "repeated_failures"],
+    ])
   })
 
   it("send failure still surfaces the send error when the release also fails", async () => {
@@ -198,7 +246,8 @@ describe("sendShopeeAlert", () => {
     vi.stubEnv("EMAIL_FROM", "alerts@example.com")
     vi.spyOn(console, "error").mockImplementation(() => {})
     const { supabase } = fakeSupabase({ data: { users: [{ email: "a@x.com" }] }, error: null })
-    const markAlerted = vi.fn(async (at: Date | null) => {
+    const markAlerted = vi.fn(async (at: Date | null, kind: ShopeeAlert | null) => {
+      void kind
       if (at === null) throw new Error("release failed")
     })
     const store = fakeStore({ markAlerted })
@@ -233,6 +282,8 @@ function connection(overrides: Partial<ShopeeConnection> = {}): ShopeeConnection
     consecutiveFailures: 0,
     lastSyncError: null,
     lastAlertAt: null,
+    lastAlertKind: null,
+    lastPushAt: null,
     updatedAt: NOW,
     ...overrides,
   }
@@ -268,7 +319,7 @@ describe("checkShopeeAlerts", () => {
       "needs_reconnect"
     )
     expect(fetchImpl).toHaveBeenCalledTimes(1)
-    expect(store.markAlerted).toHaveBeenCalledWith(NOW)
+    expect(store.markAlerted).toHaveBeenCalledWith(NOW, "needs_reconnect")
   })
 
   it("sends repeated_failures from the poll's failure count", async () => {
@@ -276,10 +327,33 @@ describe("checkShopeeAlerts", () => {
     expect(await checkShopeeAlerts({ status: "failed", consecutiveFailures: 3 }, deps)).toBe("repeated_failures")
   })
 
-  it("counts synced_via over the last 24 hours and sends push_silent", async () => {
-    const { deps, store } = setup(connection(), { push: 0, poll: 2 })
+  it("sends push_silent when the poll applied orders in the last 24 hours and no push arrived", async () => {
+    const { deps, store } = setup(connection({ lastPushAt: new Date(NOW.getTime() - 30 * HOUR) }), {
+      push: 0,
+      poll: 2,
+    })
     expect(await checkShopeeAlerts({ status: "ok", consecutiveFailures: 0 }, deps)).toBe("push_silent")
     expect(store.countRecentSyncedVia).toHaveBeenCalledWith(new Date(NOW.getTime() - 24 * HOUR))
+  })
+
+  it("push received recently suppresses push_silent even if orders came via poll", async () => {
+    const { deps, fetchImpl } = setup(connection({ lastPushAt: new Date(NOW.getTime() - HOUR) }), {
+      push: 0,
+      poll: 3,
+    })
+    expect(await checkShopeeAlerts({ status: "ok", consecutiveFailures: 0 }, deps)).toBeNull()
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("needs_reconnect is sent even within another kind's quiet window", async () => {
+    const { deps, fetchImpl, store } = setup(
+      connection({ lastAlertAt: new Date(NOW.getTime() - HOUR), lastAlertKind: "push_silent" })
+    )
+    expect(await checkShopeeAlerts({ status: "needs_reconnect", consecutiveFailures: 4 }, deps)).toBe(
+      "needs_reconnect"
+    )
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(store.markAlerted).toHaveBeenCalledWith(NOW, "needs_reconnect")
   })
 
   it("sends nothing when healthy or recently alerted", async () => {
@@ -287,7 +361,7 @@ describe("checkShopeeAlerts", () => {
     expect(await checkShopeeAlerts({ status: "ok", consecutiveFailures: 0 }, healthyRun.deps)).toBeNull()
     expect(healthyRun.fetchImpl).not.toHaveBeenCalled()
 
-    const recent = setup(connection({ lastAlertAt: new Date(NOW.getTime() - HOUR) }))
+    const recent = setup(connection({ lastAlertAt: new Date(NOW.getTime() - HOUR), lastAlertKind: "needs_reconnect" }))
     expect(await checkShopeeAlerts({ status: "needs_reconnect", consecutiveFailures: 0 }, recent.deps)).toBeNull()
     expect(recent.fetchImpl).not.toHaveBeenCalled()
   })
@@ -297,10 +371,12 @@ describe("checkShopeeAlerts", () => {
     vi.stubEnv("EMAIL_FROM", "alerts@example.com")
     const { supabase } = fakeSupabase({ data: { users: [{ email: "a@x.com" }] }, error: null })
     let lastAlertAt: Date | null = null
+    let lastAlertKind: ShopeeAlert | null = null
     const store = fakeStore({
-      getConnection: vi.fn(async () => connection({ lastAlertAt })),
-      markAlerted: vi.fn(async (at: Date | null) => {
+      getConnection: vi.fn(async () => connection({ lastAlertAt, lastAlertKind })),
+      markAlerted: vi.fn(async (at: Date | null, kind: ShopeeAlert | null) => {
         lastAlertAt = at
+        lastAlertKind = kind
       }),
     })
     const fetchImpl = okFetch()
@@ -314,12 +390,12 @@ describe("checkShopeeAlerts", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
-  it("passes the connection's previous last_alert_at so a failed send restores it", async () => {
+  it("passes the connection's previous last_alert_at and kind so a failed send restores them", async () => {
     const previous = new Date(NOW.getTime() - 30 * HOUR)
-    const { deps, store } = setup(connection({ lastAlertAt: previous }))
+    const { deps, store } = setup(connection({ lastAlertAt: previous, lastAlertKind: "repeated_failures" }))
     deps.fetchImpl = vi.fn(async () => new Response("no", { status: 503 }))
     await expect(checkShopeeAlerts({ status: "needs_reconnect", consecutiveFailures: 0 }, deps)).rejects.toThrow()
-    expect(store.markAlerted).toHaveBeenLastCalledWith(previous)
+    expect(store.markAlerted).toHaveBeenLastCalledWith(previous, "repeated_failures")
   })
 
   it("returns null when the connection row is gone", async () => {

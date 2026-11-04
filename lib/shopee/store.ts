@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 import type { OrderStatus, PackSize } from "@/lib/types/database.types"
+import type { ShopeeAlert } from "./alerts"
 import type { ListingKey, ListingMap, ShopeeOrderPayload } from "./build-order"
 import type { ShopeeTokens } from "./client"
 
@@ -17,6 +18,10 @@ export type ShopeeConnection = {
   consecutiveFailures: number
   lastSyncError: string | null
   lastAlertAt: Date | null
+  /** Which alert `lastAlertAt` belongs to. */
+  lastAlertKind: ShopeeAlert | null
+  /** Last verified order-status push for our shop. */
+  lastPushAt: Date | null
   updatedAt: Date
 }
 
@@ -50,8 +55,13 @@ export interface ShopeeStore {
   applyOrder(payload: ShopeeOrderPayload, via: "push" | "poll"): Promise<ApplyResult>
   /** Shopee API orders created since `since`, counted by how they arrived. */
   countRecentSyncedVia(since: Date): Promise<{ push: number; poll: number }>
-  /** Sets `last_alert_at` (null clears it), so the same alert is not repeated within 24 hours. */
-  markAlerted(at: Date | null): Promise<void>
+  /**
+   * Sets `last_alert_at` and `last_alert_kind` (nulls clear them), so the same
+   * alert is not repeated within 24 hours.
+   */
+  markAlerted(at: Date | null, kind: ShopeeAlert | null): Promise<void>
+  /** Sets `last_push_at`: a verified order-status push for our shop arrived. */
+  markPushReceived(at: Date): Promise<void>
 }
 
 const CHANNEL = "shopee"
@@ -69,6 +79,8 @@ type ConnectionRow = {
   consecutive_failures: number
   last_sync_error: string | null
   last_alert_at: string | null
+  last_alert_kind: ShopeeAlert | null
+  last_push_at: string | null
   updated_at: string
 }
 
@@ -102,6 +114,8 @@ export function createShopeeStore(supabase: SupabaseClient): ShopeeStore {
         consecutiveFailures: data.consecutive_failures,
         lastSyncError: data.last_sync_error,
         lastAlertAt: toDate(data.last_alert_at),
+        lastAlertKind: data.last_alert_kind,
+        lastPushAt: toDate(data.last_push_at),
         updatedAt: new Date(data.updated_at),
       }
     },
@@ -258,12 +272,20 @@ export function createShopeeStore(supabase: SupabaseClient): ShopeeStore {
       return counts
     },
 
-    async markAlerted(at) {
+    async markAlerted(at, kind) {
       const { error } = await supabase
         .from("marketplace_connections")
-        .update({ last_alert_at: at ? at.toISOString() : null })
+        .update({ last_alert_at: at ? at.toISOString() : null, last_alert_kind: kind })
         .eq("channel", CHANNEL)
       if (error) fail("markAlerted", error)
+    },
+
+    async markPushReceived(at) {
+      const { error } = await supabase
+        .from("marketplace_connections")
+        .update({ last_push_at: at.toISOString() })
+        .eq("channel", CHANNEL)
+      if (error) fail("markPushReceived", error)
     },
   }
 }

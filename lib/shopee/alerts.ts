@@ -20,31 +20,52 @@ const MESSAGES: Record<ShopeeAlert, { subject: string; sentence: string }> = {
   },
   push_silent: {
     subject: "Sheepie Dashboard: no Shopee push received in 24 hours",
-    sentence: "For the past 24 hours every Shopee order arrived through the scheduled sync rather than live push, so push may have stopped; check the settings page.",
+    sentence: "No Shopee push has arrived in the past 24 hours, but the scheduled sync picked up new orders, so push may have stopped; check the settings page.",
   },
 }
 
-/** Which alert (if any) is due. Quiet for 24 hours after the last alert. */
+function within24h(at: Date | null, now: Date): boolean {
+  return at !== null && now.getTime() - at.getTime() < DAY_MS
+}
+
+/**
+ * Which alert (if any) is due: the most urgent condition, needs_reconnect >
+ * repeated_failures > push_silent. Each kind is quiet for 24 hours after an
+ * alert of that same kind, so another kind's alert never hides it. A quieted
+ * condition does not fall through to a lower kind (that would alternate kinds
+ * every run while one problem persists).
+ */
 export function pickShopeeAlert(input: {
   needsReconnect: boolean
   consecutiveFailures: number
+  /** sync_start_at is set. */
+  syncLive: boolean
+  lastPushAt: Date | null
+  /** Orders the poll (not push) created in the last 24 hours. */
   pollCreatedLast24h: number
-  pushCreatedLast24h: number
   lastAlertAt: Date | null
+  lastAlertKind: ShopeeAlert | null
   now: Date
 }): ShopeeAlert | null {
-  if (input.lastAlertAt && input.now.getTime() - input.lastAlertAt.getTime() < DAY_MS) return null
-  if (input.needsReconnect) return "needs_reconnect"
-  if (input.consecutiveFailures >= REPEATED_FAILURE_THRESHOLD) return "repeated_failures"
-  if (input.pollCreatedLast24h > 0 && input.pushCreatedLast24h === 0) return "push_silent"
-  return null
+  const pushSilent = input.syncLive && !within24h(input.lastPushAt, input.now) && input.pollCreatedLast24h > 0
+  const due: ShopeeAlert | null = input.needsReconnect
+    ? "needs_reconnect"
+    : input.consecutiveFailures >= REPEATED_FAILURE_THRESHOLD
+      ? "repeated_failures"
+      : pushSilent
+        ? "push_silent"
+        : null
+  if (!due) return null
+  if (input.lastAlertKind === due && within24h(input.lastAlertAt, input.now)) return null
+  return due
 }
 
 export type AlertDeps = {
   supabase: SupabaseClient
   store: Pick<ShopeeStore, "markAlerted">
-  /** The connection's `last_alert_at` before this send; restored if the send fails. */
+  /** The connection's `last_alert_at` / `last_alert_kind` before this send; restored if the send fails. */
   previousAlertAt?: Date | null
+  previousAlertKind?: ShopeeAlert | null
   fetchImpl?: typeof fetch
   now?: () => Date
 }
@@ -55,7 +76,7 @@ function uniqueEmails(users: Array<{ email?: string | null }>): string[] {
 
 /**
  * Emails every dashboard user about `alert` through Resend. The 24-hour window is
- * claimed in `last_alert_at` BEFORE sending, so a failed write after an accepted
+ * claimed in `last_alert_at` / `last_alert_kind` BEFORE sending, so a failed write after an accepted
  * email can never make the same alert repeat every cron run. If the send fails the
  * claim is released (best effort); worst case is one missed alert, never spam.
  */
@@ -74,7 +95,7 @@ export async function sendShopeeAlert(alert: ShopeeAlert, deps: AlertDeps): Prom
   const html = `<p>${sentence}</p><p><a href="${SETTINGS_URL}">${SETTINGS_URL}</a></p>`
 
   // If the claim fails nothing is sent.
-  await deps.store.markAlerted((deps.now ?? (() => new Date()))())
+  await deps.store.markAlerted((deps.now ?? (() => new Date()))(), alert)
   try {
     const response = await (deps.fetchImpl ?? fetch)("https://api.resend.com/emails", {
       method: "POST",
@@ -87,7 +108,7 @@ export async function sendShopeeAlert(alert: ShopeeAlert, deps: AlertDeps): Prom
     }
   } catch (sendError) {
     try {
-      await deps.store.markAlerted(deps.previousAlertAt ?? null)
+      await deps.store.markAlerted(deps.previousAlertAt ?? null, deps.previousAlertKind ?? null)
     } catch (releaseError) {
       const message = releaseError instanceof Error ? releaseError.message : "Unknown error"
       console.error(`Shopee alert claim could not be released: ${message}`)
@@ -114,13 +135,15 @@ export async function checkShopeeAlerts(
   const alert = pickShopeeAlert({
     needsReconnect: result.status === "needs_reconnect",
     consecutiveFailures: result.consecutiveFailures,
+    syncLive: conn.syncStartAt !== null,
+    lastPushAt: conn.lastPushAt,
     pollCreatedLast24h: counts.poll,
-    pushCreatedLast24h: counts.push,
     lastAlertAt: conn.lastAlertAt,
+    lastAlertKind: conn.lastAlertKind,
     now,
   })
   if (!alert) return null
 
-  await sendShopeeAlert(alert, { ...deps, previousAlertAt: conn.lastAlertAt })
+  await sendShopeeAlert(alert, { ...deps, previousAlertAt: conn.lastAlertAt, previousAlertKind: conn.lastAlertKind })
   return alert
 }

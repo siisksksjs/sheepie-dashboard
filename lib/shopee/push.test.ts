@@ -34,6 +34,8 @@ function connection(overrides: Partial<ShopeeConnection> = {}): ShopeeConnection
     consecutiveFailures: 0,
     lastSyncError: null,
     lastAlertAt: null,
+    lastAlertKind: null,
+    lastPushAt: null,
     updatedAt: NOW,
     ...overrides,
   }
@@ -73,6 +75,7 @@ function makeDeps(conn: ShopeeConnection | null, details: ShopeeOrderDetail[] = 
     applyOrder: vi.fn(async () => ({ action: "created" as const, orderId: "order-uuid", ledgerEntries: 1 })),
     countRecentSyncedVia: vi.fn(async () => ({ push: 0, poll: 0 })),
     markAlerted: vi.fn(async () => {}),
+    markPushReceived: vi.fn(async () => {}),
   } satisfies ShopeeStore
 
   const shopee = {
@@ -173,6 +176,7 @@ describe("handleShopeePush", () => {
       expect(shopee.getOrderDetails).not.toHaveBeenCalled()
       expect(store.applyOrder).not.toHaveBeenCalled()
       expect(store.queue).not.toHaveBeenCalled()
+      expect(store.markPushReceived).not.toHaveBeenCalled()
     }
   })
 
@@ -226,5 +230,43 @@ describe("handleShopeePush", () => {
     expect(store.applyOrder).toHaveBeenCalledTimes(1)
     expect(store.applyOrder).toHaveBeenCalledWith(expect.objectContaining({ order_sn: "SN1", status: "paid" }), "push")
     expect(shopee.refreshTokens).not.toHaveBeenCalled()
+  })
+
+  it("records the push time for a verified order push before syncing", async () => {
+    const { deps, store, shopee } = makeDeps(connection(), [detail("SN1", "PROCESSED")])
+    const rawBody = orderPush()
+
+    await handleShopeePush({ rawBody, authorization: sign(rawBody) }, deps)
+
+    expect(store.markPushReceived).toHaveBeenCalledTimes(1)
+    expect(store.markPushReceived).toHaveBeenCalledWith(NOW)
+    expect(store.markPushReceived.mock.invocationCallOrder[0]).toBeLessThan(
+      shopee.getOrderDetails.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("records the push time even when the sync then fails", async () => {
+    const { deps, store } = makeDeps(connection({ accessExpiresAt: new Date(NOW.getTime() - 1000) }))
+    const rawBody = orderPush()
+
+    const result = await handleShopeePush({ rawBody, authorization: sign(rawBody) }, deps)
+
+    expect(result.body).toEqual({ ok: false, reason: "queued_for_retry" })
+    expect(store.markPushReceived).toHaveBeenCalledWith(NOW)
+  })
+
+  it("a failure to record the push time does not fail the push", async () => {
+    const { deps, store } = makeDeps(connection(), [detail("SN1", "PROCESSED")])
+    store.markPushReceived.mockRejectedValueOnce(new Error("db down"))
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {})
+    const rawBody = orderPush()
+
+    const result = await handleShopeePush({ rawBody, authorization: sign(rawBody) }, deps)
+
+    expect(result).toEqual({ status: 200, body: { ok: true } })
+    expect(store.applyOrder).toHaveBeenCalledTimes(1)
+    expect(store.queue).not.toHaveBeenCalled()
+    expect(errorLog).toHaveBeenCalledWith("Shopee push: could not record the push time: db down")
+    errorLog.mockRestore()
   })
 })

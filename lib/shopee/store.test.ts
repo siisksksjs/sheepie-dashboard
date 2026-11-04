@@ -83,10 +83,10 @@ describe("createShopeeStore queue", () => {
 })
 
 describe("createShopeeStore alert helpers", () => {
-  it("markAlerted(null) clears last_alert_at", async () => {
+  it("markAlerted(null, null) clears last_alert_at and last_alert_kind", async () => {
     const { supabase, updates } = fakeSupabase()
-    await createShopeeStore(supabase).markAlerted(null)
-    expect(updates[0].values).toEqual({ last_alert_at: null })
+    await createShopeeStore(supabase).markAlerted(null, null)
+    expect(updates[0].values).toEqual({ last_alert_at: null, last_alert_kind: null })
   })
 
   it("countRecentSyncedVia counts shopee_api orders since the cutoff by synced_via", async () => {
@@ -109,16 +109,63 @@ describe("createShopeeStore alert helpers", () => {
     expect(calls).toContainEqual(["gte", "created_at", since.toISOString()])
   })
 
-  it("markAlerted sets last_alert_at on the shopee connection", async () => {
+  it("markAlerted sets last_alert_at and last_alert_kind on the shopee connection", async () => {
     const { supabase, updates } = fakeSupabase()
     const at = new Date("2026-11-04T08:00:00.000Z")
-    await createShopeeStore(supabase).markAlerted(at)
+    await createShopeeStore(supabase).markAlerted(at, "push_silent")
     expect(updates).toEqual([
       {
         table: "marketplace_connections",
-        values: { last_alert_at: at.toISOString() },
+        values: { last_alert_at: at.toISOString(), last_alert_kind: "push_silent" },
         filters: [["eq", "channel", "shopee"]],
       },
     ])
+  })
+
+  it("markPushReceived sets last_push_at on the shopee connection", async () => {
+    const { supabase, updates } = fakeSupabase()
+    const at = new Date("2026-11-04T09:30:00.000Z")
+    await createShopeeStore(supabase).markPushReceived(at)
+    expect(updates).toEqual([
+      {
+        table: "marketplace_connections",
+        values: { last_push_at: at.toISOString() },
+        filters: [["eq", "channel", "shopee"]],
+      },
+    ])
+  })
+
+  it("getConnection maps last_push_at and last_alert_kind", async () => {
+    const row = {
+      channel: "shopee",
+      shop_id: "555",
+      access_token: "a",
+      refresh_token: "r",
+      access_expires_at: null,
+      refresh_expires_at: null,
+      sync_start_at: null,
+      last_synced_until: null,
+      consecutive_failures: 0,
+      last_sync_error: null,
+      last_alert_at: "2026-11-04T07:00:00.000Z",
+      last_alert_kind: "needs_reconnect",
+      last_push_at: "2026-11-04T06:00:00.000Z",
+      updated_at: "2026-11-04T08:00:00.000Z",
+    }
+    const builder = {
+      select: () => builder,
+      eq: () => builder,
+      maybeSingle: async () => ({ data: row, error: null }),
+    }
+    const supabase = { from: () => builder } as unknown as SupabaseClient
+
+    const conn = await createShopeeStore(supabase).getConnection()
+
+    expect(conn).toMatchObject({
+      shopId: 555,
+      lastAlertAt: new Date("2026-11-04T07:00:00.000Z"),
+      lastAlertKind: "needs_reconnect",
+      lastPushAt: new Date("2026-11-04T06:00:00.000Z"),
+    })
   })
 })

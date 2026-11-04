@@ -65,6 +65,13 @@ export async function handleShopeePush(
     // Not connected, not live yet, or another shop (e.g. Shopee's test push data).
     if (!conn || conn.shopId !== push.shopId || conn.syncStartAt === null) return IGNORED
 
+    try {
+      // Push is alive (the push_silent alert watches this), whatever the sync below does.
+      await deps.store.markPushReceived(deps.now())
+    } catch (error) {
+      console.error(`Shopee push: could not record the push time: ${errorMessage(error)}`)
+    }
+
     await syncShopeeOrders([push.ordersn], "push", deps)
     return { status: 200, body: { ok: true } }
   } catch (error) {
