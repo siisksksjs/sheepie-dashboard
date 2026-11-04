@@ -46,8 +46,15 @@ export interface ShopeeStore {
    * Upserts on order_sn. Re-queued unmapped_item / error rows reopen.
    * return_review takes over a stale unmapped_item / error row, otherwise only
    * inserts: an existing return_review row is never changed or reopened.
+   * `opened` is true when the row was inserted, reopened from resolved, or
+   * changed reason; false when it was already open with this reason (a retry).
    */
-  queue(sn: string, reason: ShopeeQueueReason, detail: Record<string, unknown>, orderId?: string): Promise<void>
+  queue(
+    sn: string,
+    reason: ShopeeQueueReason,
+    detail: Record<string, unknown>,
+    orderId?: string
+  ): Promise<{ opened: boolean }>
   /** Resolves only `unmapped_item` / `error` rows; `return_review` is a staff decision. */
   resolveQueue(sn: string): Promise<void>
   openRetryableSns(): Promise<string[]>
@@ -185,6 +192,13 @@ export function createShopeeStore(supabase: SupabaseClient): ShopeeStore {
     },
 
     async queue(sn, reason, detail, orderId) {
+      const { data: current, error: readError } = await supabase
+        .from("shopee_sync_queue")
+        .select("reason, resolved_at")
+        .eq("order_sn", sn)
+        .maybeSingle<{ reason: ShopeeQueueReason; resolved_at: string | null }>()
+      if (readError) fail("queue", readError)
+
       const row = {
         order_sn: sn,
         reason,
@@ -198,7 +212,7 @@ export function createShopeeStore(supabase: SupabaseClient): ShopeeStore {
           .from("shopee_sync_queue")
           .upsert({ ...row, resolved_at: null }, { onConflict: "order_sn" })
         if (error) fail("queue", error)
-        return
+        return { opened: !current || current.resolved_at !== null || current.reason !== reason }
       }
 
       // A stale unmapped_item / error row for this order becomes the review...
@@ -214,6 +228,7 @@ export function createShopeeStore(supabase: SupabaseClient): ShopeeStore {
         .from("shopee_sync_queue")
         .upsert(row, { onConflict: "order_sn", ignoreDuplicates: true })
       if (error) fail("queue", error)
+      return { opened: current?.reason !== "return_review" }
     },
 
     async resolveQueue(sn) {

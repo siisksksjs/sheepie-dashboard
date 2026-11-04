@@ -95,8 +95,10 @@ function makeStore(conn: ShopeeConnection | null) {
     loadListingMap: vi.fn(async () => state.listing),
     queue: vi.fn(async (sn: string, reason: string, detail: unknown, orderId?: string) => {
       // Mirrors createShopeeStore: return_review never touches an existing return_review row.
-      if (reason === "return_review" && state.queue.get(sn)?.reason === "return_review") return
+      const current = state.queue.get(sn)
+      if (reason === "return_review" && current?.reason === "return_review") return { opened: false }
       state.queue.set(sn, { reason, detail, orderId, resolvedAt: null })
+      return { opened: !current || current.resolvedAt !== null || current.reason !== reason }
     }),
     resolveQueue: vi.fn(async (sn: string) => {
       const row = state.queue.get(sn)

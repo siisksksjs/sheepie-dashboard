@@ -6,13 +6,27 @@ import { createShopeeStore } from "./store"
 type Upsert = { table: string; values: Record<string, unknown>; options: Record<string, unknown> }
 type Update = { table: string; values: Record<string, unknown>; filters: unknown[][] }
 
-/** Records the `upsert` and `update().eq().in()` calls queue() makes. */
-function fakeSupabase() {
+type QueueRow = { reason: string; resolved_at: string | null }
+
+/**
+ * Records the `upsert` and `update().eq().in()` calls queue() makes. `existing`
+ * is the queue row queue() reads first (null: no row yet).
+ */
+function fakeSupabase(existing: QueueRow | null = null, readError: { message: string } | null = null) {
   const upserts: Upsert[] = []
   const updates: Update[] = []
+  const reads: unknown[][] = []
   const supabase = {
     from(table: string) {
       return {
+        select(...args: unknown[]) {
+          reads.push(["select", table, ...args])
+          const builder = {
+            eq: (...eqArgs: unknown[]) => (reads.push(["eq", ...eqArgs]), builder),
+            maybeSingle: async () => ({ data: readError ? null : existing, error: readError }),
+          }
+          return builder
+        },
         upsert(values: Record<string, unknown>, options: Record<string, unknown>) {
           upserts.push({ table, values, options })
           return Promise.resolve({ error: null })
@@ -30,7 +44,7 @@ function fakeSupabase() {
       }
     },
   } as unknown as SupabaseClient
-  return { supabase, upserts, updates }
+  return { supabase, upserts, updates, reads }
 }
 
 describe("createShopeeStore queue", () => {
@@ -95,6 +109,66 @@ describe("createShopeeStore queue", () => {
       expect(upsert.values).toMatchObject({ resolved_at: null })
       expect(upsert.values.last_seen_at).toEqual(expect.any(String))
     }
+  })
+})
+
+describe("createShopeeStore queue opened", () => {
+  const resolved = "2026-11-04T07:00:00.000Z"
+
+  it("reads the current row for the order first", async () => {
+    const { supabase, reads } = fakeSupabase()
+    await createShopeeStore(supabase).queue("A", "error", { message: "boom" })
+    expect(reads).toEqual([
+      ["select", "shopee_sync_queue", "reason, resolved_at"],
+      ["eq", "order_sn", "A"],
+    ])
+  })
+
+  it("a new unmapped or error row is opened", async () => {
+    for (const reason of ["unmapped_item", "error"] as const) {
+      const { supabase } = fakeSupabase(null)
+      expect(await createShopeeStore(supabase).queue("A", reason, {})).toEqual({ opened: true })
+    }
+  })
+
+  it("a resolved row that fails again is reopened", async () => {
+    const { supabase } = fakeSupabase({ reason: "error", resolved_at: resolved })
+    expect(await createShopeeStore(supabase).queue("A", "error", { message: "boom" })).toEqual({ opened: true })
+  })
+
+  it("an open row with the same reason is not opened again", async () => {
+    for (const reason of ["unmapped_item", "error"] as const) {
+      const { supabase, upserts } = fakeSupabase({ reason, resolved_at: null })
+      expect(await createShopeeStore(supabase).queue("A", reason, {})).toEqual({ opened: false })
+      // last_seen_at and detail still refresh.
+      expect(upserts).toHaveLength(1)
+    }
+  })
+
+  it("an open row with a different reason counts as opened", async () => {
+    const { supabase } = fakeSupabase({ reason: "error", resolved_at: null })
+    expect(await createShopeeStore(supabase).queue("A", "unmapped_item", { items: [] })).toEqual({ opened: true })
+  })
+
+  it("return_review is opened only when inserted or taking over an unmapped / error row", async () => {
+    const fresh = fakeSupabase(null)
+    expect(await createShopeeStore(fresh.supabase).queue("A", "return_review", {})).toEqual({ opened: true })
+
+    const stale = fakeSupabase({ reason: "error", resolved_at: null })
+    expect(await createShopeeStore(stale.supabase).queue("A", "return_review", {})).toEqual({ opened: true })
+
+    for (const resolvedAt of [null, resolved]) {
+      const existing = fakeSupabase({ reason: "return_review", resolved_at: resolvedAt })
+      expect(await createShopeeStore(existing.supabase).queue("A", "return_review", {})).toEqual({ opened: false })
+    }
+  })
+
+  it("throws when reading the current row fails", async () => {
+    const { supabase, upserts } = fakeSupabase(null, { message: "db down" })
+    await expect(createShopeeStore(supabase).queue("A", "error", {})).rejects.toThrow(
+      "Shopee store queue failed: db down"
+    )
+    expect(upserts).toHaveLength(0)
   })
 })
 
