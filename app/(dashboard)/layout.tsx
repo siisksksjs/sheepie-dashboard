@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 import { Rail } from "@/components/shell/rail"
+import { ShopeeLiveRefresh } from "@/components/shell/shopee-live-refresh"
 import { TabBar } from "@/components/shell/tab-bar"
 import { createClient } from "@/lib/supabase/server"
 
@@ -18,6 +19,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <div className="mx-auto max-w-[1240px]">{children}</div>
       </main>
       <TabBar />
+      <ShopeeLiveRefresh />
     </div>
   )
 }

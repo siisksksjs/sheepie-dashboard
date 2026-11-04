@@ -112,6 +112,35 @@ export async function getShopeeSettings(): Promise<ShopeeSettings> {
   }
 }
 
+/** What the orders page needs: is Shopee connected, how fresh is the sync, how many orders wait on staff. */
+export type ShopeeSyncSummary = {
+  connected: boolean
+  syncStartAt: string | null
+  lastSyncedUntil: string | null
+  pendingCount: number
+}
+
+/** A lean `getShopeeSettings`: connection status plus a head count of unresolved queue rows. */
+export async function getShopeeSyncSummary(): Promise<ShopeeSyncSummary> {
+  const supabase = await signedInClient()
+  if (!supabase) throw new Error(SIGN_IN_AGAIN)
+
+  const [statusResult, queueResult] = await Promise.all([
+    supabase.rpc("get_shopee_connection_status"),
+    supabase.from("shopee_sync_queue").select("order_sn", { count: "exact", head: true }).is("resolved_at", null),
+  ])
+  if (statusResult.error) throw new Error(`Loading Shopee sync status failed: ${statusResult.error.message}`)
+  if (queueResult.error) throw new Error(`Loading Shopee sync queue failed: ${queueResult.error.message}`)
+
+  const status = (statusResult.data as Pick<ShopeeConnectionStatus, "connected" | "sync_start_at" | "last_synced_until">[] | null)?.[0]
+  return {
+    connected: status?.connected ?? false,
+    syncStartAt: status?.sync_start_at ?? null,
+    lastSyncedUntil: status?.last_synced_until ?? null,
+    pendingCount: queueResult.count ?? 0,
+  }
+}
+
 /** The go-live switch. From now on Shopee orders sync instead of being logged by hand. */
 export async function startShopeeSync(): Promise<ActionResult> {
   const supabase = await signedInClient()
